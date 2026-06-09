@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- powermetrics needs root: install as a SYSTEM daemon.
+     sudo cp com.qwen.exporter.plist /Library/LaunchDaemons/
+     sudo launchctl load -w /Library/LaunchDaemons/com.qwen.exporter.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.qwen.exporter</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/target/release/qwen-mac-exporter</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MAC_EXPORTER_ADDR</key><string>0.0.0.0:9101</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/exporter.log</string>
+  <key>StandardErrorPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/exporter.log</string>
+</dict>
+</plist>

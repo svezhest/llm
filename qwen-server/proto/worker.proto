@@ -1,0 +1,52 @@
+syntax = "proto3";
+package qwenworker;
+
+// gRPC contract between the Rust gateway and the Python MLX worker.
+// Single source of truth: both sides codegen from this file.
+service Worker {
+  rpc Generate(Request) returns (stream Event);   // server-streaming token stream
+  rpc Cancel(CancelReq) returns (Ack);
+  rpc Health(Empty)     returns (HealthReply);
+  rpc Shutdown(Empty)   returns (Ack);
+}
+
+message Request {
+  string id = 1;
+  repeated Message messages = 2;       // OpenAI-style chat
+  repeated string images = 3;          // PATHS/URLs, not bytes
+  Params params = 4;
+}
+message Message {
+  string role = 1; string content = 2;
+  string name = 3;             // tool role: the function name that produced this result
+  string tool_call_id = 4;     // tool role: which assistant tool_call this answers
+  string tool_calls_json = 5;  // assistant role: JSON array of tool_calls it previously made
+}
+message Params {
+  uint32 max_tokens = 1; float temperature = 2; float top_p = 3;
+  bool enable_thinking = 4; uint32 thinking_budget = 5;   // 0 = unlimited
+  optional uint64 seed = 6; repeated string stop = 7;
+  string tools_json = 8;       // OpenAI `tools` array as JSON (empty = no tools)
+  string tool_choice = 9;      // "auto"|"none"|"required"|{...}; empty = auto
+}
+
+// A function/tool call the model decided to make. `arguments` is a JSON string.
+message ToolCall { string id = 1; string name = 2; string arguments = 3; }
+
+message Event {
+  string id = 1;
+  oneof kind { Start start = 2; Token token = 3; Done done = 4; Error error = 5; }
+}
+message Start { string role = 1; }
+message Token { string text = 1; bool thinking = 2; }   // thinking=true while inside <think>
+message Done  { string finish = 1; Usage usage = 2; repeated ToolCall tool_calls = 3; }
+message Error { string kind = 1; string msg = 2; }
+message Usage {
+  uint32 prompt_tokens = 1; uint32 gen_tokens = 2;
+  float tps = 3; uint32 ttft_ms = 4; float peak_gb = 5;
+}
+
+message CancelReq { string id = 1; }
+message HealthReply { bool ready = 1; string model = 2; uint32 load_ms = 3; }
+message Ack {}
+message Empty {}

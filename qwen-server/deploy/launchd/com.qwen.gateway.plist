@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Load: launchctl load -w ~/Library/LaunchAgents/com.qwen.gateway.plist
+     Build first: cargo build --release (binary at target/release/qwen-gateway). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.qwen.gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/target/release/qwen-gateway</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUST_LOG</key><string>info</string>
+    <key>LOG_FORMAT</key><string>json</string>
+    <key>GATEWAY_ADDR</key><string>0.0.0.0:8080</string>
+    <key>WORKER_ADDR</key><string>127.0.0.1:50051</string>
+    <key>MAX_QUEUE</key><string>32</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/gateway.log</string>
+  <key>StandardErrorPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/gateway.log</string>
+</dict>
+</plist>

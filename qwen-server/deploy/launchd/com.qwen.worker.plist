@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Load: launchctl load -w ~/Library/LaunchAgents/com.qwen.worker.plist
+     Edit the paths below to match your checkout / uv location. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.qwen.worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/user/.local/bin/uv</string>
+    <string>run</string>
+    <string>python</string>
+    <string>worker.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/worker</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LOG_LEVEL</key><string>INFO</string>
+    <key>HF_HUB_DISABLE_XET</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/worker.log</string>
+  <key>StandardErrorPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/worker.log</string>
+</dict>
+</plist>

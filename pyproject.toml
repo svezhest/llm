@@ -1,0 +1,11 @@
+[project]
+name = "qwen36-35b-a3b"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "hf-transfer>=0.1.9",
+    "huggingface-hub>=1.18.0",
+    "mlx-lm>=0.31.3",
+    "mlx-vlm>=0.6.2",
+]

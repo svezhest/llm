@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: qwen
+    folder: qwen
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

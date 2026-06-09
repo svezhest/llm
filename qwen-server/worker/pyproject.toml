@@ -1,0 +1,16 @@
+[project]
+name = "qwen-mlx-worker"
+version = "0.1.0"
+description = "Thin gRPC worker that loads the Qwen MLX VLM and streams tokens."
+requires-python = ">=3.11"
+dependencies = [
+    "mlx-vlm>=0.6.2",
+    "mlx-lm>=0.31.3",
+    "grpcio>=1.68",
+]
+
+[dependency-groups]
+proto = ["grpcio-tools>=1.68"]
+
+[tool.uv]
+package = false

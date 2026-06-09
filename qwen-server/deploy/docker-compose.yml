@@ -1,0 +1,45 @@
+# Observability stack. Inference (gateway + MLX worker + mac-exporter) stays
+# NATIVE on the host (Metal is not available in Docker) — these containers only
+# scrape it via host.docker.internal.
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    ports: ["9090:9090"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    ports: ["3100:3100"]
+
+  promtail:
+    image: grafana/promtail:latest
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - ${QWEN_LOG_DIR:-../logs}:/var/log/qwen:ro
+    depends_on: [loki]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on: [prometheus, loki]
+
+volumes:
+  prom_data:
+  loki_data:
+  grafana_data:

@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Rust build artifacts
+target/
+
+# Generated gRPC stubs (regenerate with worker/gen_proto.sh)
+worker_pb2.py
+worker_pb2_grpc.py
+
+# Logs / runtime
+*.log
+logs/
+
+# macOS
+.DS_Store
+
+# Docker observability volumes
+deploy/**/data/

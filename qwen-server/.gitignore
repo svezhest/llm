@@ -1,0 +1,6 @@
+/target
+worker/.venv
+worker/__pycache__
+worker/worker_pb2.py
+worker/worker_pb2_grpc.py
+logs/
