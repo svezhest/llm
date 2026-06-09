@@ -142,6 +142,17 @@ MAX_CONTEXT = 65536
 # first N tokens in fp16, then quantizes the tail.
 KV_KWARGS = {"kv_bits": 4, "kv_group_size": 64, "quantized_kv_start": 5000}
 
+# Sampling (native mlx-lm logits processors via mlx-vlm — no custom code):
+# greedy/argmax decoding (temperature=0, so top_p is irrelevant) with an ADDITIVE
+# presence penalty over a 512-token window. Multiplicative repetition penalty and
+# frequency penalty are OFF (left as None). Env-overridable for the run.
+SAMPLING_KWARGS = {
+    "temperature": float(os.environ.get("QWEN_TEMPERATURE", "0.0")),    # 0 => argmax
+    "top_p": 1.0,                                                       # off
+    "presence_penalty": float(os.environ.get("QWEN_PRESENCE_PENALTY", "1.5")),
+    "presence_context_size": int(os.environ.get("QWEN_PRESENCE_CONTEXT", "512")),
+}
+
 
 class Engine:
     """Owns the MLX model and runs (serialized) generations."""
@@ -288,8 +299,7 @@ class Engine:
                 for chunk in stream_generate(
                     self.model, self.processor, formatted, images,
                     max_tokens=max_tokens,
-                    temperature=p.temperature,
-                    **KV_KWARGS, **think_kwargs,
+                    **SAMPLING_KWARGS, **KV_KWARGS, **think_kwargs,
                 ):
                     if cancel_ev.is_set():
                         yield _done(req.id, "cancelled", state, t0, ttft_ms, last)
