@@ -48,6 +48,8 @@ async fn main() -> anyhow::Result<()> {
             let h = metrics_state.metrics.clone();
             async move { h.render() }
         }))
+        // Vision payloads: a base64 PNG snapshot easily tops axum's 2MB default.
+        .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
         .with_state(state);
 
     let l = tokio::net::TcpListener::bind(&listen).await?;

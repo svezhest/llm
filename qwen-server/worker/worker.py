@@ -134,8 +134,10 @@ def _rebuild_messages(pb_messages):
 
 # Context ceiling (prompt + generation). Model supports 262144 natively, but on
 # 32 GB it's bounded by KV-cache memory. The weights are already 3-bit, so a
-# 4-bit KV cache (~20 KiB/token) is a balanced match — 64K costs just ~1.3 GB.
-MAX_CONTEXT = 65536
+# 4-bit KV cache (~20 KiB/token) is a balanced match — 128K costs ~2.6 GB
+# (model ~18 GB + KV still fits the default ~21.8 GB Metal wired limit; raise
+# iogpu.wired_limit_mb for more headroom if needed).
+MAX_CONTEXT = 131072
 
 # KV cache quantization (the MLX equivalent of llama.cpp's --cache-type-k q4_0).
 # kv_bits applies to BOTH K and V uniformly here. quantized_kv_start keeps the
@@ -239,24 +241,18 @@ class Engine:
                 yield pb.Event(id=req.id, start=pb.Start(role="assistant"))
 
                 images, tmp_files = materialize_images(list(req.images))
-                if tools_mode:
-                    # Unified path: mlx-vlm's apply_chat_template takes a FULL message
-                    # list, forwards `tools` to the Qwen Jinja template, AND inserts
-                    # image tokens for num_images — so tools + vision work together
-                    # (opencode is an agent: every request carries tools, often + an image).
-                    tools = json.loads(p.tools_json)
-                    oai_messages = _rebuild_messages(req.messages)
-                    formatted = apply_chat_template(
-                        self.processor, self.config, oai_messages,
-                        num_images=len(images), tools=tools,
-                        enable_thinking=p.enable_thinking,
-                    )
-                else:
-                    prompt = req.messages[-1].content if req.messages else ""
-                    formatted = apply_chat_template(
-                        self.processor, self.config, prompt,
-                        num_images=len(images), enable_thinking=p.enable_thinking,
-                    )
+                # One path for both modes: mlx-vlm's apply_chat_template takes a FULL
+                # message list (system + history + tool messages), forwards `tools` to
+                # the Qwen Jinja template, AND inserts image tokens for num_images.
+                # The old non-tools branch passed only the LAST message, silently
+                # dropping system prompts and history — a long-standing footgun.
+                oai_messages = _rebuild_messages(req.messages)
+                extra = {"tools": json.loads(p.tools_json)} if tools_mode else {}
+                formatted = apply_chat_template(
+                    self.processor, self.config, oai_messages,
+                    num_images=len(images), enable_thinking=p.enable_thinking,
+                    **extra,
+                )
 
                 # Reject prompts that don't fit the context window, and clamp the
                 # generation to whatever budget is left (prompt + output <= 64K).
@@ -308,13 +304,15 @@ class Engine:
                     if ttft_ms == 0:
                         ttft_ms = int((time.time() - t0) * 1000)
 
-                    text = chunk.text
-                    thinking = state.feed(text)
-                    if tools_mode and not thinking:
-                        # Don't stream raw answer (may contain <tool_call> XML); buffer it.
-                        answer_buf.append(text)
-                    else:
-                        yield pb.Event(id=req.id, token=pb.Token(text=text, thinking=thinking))
+                    think_part, ans_part = state.feed(chunk.text)
+                    if think_part:
+                        yield pb.Event(id=req.id, token=pb.Token(text=think_part, thinking=True))
+                    if ans_part:
+                        if tools_mode:
+                            # Don't stream raw answer (may contain <tool_call> XML); buffer it.
+                            answer_buf.append(ans_part)
+                        else:
+                            yield pb.Event(id=req.id, token=pb.Token(text=ans_part, thinking=False))
 
                 if tools_mode:
                     tool_calls, leftover = parse_tool_calls("".join(answer_buf))
@@ -351,15 +349,24 @@ class _GenState:
         self.in_thinking = bool(params.enable_thinking)
         self.gen_tokens = 0
 
-    def feed(self, text: str) -> bool:
-        """Update state with a new chunk; return True if it is thinking text."""
+    def feed(self, text: str) -> tuple[str, str]:
+        """Split a chunk into (thinking_part, answer_part).
+
+        A single chunk can straddle the </think> boundary — notably when
+        thinking_budget force-injects "\\n</think>" and the answer follows in
+        the same chunk. Classifying whole chunks put the answer into
+        reasoning_content and left content empty; split instead.
+        """
         self.gen_tokens += 1
         if THINK_OPEN in text:
             self.in_thinking = True
-        was_thinking = self.in_thinking
-        if THINK_CLOSE in text:
-            self.in_thinking = False
-        return was_thinking
+        if self.in_thinking:
+            if THINK_CLOSE in text:
+                self.in_thinking = False
+                pre, _, post = text.partition(THINK_CLOSE)
+                return (pre + THINK_CLOSE, post)
+            return (text, "")
+        return ("", text)
 
 
 def _done(req_id, finish, state, t0, ttft_ms, last, tool_calls=None):
