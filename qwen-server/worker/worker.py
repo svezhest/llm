@@ -27,6 +27,7 @@ import uuid
 from concurrent import futures
 
 import grpc
+import mlx.core as mx
 
 import worker_pb2 as pb
 import worker_pb2_grpc as pb_grpc
@@ -144,6 +145,19 @@ MAX_CONTEXT = 131072
 # first N tokens in fp16, then quantizes the tail.
 KV_KWARGS = {"kv_bits": 4, "kv_group_size": 64, "quantized_kv_start": 5000}
 
+# Chunked prefill: process a long prompt in N-token slabs instead of one giant
+# matmul, so the prefill ACTIVATION peak (not the KV cache) stays bounded. A 39K
+# prompt prefilled in one shot is what spiked us over the wired limit. 512 is a
+# safe slab; raise via QWEN_PREFILL_STEP if you have headroom and want speed.
+PREFILL_STEP = int(os.environ.get("QWEN_PREFILL_STEP", "512"))
+
+# Metal wired-memory ceiling. Default on a 32 GB Mac is ~21.8 GB — barely above
+# the ~18 GB of 3-bit weights, leaving almost nothing for KV + prefill. Raise it
+# in-process when QWEN_WIRED_LIMIT_GB is set. NOTE: going above the OS-recommended
+# max also needs `sudo sysctl iogpu.wired_limit_mb=<MB>` — set_wired_limit alone
+# cannot exceed what the kernel allows.
+_WIRED_GB = float(os.environ.get("QWEN_WIRED_LIMIT_GB", "0") or "0")
+
 # Sampling (native mlx-lm logits processors via mlx-vlm — no custom code):
 # greedy/argmax decoding (temperature=0, so top_p is irrelevant) with an ADDITIVE
 # presence penalty over a 512-token window. Multiplicative repetition penalty and
@@ -177,6 +191,17 @@ class Engine:
         self.model, self.processor = load(self.model_path)
         self.config = load_config(self.model_path)
         self.load_ms = int((time.time() - t) * 1000)
+        if _WIRED_GB > 0:
+            want = int(_WIRED_GB * 1024**3)
+            cap = int(mx.device_info()["max_recommended_working_set_size"])
+            if want > cap:
+                log.warning(
+                    "requested wired limit %.1f GB exceeds kernel max %.1f GB; "
+                    "clamping. Raise it with: sudo sysctl iogpu.wired_limit_mb=%d",
+                    _WIRED_GB, cap / 1024**3, int(_WIRED_GB * 1024))
+                want = cap
+            mx.set_wired_limit(want)
+            log.info("wired limit set to %.1f GB", want / 1024**3)
         self.ready = True
         log.info("model loaded in %d ms", self.load_ms)
 
@@ -294,7 +319,7 @@ class Engine:
                 answer_buf = []   # tools mode: buffer answer tokens, parse at the end
                 for chunk in stream_generate(
                     self.model, self.processor, formatted, images,
-                    max_tokens=max_tokens,
+                    max_tokens=max_tokens, prefill_step_size=PREFILL_STEP,
                     **SAMPLING_KWARGS, **KV_KWARGS, **think_kwargs,
                 ):
                     if cancel_ev.is_set():
@@ -332,6 +357,10 @@ class Engine:
                     os.unlink(f)
                 except OSError:
                     pass
+            # Release MLX's reclaimable buffer pool. Without this the cache from
+            # this generation stays resident and the NEXT request's prefill OOMs
+            # (exactly the second-request crash we saw on the 32 GB box).
+            mx.clear_cache()
 
 
 class _GenState:
@@ -424,7 +453,16 @@ def main():
 
     stop_event = threading.Event()
     # Single MLX worker: one generation at a time, but allow Health/Cancel concurrently.
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
+    # Vision prompts carry base64 image data URIs: a detailed map snapshot is several MB,
+    # past gRPC's 4 MB default receive cap. Lift it so high-res vision requests get through.
+    _MAX_MSG = 64 * 1024 * 1024
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=4),
+        options=[
+            ("grpc.max_receive_message_length", _MAX_MSG),
+            ("grpc.max_send_message_length", _MAX_MSG),
+        ],
+    )
     pb_grpc.add_WorkerServicer_to_server(WorkerServicer(engine, stop_event), server)
     server.add_insecure_port(args.addr)
     server.start()
