@@ -81,11 +81,14 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 
 ## Implementation notes worth keeping
 
-- **Context = 128K** (`MAX_CONTEXT=131072`, prompt + generation). **KV cache q4**:
-  weights are 3-bit, so a 4-bit KV cache is the balanced match —
-  `stream_generate(..., kv_bits=4, kv_group_size=64, quantized_kv_start=5000)`
-  (MLX analog of llama.cpp `--cache-type-k q4_0`; K and V uniform, fp16 warmup for
-  the first 5000 tokens). ~20 KiB/token → ~2.6 GB KV at 128K. q8 ≈ 40 KiB/tok; fp16 ≈ 80.
+- **Context = 128K** (`MAX_CONTEXT=131072`, prompt + generation). **KV cache is
+  per-model** via `QWEN_KV_BITS` (default 4) — `stream_generate(..., kv_bits=N,
+  kv_group_size=64, quantized_kv_start=5000)` (MLX analog of llama.cpp
+  `--cache-type-k`; K and V uniform, fp16 warmup for the first 5000 tokens). Pick N
+  by weight precision + budget: **35B (3-bit, ~18 GB) → q4** (~2.6 GB KV @ 128K; q8
+  would blow the 32 GB budget); **9B (8-bit, ~10 GB) → q8** (~8 GB KV @ 128K, ~18 GB
+  total, near-lossless — no reason to compress to q4). The 9B's `head_dim=256` (2×
+  typical) makes KV the dominant cost, not weights. Shipped 9B config: 128K + q8.
 - **OOM avoidance on 32 GB** (all three needed for the 35B at long context):
   `sudo sysctl iogpu.wired_limit_mb=28672` (kernel cap) + `QWEN_WIRED_LIMIT_GB=27`
   (MLX wired limit, clamped to cap) + `QWEN_PREFILL_STEP=512` (chunked prefill
@@ -118,6 +121,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `WORKER_ADDR` / `GATEWAY_ADDR` / `MAX_QUEUE` / `MODEL_NAME` | gateway | `127.0.0.1:50051` / `0.0.0.0:8080` / `32` / `qwen3.6-35b-a3b` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty (set `json` for Loki) |
 | `LOG_LEVEL` | worker | `INFO` |
+| `QWEN_KV_BITS` | worker | `4` (35B); `8` for the 9B |
 | `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `512` |
 | `QWEN_TEMPERATURE` / `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `0.0` (argmax) / `1.5` / `512` |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` (run under sudo) |

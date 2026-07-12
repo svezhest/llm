@@ -53,8 +53,9 @@ never hard-kill (orphans partials). See `CLAUDE.md`.
    uv run --group proto bash gen_proto.sh    # once: codegen worker_pb2*.py
    # Qwen 35B (needs the wired-limit bump above):
    QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py   # 127.0.0.1:50051
-   # or the light Ornith 9B (no wired-limit dance needed):
-   QWEN_MODEL=../../weights/ornith10-9b-mlx-8bit uv run python worker.py --addr 127.0.0.1:50052
+   # or the light Ornith 9B — 128K context with q8 KV (no wired-limit dance):
+   QWEN_MODEL=../../weights/ornith10-9b-mlx-8bit QWEN_KV_BITS=8 \
+     uv run python worker.py --addr 127.0.0.1:50052
    ```
 
 2. **Gateway** (after the worker logs "model loaded"):
@@ -79,8 +80,20 @@ Quick CLI (no gateway): `uv run python chat.py "Привет!" [--image photo.jp
 ## Context & memory
 
 Context is capped at **128K tokens** (`MAX_CONTEXT=131072`, prompt + generation).
-The 35B weights are 3-bit, so the worker runs a **q4 KV cache** (`kv_bits=4`,
-~20 KiB/token → ~2.6 GB at 128K) — the balanced match for a 3-bit model on 32 GB.
+
+**KV cache precision is per-model** (`QWEN_KV_BITS`, default 4), because the right
+value tracks the *weight* precision and the memory budget:
+
+| model | weights | KV (`QWEN_KV_BITS`) | KV @ 128K | resident @ 128K | why |
+|---|---|---|---|---|---|
+| Qwen 35B-A3B | 3-bit, ~18 GB | **q4** (default) | ~2.6 GB | ~21 GB (tight) | 4-bit KV is the balanced match for 3-bit weights; q8 KV would blow the 32 GB budget |
+| **Ornith 9B** | 8-bit, ~10 GB | **q8** | ~8 GB | **~18 GB** | 8-bit weights + tons of headroom → run near-lossless q8 KV; no reason to compress the cache to 4-bit and eat the quality hit |
+
+So the 9B runs `QWEN_KV_BITS=8` at the full 128K — that's the configuration we
+ship for it. Its head_dim is 256 (2× a typical model), so KV is the dominant cost,
+not the weights; even at q8 it's only ~8 GB, and the whole thing fits in ~18 GB with
+no `sudo sysctl` needed. (256K would also fit at q8, ~26 GB, but needs the wired bump
+and raising `MAX_CONTEXT`.)
 
 Oversized prompts are rejected with **HTTP 400 `context_length_exceeded`** before
 any allocation (no OOM). Image tokens are counted for real (a 4K image ≈ 10k
@@ -127,6 +140,7 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `MODEL_NAME` | gateway | `qwen3.6-35b-a3b` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
 | `LOG_LEVEL` | worker | `INFO` |
+| `QWEN_KV_BITS` | worker | `4` (35B); set `8` for the 9B |
 | `QWEN_WIRED_LIMIT_GB` | worker | `0` (off; clamped to kernel cap) |
 | `QWEN_PREFILL_STEP` | worker | `512` |
 | `QWEN_TEMPERATURE` | worker | `0.0` (argmax) |

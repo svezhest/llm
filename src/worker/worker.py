@@ -149,7 +149,16 @@ MAX_CONTEXT = 131072
 # KV cache quantization (the MLX equivalent of llama.cpp's --cache-type-k q4_0).
 # kv_bits applies to BOTH K and V uniformly here. quantized_kv_start keeps the
 # first N tokens in fp16, then quantizes the tail.
-KV_KWARGS = {"kv_bits": 4, "kv_group_size": 64, "quantized_kv_start": 5000}
+#
+# Per-model via QWEN_KV_BITS (default 4). The right value tracks the *weight*
+# precision + the memory budget, so it differs by model:
+#   - 35B-A3B (3-bit weights, ~18 GB, tight on 32 GB): kv_bits=4 — a 4-bit KV is
+#     the balanced match for 3-bit weights, and q8 KV would blow the budget.
+#   - 9B (8-bit weights, ~10 GB, tons of headroom): kv_bits=8 — near-lossless KV
+#     costs only ~8 GB at 128K and still fits comfortably, so there's no reason to
+#     compress the cache to 4-bit and eat the quality hit.
+KV_BITS = int(os.environ.get("QWEN_KV_BITS", "4"))
+KV_KWARGS = {"kv_bits": KV_BITS, "kv_group_size": 64, "quantized_kv_start": 5000}
 
 # Chunked prefill: process a long prompt in N-token slabs instead of one giant
 # matmul, so the prefill ACTIVATION peak (not the KV cache) stays bounded. A 39K
