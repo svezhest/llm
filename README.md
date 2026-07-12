@@ -19,8 +19,8 @@ only the observability stack is containerized.
 
 | dir | model | quant | size | arch |
 |---|---|---|---|---|
+| `ornith10-9b-mlx-8bit` **(default)** | Ornith-1.0-9B | MLX **8-bit** g64 | ~10.4 GB | dense VL |
 | `qwen36-35b-a3b-mlx-ud3` | Qwen3.6-35B-A3B | MLX affine g64, **3-bit UD** (mixed: embed 6b, attn/gates 8b, shared-expert 4b, MoE experts 3b) | ~16 GB | VL MoE (256 experts, ~3B active) |
-| `ornith10-9b-mlx-8bit`   | Ornith-1.0-9B   | MLX **8-bit** g64 | ~10.4 GB | dense VL |
 
 Weights live in `weights/` (git-ignored). MLX loads from a plain path — no HF
 cache needed. Download recipe for a slow, throttled link: multi-connection
@@ -40,42 +40,45 @@ never hard-kill (orphans partials). See `CLAUDE.md`.
 
 ## Run (dev)
 
-0. **Raise the Metal wired limit** (once per boot, for the 35B long-context path
-   on 32 GB — see *Context & memory*). Resets on reboot:
-   ```zsh
-   sudo sysctl iogpu.wired_limit_mb=28672    # 28 GB cap (default ~21.8 GB)
-   ```
+The **shipped default is Ornith 9B — 128K context, q8 KV** (light: ~18 GB
+resident, no wired-limit tuning needed). The 35B is the heavier alternative below.
 
-1. **Worker** — defaults to `weights/qwen36-35b-a3b-mlx-ud3`; override with
-   `--model <path>` or `QWEN_MODEL`:
+1. **Worker** — run the 9B (override the built-in default 35B path via `QWEN_MODEL`):
    ```zsh
    cd src/worker
    uv run --group proto bash gen_proto.sh    # once: codegen worker_pb2*.py
-   # Qwen 35B (needs the wired-limit bump above):
-   QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py   # 127.0.0.1:50051
-   # or the light Ornith 9B — 128K context with q8 KV (no wired-limit dance):
    QWEN_MODEL=../../weights/ornith10-9b-mlx-8bit QWEN_KV_BITS=8 \
-     uv run python worker.py --addr 127.0.0.1:50052
+     uv run python worker.py                  # serves 127.0.0.1:50051
    ```
 
 2. **Gateway** (after the worker logs "model loaded"):
    ```zsh
    cargo build --release
-   RUST_LOG=info ./target/release/qwen-gateway    # serves 0.0.0.0:8080
+   RUST_LOG=info MODEL_NAME=ornith10-9b ./target/release/qwen-gateway   # 0.0.0.0:8080
    ```
 
 3. **Call it** (OpenAI-compatible):
    ```zsh
    curl -N http://localhost:8080/v1/chat/completions -H 'content-type: application/json' -d '{
-     "model": "qwen3.6-35b-a3b", "stream": true,
+     "model": "ornith10-9b", "stream": true,
      "messages": [{"role":"user","content":"Привет! Кто ты?"}]
    }'
    ```
-   Vision: put an `image_url` part in the message content. Reasoning:
-   `"enable_thinking": true, "thinking_budget": 256` (0 = unlimited). Thinking
-   streams as `delta.reasoning_content`, the answer as `delta.content`.
 
-Quick CLI (no gateway): `uv run python chat.py "Привет!" [--image photo.jpg]`.
+**Heavier alternative — Qwen 35B-A3B** (the worker's built-in default path). Needs
+the Metal wired-limit bump first (once per boot, resets on reboot — see
+*Context & memory*), and runs q4 KV:
+```zsh
+sudo sysctl iogpu.wired_limit_mb=28672    # 28 GB cap (default ~21.8 GB)
+QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py   # q4 KV (default)
+# gateway: leave MODEL_NAME at its default qwen3.6-35b-a3b; call with that model name.
+```
+
+Vision (either model): put an `image_url` part in the message content. Reasoning:
+`"enable_thinking": true, "thinking_budget": 256` (0 = unlimited). Thinking streams
+as `delta.reasoning_content`, the answer as `delta.content`.
+
+Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/ornith10-9b-mlx-8bit`.
 
 ## Context & memory
 
