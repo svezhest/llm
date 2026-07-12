@@ -25,3 +25,6 @@ logs/
 
 # Docker observability volumes
 deploy/**/data/
+
+# Model weights (large; kept out of git)
+weights/

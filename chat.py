@@ -7,10 +7,12 @@ Examples:
   uv run python chat.py "Solve 2x+3=7" --max-tokens 512 --temp 0.0
 """
 import argparse
+import os
 import sys
 import time
 
-DEFAULT_MODEL = "/Users/user/models/Qwen3.6-35B-A3B-UD-MLX-3bit"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_MODEL = os.path.join(_REPO_ROOT, "weights", "qwen36-35b-a3b-mlx-ud3")
 
 
 def main():

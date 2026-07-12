@@ -12,7 +12,7 @@
     <string>python</string>
     <string>worker.py</string>
   </array>
-  <key>WorkingDirectory</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/worker</string>
+  <key>WorkingDirectory</key><string>/Users/user/Projects/llm/src/worker</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>LOG_LEVEL</key><string>INFO</string>
@@ -21,7 +21,7 @@
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/worker.log</string>
-  <key>StandardErrorPath</key><string>/Users/user/Projects/qwen36-35b-a3b/qwen-server/logs/worker.log</string>
+  <key>StandardOutPath</key><string>/Users/user/Projects/llm/logs/worker.log</string>
+  <key>StandardErrorPath</key><string>/Users/user/Projects/llm/logs/worker.log</string>
 </dict>
 </plist>

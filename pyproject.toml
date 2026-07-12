@@ -1,5 +1,5 @@
 [project]
-name = "qwen36-35b-a3b"
+name = "llm"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"

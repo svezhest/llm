@@ -1,76 +1,135 @@
-# Qwen3.6-35B-A3B (MLX, 3-bit) — local setup
+# llm
 
-Running `unsloth/Qwen3.6-35B-A3B-UD-MLX-3bit` on Apple Silicon.
+Local LLM inference on Apple Silicon (MLX): a **Rust gateway** (OpenAI-compatible
+HTTP/SSE) talking to thin **Python MLX workers** over **gRPC**, with Prometheus
+metrics, Grafana dashboards, Loki logs, a request queue, and leveled logging.
 
-- **Model**: ~17.4 GB, 4 safetensors shards (5.35 / 5.32 / 5.29 / 1.41 GB), MoE with 3B active params.
-- **Runtime**: `mlx-vlm` — it's a **vision-language** model, so use `mlx-vlm`, not `mlx-lm`.
-- **Tested on**: M1 Max, 32 GB. Comfortable fit (model + context well under unified memory).
-
-## Quick use (once weights are present)
-
-```zsh
-uv run python -c "
-from mlx_vlm import load, generate
-model, processor = load('~/models/Qwen3.6-35B-A3B-UD-MLX-3bit')
-print(generate(model, processor, 'Привет! Кратко расскажи о себе.', max_tokens=128))
-"
+```
+clients ──HTTP/SSE (OpenAI)──► gateway (Rust) ──gRPC stream──► mlx worker(s) (Python)
+                                 /metrics, queue, logs           mlx-vlm load + generate
+        Prometheus ◄─scrape─ gateway + mac-exporter ; Grafana ◄ Prometheus + Loki ◄ Promtail
 ```
 
-(Or pass the HF repo id `unsloth/Qwen3.6-35B-A3B-UD-MLX-3bit` if you let `hf` manage the cache.)
+Why the split: Rust for everything (API, queue, metrics, logging, gRPC); Python
+only where MLX must load. Process isolation, no PyO3. The `.proto` is the single
+source of truth. Inference stays native on the host (Metal is not in Docker);
+only the observability stack is containerized.
 
----
+## Models (`weights/`)
 
-## Downloading the weights over a slow / flaky link
+| dir | model | quant | size | arch |
+|---|---|---|---|---|
+| `qwen36-35b-a3b-mlx-ud3` | Qwen3.6-35B-A3B | MLX affine g64, **3-bit UD** (mixed: embed 6b, attn/gates 8b, shared-expert 4b, MoE experts 3b) | ~16 GB | VL MoE (256 experts, ~3B active) |
+| `ornith10-9b-mlx-8bit`   | Ornith-1.0-9B   | MLX **8-bit** g64 | ~10.4 GB | dense VL |
 
-On a clean fast connection, `hf download unsloth/Qwen3.6-35B-A3B-UD-MLX-3bit` is enough.
-This section is the **hard-won recipe** for a degraded link (e.g. a throttling proxy
-in front of everything), where the naive path fails.
+Weights live in `weights/` (git-ignored). MLX loads from a plain path — no HF
+cache needed. Download recipe for a slow, throttled link: multi-connection
+`aria2c -c -x16 -s16` per shard with `--check-integrity --checksum=sha-256=<lfs.oid>`
+(oids from `https://huggingface.co/api/models/<repo>/tree/main`), `HF_HUB_DISABLE_XET=1`,
+never hard-kill (orphans partials). See `CLAUDE.md`.
 
-### Pitfalls (why the simple commands fail)
+## Layout
 
-| Symptom | Cause | Fix |
+- `src/proto/worker.proto` — gRPC contract.
+- `src/gateway/` (Rust) — axum HTTP + tonic gRPC client + queue + metrics + tracing.
+- `src/worker/`  (Python) — grpcio server, mlx-vlm; load + generate + reasoning budget.
+- `src/exporter/` (Rust) — `powermetrics` → `/metrics` (GPU/ANE/mem/watts).
+- `deploy/` — docker-compose (prometheus/grafana/loki/promtail) + launchd plists.
+- `Cargo.toml` — Rust workspace (members `src/gateway`, `src/exporter`).
+- `pyproject.toml` — root tooling/download env; `src/worker/` is its own uv project.
+
+## Run (dev)
+
+0. **Raise the Metal wired limit** (once per boot, for the 35B long-context path
+   on 32 GB — see *Context & memory*). Resets on reboot:
+   ```zsh
+   sudo sysctl iogpu.wired_limit_mb=28672    # 28 GB cap (default ~21.8 GB)
+   ```
+
+1. **Worker** — defaults to `weights/qwen36-35b-a3b-mlx-ud3`; override with
+   `--model <path>` or `QWEN_MODEL`:
+   ```zsh
+   cd src/worker
+   uv run --group proto bash gen_proto.sh    # once: codegen worker_pb2*.py
+   # Qwen 35B (needs the wired-limit bump above):
+   QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py   # 127.0.0.1:50051
+   # or the light Ornith 9B (no wired-limit dance needed):
+   QWEN_MODEL=../../weights/ornith10-9b-mlx-8bit uv run python worker.py --addr 127.0.0.1:50052
+   ```
+
+2. **Gateway** (after the worker logs "model loaded"):
+   ```zsh
+   cargo build --release
+   RUST_LOG=info ./target/release/qwen-gateway    # serves 0.0.0.0:8080
+   ```
+
+3. **Call it** (OpenAI-compatible):
+   ```zsh
+   curl -N http://localhost:8080/v1/chat/completions -H 'content-type: application/json' -d '{
+     "model": "qwen3.6-35b-a3b", "stream": true,
+     "messages": [{"role":"user","content":"Привет! Кто ты?"}]
+   }'
+   ```
+   Vision: put an `image_url` part in the message content. Reasoning:
+   `"enable_thinking": true, "thinking_budget": 256` (0 = unlimited). Thinking
+   streams as `delta.reasoning_content`, the answer as `delta.content`.
+
+Quick CLI (no gateway): `uv run python chat.py "Привет!" [--image photo.jpg]`.
+
+## Context & memory
+
+Context is capped at **128K tokens** (`MAX_CONTEXT=131072`, prompt + generation).
+The 35B weights are 3-bit, so the worker runs a **q4 KV cache** (`kv_bits=4`,
+~20 KiB/token → ~2.6 GB at 128K) — the balanced match for a 3-bit model on 32 GB.
+
+Oversized prompts are rejected with **HTTP 400 `context_length_exceeded`** before
+any allocation (no OOM). Image tokens are counted for real (a 4K image ≈ 10k
+tokens), so vision prompts are validated accurately, not undercounted.
+
+**Fitting the 35B long context on 32 GB.** Weights are ~16–18 GB; the default
+Metal wired limit (~21.8 GB) leaves almost nothing for KV + prefill activations,
+so big prompts OOM. Three things keep it alive:
+- **`sudo sysctl iogpu.wired_limit_mb=28672`** raises the kernel working-set cap
+  to 28 GB (resets on reboot). `QWEN_WIRED_LIMIT_GB` then pins MLX's wired limit
+  (clamped to the cap — set it *below* the sysctl value, e.g. 27).
+- **Chunked prefill** (`QWEN_PREFILL_STEP=512`) bounds the prefill activation
+  peak so a 50K-token prompt doesn't spike memory in one matmul.
+- **`mx.clear_cache()` runs after every generation**, so MLX's buffer pool from
+  one request never carries into the next request's prefill (the cause of the
+  second-request OOM). Verified: 56K-token prompt × 2 back-to-back, no OOM.
+
+The **9B-8bit** model needs none of this — ~10 GB resident leaves plenty of
+headroom on 32 GB.
+
+See **CLAUDE.md** for design decisions, implementation notes, and gotchas.
+
+## Observability
+```zsh
+cd deploy && QWEN_LOG_DIR=../logs docker compose up -d
+```
+- Grafana: http://localhost:3000 (anonymous admin) → dashboard **qwen-server**.
+- Prometheus: http://localhost:9090 ; gateway metrics: http://localhost:8080/metrics.
+- mac-exporter (GPU/ANE/watts) needs root: `sudo ./target/release/qwen-mac-exporter`.
+- Set `LOG_FORMAT=json` on the gateway so Promtail can label by level.
+
+## Resilience (launchd)
+Edit paths in `deploy/launchd/*.plist`, then load them (worker + gateway as user
+agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
+`/health` goes dark. See comments inside each plist.
+
+## Env knobs
+| var | where | default |
 |---|---|---|
-| `hf download` sits at 0 MB/s | Xet backend hangs on this network | `HF_HUB_DISABLE_XET=1` |
-| Cache balloons with duplicate partials, never finishes | A `kill -9` stall-watchdog orphans the temp file every restart | Never hard-kill; graceful-exit resume only |
-| Big shards never accumulate; `.incomplete` keeps vanishing | The proxy drops the CDN SSL mid-file; `hf` deletes the bad partial | Bypass `hf`, use a tool that **keeps** partials (aria2/curl `-c`) |
-| File reaches full size but is **corrupt** | Proxy wrote block-page bytes to hit the size | **Verify SHA256** — size match ≠ integrity |
-| Single-stream download capped at ~55 KB/s | CDN throttles **per connection** | aria2 `-x16` (got ~640 KiB/s, ~12×) |
-
-### The approach that works
-
-Download each shard with **aria2c**, straight into a local dir, **with its expected
-SHA256** so aria2 self-verifies and re-fetches corrupt pieces — it won't report success
-until the hash matches.
-
-1. Get each shard's expected sha256 (`lfs.oid`) from the HF API:
-
-   ```zsh
-   curl -sS https://huggingface.co/api/models/unsloth/Qwen3.6-35B-A3B-UD-MLX-3bit/tree/main \
-     | python3 -c "import sys,json;[print(x['path'],x.get('lfs',{}).get('oid','-')) for x in json.load(sys.stdin)]"
-   ```
-
-2. Fetch each shard (and the small json/tokenizer files) with integrity checking:
-
-   ```zsh
-   DIR=~/models/Qwen3.6-35B-A3B-UD-MLX-3bit
-   BASE=https://huggingface.co/unsloth/Qwen3.6-35B-A3B-UD-MLX-3bit/resolve/main
-   aria2c -c -x16 -s16 -k1M -j1 \
-     --max-tries=0 --retry-wait=5 --connect-timeout=30 --timeout=60 \
-     --check-integrity=true --checksum=sha-256=<oid-for-this-shard> \
-     --dir="$DIR" -o model-00001-of-00004.safetensors \
-     "$BASE/model-00001-of-00004.safetensors"
-   ```
-
-   Repeat for shards 2–4 plus: `model.safetensors.index.json`, `config.json`,
-   `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, `processor_config.json`.
-
-### Notes
-
-- aria2 **preallocates** the file, so `stat`/`ls` size jumps to full immediately.
-  Track real progress in aria2's own log line (`<got>/<total> ... DL:<speed>`), not file size.
-- Completed blobs from a prior partial `hf download` live under
-  `~/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-UD-MLX-3bit/` and are
-  content-addressed — safe to copy out and reuse (skip re-downloading what's intact).
-- Auth: a global token at `~/.cache/huggingface/token` is picked up automatically; the
-  shards themselves are public, so plain `aria2c`/`curl` need no token.
-- Verify any file independently with: `shasum -a 256 <file>` vs the `lfs.oid` from step 1.
+| `QWEN_MODEL` | worker | `weights/qwen36-35b-a3b-mlx-ud3` (repo-relative) |
+| `WORKER_ADDR` | gateway | `127.0.0.1:50051` |
+| `GATEWAY_ADDR` | gateway | `0.0.0.0:8080` |
+| `MAX_QUEUE` | gateway | `32` |
+| `MODEL_NAME` | gateway | `qwen3.6-35b-a3b` |
+| `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
+| `LOG_LEVEL` | worker | `INFO` |
+| `QWEN_WIRED_LIMIT_GB` | worker | `0` (off; clamped to kernel cap) |
+| `QWEN_PREFILL_STEP` | worker | `512` |
+| `QWEN_TEMPERATURE` | worker | `0.0` (argmax) |
+| `QWEN_PRESENCE_PENALTY` | worker | `1.5` |
+| `QWEN_PRESENCE_CONTEXT` | worker | `512` |
+| `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` |

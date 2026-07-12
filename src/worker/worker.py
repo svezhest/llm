@@ -34,7 +34,13 @@ import worker_pb2_grpc as pb_grpc
 
 log = logging.getLogger("qwen.worker")
 
-DEFAULT_MODEL = os.path.expanduser("~/models/Qwen3.6-35B-A3B-UD-MLX-3bit")
+# Repo-relative default: <repo>/weights/<name>. worker.py lives at src/worker/,
+# so the repo root is two directories up. Override with --model or QWEN_MODEL.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DEFAULT_MODEL = os.environ.get(
+    "QWEN_MODEL",
+    os.path.join(_REPO_ROOT, "weights", "qwen36-35b-a3b-mlx-ud3"),
+)
 
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
