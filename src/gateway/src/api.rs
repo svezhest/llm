@@ -27,6 +27,9 @@ pub struct ChatRequest {
     #[serde(default)]
     pub stream: bool,
     pub max_tokens: Option<u32>,
+    // OpenAI's newer field name; many clients (e.g. pydantic-ai) send THIS instead of
+    // max_tokens and OMIT max_tokens entirely. Accept both or the budget silently → 1024.
+    pub max_completion_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     #[serde(default)]
@@ -126,9 +129,9 @@ fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
         messages,
         images,
         params: Some(pb::Params {
-            max_tokens: req.max_tokens.unwrap_or(1024),
-            temperature: req.temperature.unwrap_or(0.7),
-            top_p: req.top_p.unwrap_or(1.0),
+            max_tokens: req.max_tokens.or(req.max_completion_tokens).unwrap_or(1024),
+            temperature: req.temperature.unwrap_or(-1.0), // -1 => worker default
+            top_p: req.top_p.unwrap_or(0.0),            // 0 => worker default
             enable_thinking: req.enable_thinking,
             thinking_budget: req.thinking_budget,
             seed: req.seed,

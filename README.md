@@ -21,12 +21,18 @@ only the observability stack is containerized.
 |---|---|---|---|---|
 | `ornith10-9b-mlx-8bit` **(default)** | Ornith-1.0-9B | MLX **8-bit** g64 | ~10.4 GB | dense VL |
 | `qwen36-35b-a3b-mlx-ud3` | Qwen3.6-35B-A3B | MLX affine g64, **3-bit UD** (mixed: embed 6b, attn/gates 8b, shared-expert 4b, MoE experts 3b) | ~16 GB | VL MoE (256 experts, ~3B active) |
+| `qwen38-27b-mlx-5bit` | Qwen3.8-27B | MLX affine g64, **5-bit** | ~18.1 GB | dense hybrid VL (64 layers; Gated DeltaNet + full attention every 4th, 4 KV heads, head_dim 256; native 256K ctx) |
+
+All three are `model_type qwen3_5` (`qwen3_5_moe` for the 35B) in mlx-vlm — one
+worker code path; only the env knobs differ.
 
 Weights live in `weights/` (git-ignored). MLX loads from a plain path — no HF
 cache needed. Download recipe for a slow, throttled link: multi-connection
 `aria2c -c -x16 -s16` per shard with `--check-integrity --checksum=sha-256=<lfs.oid>`
 (oids from `https://huggingface.co/api/models/<repo>/tree/main`), `HF_HUB_DISABLE_XET=1`,
-never hard-kill (orphans partials). See `CLAUDE.md`.
+never hard-kill (orphans partials). See `CLAUDE.md`. Scripted, resumable:
+`scripts/hf_pull.sh lmstudio-community/Qwen3.8-27B-MLX-5bit weights/qwen38-27b-mlx-5bit`
+(re-run the same line after any interruption; finished shards are skipped by checksum).
 
 ## Layout
 
@@ -40,8 +46,8 @@ never hard-kill (orphans partials). See `CLAUDE.md`.
 
 ## Run (dev)
 
-The **shipped default is Ornith 9B — 128K context, q8 KV** (light: ~18 GB
-resident, no wired-limit tuning needed). The 35B is the heavier alternative below.
+The **shipped default is Ornith 9B — 128K context, q8 KV** (light: ~15 GB
+resident, no wired-limit tuning needed). The 35B and 27B are the heavier alternatives below.
 
 1. **Worker** — run the 9B (override the built-in default 35B path via `QWEN_MODEL`):
    ```zsh
@@ -74,7 +80,34 @@ QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py   # q4 KV (
 # gateway: leave MODEL_NAME at its default qwen3.6-35b-a3b; call with that model name.
 ```
 
-Vision (either model): put an `image_url` part in the message content. Reasoning:
+**Qwen3.8-27B (5-bit)** — the strongest dense option; ~24 GB resident at 128K, so
+it needs the same wired-limit bump as the 35B, but runs **q8 KV**:
+```zsh
+sudo sysctl iogpu.wired_limit_mb=28672                 # once per boot
+cd src/worker
+QWEN_MODEL=../../weights/qwen38-27b-mlx-5bit QWEN_KV_BITS=8 \
+  QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py
+# gateway (after "model loaded"):
+RUST_LOG=info MODEL_NAME=qwen3.8-27b ./target/release/qwen-gateway
+```
+`MODEL_NAME` is only the label the gateway answers to (`"model"` in requests and
+`/v1/models`); the worker's `QWEN_MODEL` path decides what's loaded. Keep the pair
+consistent: `ornith10-9b` ⇄ `ornith10-9b-mlx-8bit`, `qwen3.6-35b-a3b` ⇄
+`qwen36-35b-a3b-mlx-ud3`, `qwen3.8-27b` ⇄ `qwen38-27b-mlx-5bit`.
+
+**Sampling is process-wide** (env at launch; per-request `temperature`/`top_p` are
+not applied). The shipped default is argmax + presence penalty 1.5 over 512 tokens
+— the Qwen card's *non-thinking* setting, and **wrong for reasoning and
+benchmarks**: it suppresses repeated tokens inside long `<think>` traces. For
+evals run the card's thinking-mode sampler:
+```zsh
+QWEN_PRESENCE_PENALTY=0 QWEN_TEMPERATURE=1.0 QWEN_TOP_P=0.95 QWEN_TOP_K=20 QWEN_MIN_P=0 \
+  QWEN_MODEL=... uv run python worker.py
+```
+(Qwen3.8 card: thinking = T 1.0 / top_p 0.95 / top_k 20 / min_p 0 / presence 0;
+instruct = T 0.7 / top_p 0.80 / top_k 20 / presence 1.5.)
+
+Vision (any model): put an `image_url` part in the message content. Reasoning:
 `"enable_thinking": true, "thinking_budget": 256` (0 = unlimited). Thinking streams
 as `delta.reasoning_content`, the answer as `delta.content`.
 
@@ -82,7 +115,8 @@ Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/o
 
 ## Context & memory
 
-Context is capped at **128K tokens** (`MAX_CONTEXT=131072`, prompt + generation).
+Context is capped at **128K tokens** (`MAX_CONTEXT=131072`, prompt + generation;
+override with `QWEN_MAX_CONTEXT`).
 
 **KV cache precision is per-model** (`QWEN_KV_BITS`, default 4), because the right
 value tracks the *weight* precision and the memory budget:
@@ -90,19 +124,24 @@ value tracks the *weight* precision and the memory budget:
 | model | weights | KV (`QWEN_KV_BITS`) | KV @ 128K | resident @ 128K | why |
 |---|---|---|---|---|---|
 | Qwen 35B-A3B | 3-bit, ~18 GB | **q4** (default) | ~2.6 GB | ~21 GB (tight) | 4-bit KV is the balanced match for 3-bit weights; q8 KV would blow the 32 GB budget |
-| **Ornith 9B** | 8-bit, ~10 GB | **q8** | ~8 GB | **~18 GB** | 8-bit weights + tons of headroom → run near-lossless q8 KV; no reason to compress the cache to 4-bit and eat the quality hit |
+| **Ornith 9B** | 8-bit, ~10 GB | **q8** | ~2 GB | **~15 GB** | 8-bit weights + tons of headroom → run near-lossless q8 KV; no reason to compress the cache to 4-bit and eat the quality hit |
+| **Qwen3.8-27B** | 5-bit, ~18.1 GB | **q8** | ~3.9 GB | **~24 GB** | 5-bit weights deserve q8 KV; fits under the 27 GB wired limit with the bump |
 
-So the 9B runs `QWEN_KV_BITS=8` at the full 128K — that's the configuration we
-ship for it. Its head_dim is 256 (2× a typical model), so KV is the dominant cost,
-not the weights; even at q8 it's only ~8 GB, and the whole thing fits in ~18 GB with
-no `sudo sysctl` needed. (256K would also fit at q8, ~26 GB, but needs the wired bump
-and raising `MAX_CONTEXT`.)
+**KV math for the hybrid models.** Only the full-attention layers (every 4th) hold
+a growing KV cache; the Gated DeltaNet layers keep a small constant state. Per token
+at q8: `2 (K,V) × full-attn layers × 4 KV heads × head_dim 256 × 1 byte` → 9B
+(8 layers) ≈ 16 KB, 27B (16 layers) ≈ 32 KB. So the 27B is ~3.9 GB at 128K and
+~6.1 GB at 200K; resident ≈ weights 18.1 + KV + ~2 GB prefill activations ≈ 24 GB
+(128K) / 26 GB (200K). **To run the 27B at 200K**: `QWEN_MAX_CONTEXT=204800` plus
+the wired bump (`sudo sysctl iogpu.wired_limit_mb=28672`, `QWEN_WIRED_LIMIT_GB=27`,
+`QWEN_PREFILL_STEP=512`) — ~1 GB of slack under the limit, so keep prefill chunked.
+The 9B runs q8 at 128K with no `sudo sysctl` needed (256K ≈ 4 GB KV also fits).
 
 Oversized prompts are rejected with **HTTP 400 `context_length_exceeded`** before
 any allocation (no OOM). Image tokens are counted for real (a 4K image ≈ 10k
 tokens), so vision prompts are validated accurately, not undercounted.
 
-**Fitting the 35B long context on 32 GB.** Weights are ~16–18 GB; the default
+**Fitting the 35B / 27B long context on 32 GB.** Weights are ~16–18 GB; the default
 Metal wired limit (~21.8 GB) leaves almost nothing for KV + prefill activations,
 so big prompts OOM. Three things keep it alive:
 - **`sudo sysctl iogpu.wired_limit_mb=28672`** raises the kernel working-set cap
@@ -143,10 +182,11 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `MODEL_NAME` | gateway | `qwen3.6-35b-a3b` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
 | `LOG_LEVEL` | worker | `INFO` |
-| `QWEN_KV_BITS` | worker | `4` (35B); set `8` for the 9B |
+| `QWEN_MAX_CONTEXT` | worker | `131072` |
+| `QWEN_KV_BITS` | worker | `4` (35B); set `8` for the 9B and 27B |
 | `QWEN_WIRED_LIMIT_GB` | worker | `0` (off; clamped to kernel cap) |
 | `QWEN_PREFILL_STEP` | worker | `512` |
-| `QWEN_TEMPERATURE` | worker | `0.0` (argmax) |
-| `QWEN_PRESENCE_PENALTY` | worker | `1.5` |
+| `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` (off) |
+| `QWEN_PRESENCE_PENALTY` | worker | `1.5` (set `0` for reasoning/benchmarks) |
 | `QWEN_PRESENCE_CONTEXT` | worker | `512` |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` |

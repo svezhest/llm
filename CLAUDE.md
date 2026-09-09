@@ -8,7 +8,8 @@ See `README.md` for run instructions, `BACKLOG.md` for the plan + phase status.
 
 ## Layout (repo root = `/Users/user/Projects/llm`)
 
-- `weights/` — model dirs (git-ignored). `qwen36-35b-a3b-mlx-ud3`, `ornith10-9b-mlx-8bit`.
+- `weights/` — model dirs (git-ignored). `qwen36-35b-a3b-mlx-ud3`, `ornith10-9b-mlx-8bit`,
+  `qwen38-27b-mlx-5bit`. Pull with `scripts/hf_pull.sh <repo> <dir>` (resumable aria2c).
 - `src/proto/worker.proto` — gRPC contract (single source of truth; both sides codegen).
 - `src/gateway/` (Rust) — axum HTTP + tonic gRPC client + queue + metrics + tracing.
   `src/{main,api,pool,metrics,worker_client,logging,pb}.rs`.
@@ -49,6 +50,10 @@ resource manager / `footprint` for the real size.
   finetune), dense VL, MLX 8-bit. ~10.4 GB. No wired-limit dance; 8-bit ≈ fp16 quality.
   Card benchmarks (SWE-bench 69%) are self-reported and implausibly high for the
   size — **evaluate empirically, don't trust the card**.
+- **`qwen38-27b-mlx-5bit`** — Qwen3.8-27B (lmstudio-community), dense hybrid VL,
+  `model_type qwen3_5` like the 9B (64 layers, full attn every 4th, 4 KV heads,
+  head_dim 256, native 256K). MLX 5-bit g64, ~18.1 GB. Run: `QWEN_KV_BITS=8` +
+  wired-limit dance (~24 GB @128K; 200K via `QWEN_MAX_CONTEXT=204800`, ~26 GB).
 
 Download over a slow, throttled link — hard-won recipe:
 - `HF_HUB_DISABLE_XET=1` always (Xet backend hangs silently at 0 MB/s here).
@@ -87,8 +92,10 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   `--cache-type-k`; K and V uniform, fp16 warmup for the first 5000 tokens). Pick N
   by weight precision + budget: **35B (3-bit, ~18 GB) → q4** (~2.6 GB KV @ 128K; q8
   would blow the 32 GB budget); **9B (8-bit, ~10 GB) → q8** (~8 GB KV @ 128K, ~18 GB
-  total, near-lossless — no reason to compress to q4). The 9B's `head_dim=256` (2×
-  typical) makes KV the dominant cost, not weights. Shipped 9B config: 128K + q8.
+  total, near-lossless — no reason to compress to q4); **27B (5-bit, ~18 GB) → q8**
+  (~3.9 GB @128K, ~24 GB total). Only full-attention layers (every 4th) hold KV:
+  q8 ≈ 16 KB/token (9B) / 32 KB/token (27B). Sampling is process-wide via env;
+  per-request temperature/top_p are ignored by the worker.
 - **OOM avoidance on 32 GB** (all three needed for the 35B at long context):
   `sudo sysctl iogpu.wired_limit_mb=28672` (kernel cap) + `QWEN_WIRED_LIMIT_GB=27`
   (MLX wired limit, clamped to cap) + `QWEN_PREFILL_STEP=512` (chunked prefill
@@ -121,9 +128,11 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `WORKER_ADDR` / `GATEWAY_ADDR` / `MAX_QUEUE` / `MODEL_NAME` | gateway | `127.0.0.1:50051` / `0.0.0.0:8080` / `32` / `qwen3.6-35b-a3b` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty (set `json` for Loki) |
 | `LOG_LEVEL` | worker | `INFO` |
-| `QWEN_KV_BITS` | worker | `4` (35B); `8` for the 9B |
+| `QWEN_MAX_CONTEXT` | worker | `131072` |
+| `QWEN_KV_BITS` | worker | `4` (35B); `8` for the 9B and 27B |
 | `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `512` |
-| `QWEN_TEMPERATURE` / `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `0.0` (argmax) / `1.5` / `512` |
+| `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` |
+| `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `1.5` / `512` — **benchmarks/reasoning: `0`** + card sampler (see README) |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` (run under sudo) |
 
 ## Gotchas

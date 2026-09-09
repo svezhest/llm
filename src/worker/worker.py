@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin gRPC MLX worker for Qwen3.6-35B-A3B (vision-language).
+"""Thin gRPC MLX worker for the Qwen3.x-family VL models (mlx-vlm).
 
 Loads the model once, then serves the `Worker` service from worker.proto:
   - Generate: server-streaming Start/Token/Done/Error
@@ -144,7 +144,10 @@ def _rebuild_messages(pb_messages):
 # 4-bit KV cache (~20 KiB/token) is a balanced match — 128K costs ~2.6 GB
 # (model ~18 GB + KV still fits the default ~21.8 GB Metal wired limit; raise
 # iogpu.wired_limit_mb for more headroom if needed).
-MAX_CONTEXT = 131072
+# Context window (prompt + generation). 131072 is the shipped default for all
+# three models; the 27B can run 200K (`QWEN_MAX_CONTEXT=204800`) — see README
+# "Context & memory" for the KV budget before raising it.
+MAX_CONTEXT = int(os.environ.get("QWEN_MAX_CONTEXT", "131072"))
 
 # KV cache quantization (the MLX equivalent of llama.cpp's --cache-type-k q4_0).
 # kv_bits applies to BOTH K and V uniformly here. quantized_kv_start keeps the
@@ -155,8 +158,12 @@ MAX_CONTEXT = 131072
 #   - 35B-A3B (3-bit weights, ~18 GB, tight on 32 GB): kv_bits=4 — a 4-bit KV is
 #     the balanced match for 3-bit weights, and q8 KV would blow the budget.
 #   - 9B (8-bit weights, ~10 GB, tons of headroom): kv_bits=8 — near-lossless KV
-#     costs only ~8 GB at 128K and still fits comfortably, so there's no reason to
-#     compress the cache to 4-bit and eat the quality hit.
+#     costs only ~2 GB at 128K, so there's no reason to compress it to 4-bit.
+#   - 27B (5-bit weights, ~18 GB): kv_bits=8 — ~32 KB/token (16 full-attention
+#     layers x 4 KV heads x head_dim 256), ~3.9 GB at 128K; fits with the wired bump.
+# Only the full-attention layers' KVCache is quantized; the linear-attention
+# (Gated DeltaNet) layers keep a small constant recurrent state that mlx-lm's
+# maybe_quantize_kv_cache skips (ArraysCache has no to_quantized).
 KV_BITS = int(os.environ.get("QWEN_KV_BITS", "4"))
 KV_KWARGS = {"kv_bits": KV_BITS, "kv_group_size": 64, "quantized_kv_start": 5000}
 
@@ -173,13 +180,19 @@ PREFILL_STEP = int(os.environ.get("QWEN_PREFILL_STEP", "512"))
 # cannot exceed what the kernel allows.
 _WIRED_GB = float(os.environ.get("QWEN_WIRED_LIMIT_GB", "0") or "0")
 
-# Sampling (native mlx-lm logits processors via mlx-vlm — no custom code):
-# greedy/argmax decoding (temperature=0, so top_p is irrelevant) with an ADDITIVE
-# presence penalty over a 512-token window. Multiplicative repetition penalty and
-# frequency penalty are OFF (left as None). Env-overridable for the run.
+# Sampling (native mlx-lm sampler + logits processors via mlx-vlm — no custom code).
+# Env sets the process-wide defaults; a request's temperature/top_p (OpenAI
+# fields, sentinel -1 / 0 from the gateway when omitted) override them. Default:
+# greedy/argmax (temperature=0 => top_p/top_k/min_p irrelevant) with an ADDITIVE
+# presence penalty 1.5 over a 512-token window (the Qwen card's *non-thinking*
+# setting). Multiplicative repetition penalty is OFF.
+# For reasoning / benchmarks set QWEN_PRESENCE_PENALTY=0 and the card's sampler
+# (thinking: temperature 1.0, top_p 0.95, top_k 20, min_p 0) — see README.
 SAMPLING_KWARGS = {
     "temperature": float(os.environ.get("QWEN_TEMPERATURE", "0.0")),    # 0 => argmax
-    "top_p": 1.0,                                                       # off
+    "top_p": float(os.environ.get("QWEN_TOP_P", "1.0")),                # 1.0 => off
+    "top_k": int(os.environ.get("QWEN_TOP_K", "0")),                    # 0 => off
+    "min_p": float(os.environ.get("QWEN_MIN_P", "0.0")),                # 0 => off
     "presence_penalty": float(os.environ.get("QWEN_PRESENCE_PENALTY", "1.5")),
     "presence_context_size": int(os.environ.get("QWEN_PRESENCE_CONTEXT", "512")),
 }
@@ -331,11 +344,19 @@ class Engine:
                 if p.enable_thinking and p.thinking_budget > 0:
                     think_kwargs["thinking_budget"] = p.thinking_budget
 
+                sampling = dict(SAMPLING_KWARGS)
+                if p.temperature >= 0:
+                    sampling["temperature"] = p.temperature
+                if p.top_p > 0:
+                    sampling["top_p"] = p.top_p
+                if p.HasField("seed"):
+                    mx.random.seed(p.seed)
+
                 answer_buf = []   # tools mode: buffer answer tokens, parse at the end
                 for chunk in stream_generate(
                     self.model, self.processor, formatted, images,
                     max_tokens=max_tokens, prefill_step_size=PREFILL_STEP,
-                    **SAMPLING_KWARGS, **KV_KWARGS, **think_kwargs,
+                    **sampling, **KV_KWARGS, **think_kwargs,
                 ):
                     if cancel_ev.is_set():
                         yield _done(req.id, "cancelled", state, t0, ttft_ms, last)
