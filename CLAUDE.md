@@ -94,8 +94,30 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   would blow the 32 GB budget); **9B (8-bit, ~10 GB) → q8** (~8 GB KV @ 128K, ~18 GB
   total, near-lossless — no reason to compress to q4); **27B (5-bit, ~18 GB) → q8**
   (~3.9 GB @128K, ~24 GB total). Only full-attention layers (every 4th) hold KV:
-  q8 ≈ 16 KB/token (9B) / 32 KB/token (27B). Sampling is process-wide via env;
-  per-request temperature/top_p are ignored by the worker.
+  q8 ≈ 16 KB/token (9B) / 32 KB/token (27B). Env sets sampler defaults;
+  requests may override temperature/top_p/top_k/min_p/presence_penalty (proto
+  `optional` fields; absent = env default, temperature -1 / top_p 0 likewise).
+- **The worker owns its prefill/decode loop** (`Engine._run`), a trimmed copy of
+  mlx-vlm 0.6.2 `generate_step`+`stream_generate` (same sampler, logits
+  processors, KV quantization, ThinkingBudgetCriteria, detokenizer). Reasons:
+  the prompt-cache snapshot has to be taken at the exact point where the cache
+  holds prompt[:-1] and nothing else (the library's `PromptCacheState` snapshots
+  after the first generated token and trims — impossible for ArraysCache,
+  broken for quantized tuples); pre-tokenized vision inputs go in directly;
+  `finish_reason` `"length"` and pool clearing are ours. Output verified
+  byte-identical to `stream_generate` at temperature 0. When bumping mlx-vlm,
+  diff `generate/ar.py::generate_step` against `_run`.
+- **Prompt cache** (`QWEN_PROMPT_CACHE=1`): single `_Snapshot(ids[:-1], cache
+  copy)`. Hit = new ids strictly extend the snapshot ids; delta-only prefill from
+  a `_copy_cache` of it. Never trim; never share mx.array *objects* between cache
+  copies (`a[i] = v` rebinds the Python object in place — slice to get a new one,
+  buffers are copy-on-write). On a hit set `language_model._rope_deltas` to zeros
+  (text mRoPE continues from the cache offset; a previous vision request leaves
+  its own delta there). Text-only conversations only.
+- **Buffer pool**: `QWEN_CLEAR_CACHE` (1) / `QWEN_CACHE_LIMIT_GB` (3, via
+  `mx.set_cache_limit` at load). See README "Context & memory" for the numbers.
+- **Stop sequences**: `_StopFilter` in the chunk loop keeps back the longest
+  stream tail that is a prefix of a stop string; applied to answer text only.
 - **OOM avoidance on 32 GB** (all three needed for the 35B at long context):
   `sudo sysctl iogpu.wired_limit_mb=28672` (kernel cap) + `QWEN_WIRED_LIMIT_GB=27`
   (MLX wired limit, clamped to cap) + `QWEN_PREFILL_STEP=512` (chunked prefill
@@ -133,6 +155,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `512` |
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` |
 | `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `1.5` / `512` — **benchmarks/reasoning: `0`** + card sampler (see README) |
+| `QWEN_PROMPT_CACHE` | worker | `0` |
+| `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` (run under sudo) |
 
 ## Gotchas

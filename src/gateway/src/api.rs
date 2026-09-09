@@ -32,9 +32,14 @@ pub struct ChatRequest {
     pub max_completion_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
-    #[serde(default)]
+    // OpenAI allows `stop` as a single string or an array of strings.
+    #[serde(default, deserialize_with = "string_or_vec")]
     pub stop: Vec<String>,
     pub seed: Option<u64>,
+    // Common extensions (llama.cpp / vLLM style); absent = worker default.
+    pub top_k: Option<u32>,
+    pub min_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
     // Extensions (Qwen reasoning controls).
     #[serde(default)]
     pub enable_thinking: bool,
@@ -58,6 +63,17 @@ pub struct InMessage {
     pub tool_call_id: Option<String>,
     #[serde(default)]
     pub tool_calls: Option<Value>,
+}
+
+fn string_or_vec<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum V { One(String), Many(Vec<String>) }
+    Ok(match Option::<V>::deserialize(d)? {
+        Some(V::One(s)) => vec![s],
+        Some(V::Many(v)) => v,
+        None => vec![],
+    })
 }
 
 /// Flatten OpenAI content (string or parts array) into (text, image urls).
@@ -138,6 +154,9 @@ fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
             stop: req.stop.clone(),
             tools_json,
             tool_choice,
+            top_k: req.top_k,
+            min_p: req.min_p,
+            presence_penalty: req.presence_penalty,
         }),
     }
 }

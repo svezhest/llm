@@ -28,6 +28,10 @@ message Params {
   optional uint64 seed = 6; repeated string stop = 7;
   string tools_json = 8;       // OpenAI `tools` array as JSON (empty = no tools)
   string tool_choice = 9;      // "auto"|"none"|"required"|{...}; empty = auto
+  // Sampler overrides; absent = worker env default (like temperature -1 / top_p 0).
+  optional uint32 top_k = 10;
+  optional float min_p = 11;
+  optional float presence_penalty = 12;
 }
 
 // A function/tool call the model decided to make. `arguments` is a JSON string.

@@ -95,11 +95,17 @@ RUST_LOG=info MODEL_NAME=qwen3.8-27b ./target/release/qwen-gateway
 consistent: `ornith10-9b` ⇄ `ornith10-9b-mlx-8bit`, `qwen3.6-35b-a3b` ⇄
 `qwen36-35b-a3b-mlx-ud3`, `qwen3.8-27b` ⇄ `qwen38-27b-mlx-5bit`.
 
-**Sampling is process-wide** (env at launch; per-request `temperature`/`top_p` are
-not applied). The shipped default is argmax + presence penalty 1.5 over 512 tokens
-— the Qwen card's *non-thinking* setting, and **wrong for reasoning and
-benchmarks**: it suppresses repeated tokens inside long `<think>` traces. For
-evals run the card's thinking-mode sampler:
+**Sampling**: env sets the process-wide defaults; a request may override
+`temperature`, `top_p`, `top_k`, `min_p` and `presence_penalty` (the last three
+are the usual llama.cpp/vLLM extensions). `stop` (string or array) is honoured:
+the worker holds back the stream tail until it knows a stop sequence is not
+starting there, so a stop split across tokens is caught and never emitted;
+`finish_reason` is `"stop"` for EOS/stop-string, `"length"` for `max_tokens`.
+Stop sequences apply to the answer, not to `reasoning_content`. The shipped
+default is argmax + presence penalty 1.5 over 512 tokens — the Qwen card's
+*non-thinking* setting, and **wrong for reasoning and benchmarks**: it
+suppresses repeated tokens inside long `<think>` traces. For evals run the
+card's thinking-mode sampler:
 ```zsh
 QWEN_PRESENCE_PENALTY=0 QWEN_TEMPERATURE=1.0 QWEN_TOP_P=0.95 QWEN_TOP_K=20 QWEN_MIN_P=0 \
   QWEN_MODEL=... uv run python worker.py
@@ -112,6 +118,26 @@ Vision (any model): put an `image_url` part in the message content. Reasoning:
 as `delta.reasoning_content`, the answer as `delta.content`.
 
 Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/ornith10-9b-mlx-8bit`.
+
+## Prompt cache (`QWEN_PROMPT_CACHE=1`, default off)
+
+One snapshot slot. After the prefill of a text-only prompt the worker keeps a
+copy of the whole cache list (the 16 full-attention KV caches plus the 48
+gated-delta-net recurrent states) together with the prompt ids minus the last
+one. The next request whose ids extend that snapshot — the typical multi-turn
+chat, or an exact regenerate — starts from a copy of it and prefills only the
+delta; anything else is a miss and prefills from scratch. There is no prefix
+trimming on purpose: the recurrent states cannot be rewound, and quantized KV
+keys are tuples that mlx-vlm's own `PromptCacheState` trim breaks on. So a
+shared system prompt followed by a *different* first user turn is a miss.
+Vision requests never touch the cache (neither hit nor snapshot).
+
+Measured on the 9B (q8 KV, ~640-token prompt, temperature 0): turn-2 TTFT
+0.23 s from the snapshot vs 2.25 s cold, output byte-identical to the cold run
+and to mlx-vlm's own `stream_generate`. The snapshot for a ~30-token prompt is
+~52 MB — almost all of it the constant recurrent state; the KV part grows at
+~16 KB/token (9B) / ~32 KB/token (27B). The worker logs `prompt cache HIT
+n/m tokens reused` / `MISS (common prefix k)` and the snapshot size per request.
 
 ## Context & memory
 
@@ -139,7 +165,9 @@ The 9B runs q8 at 128K with no `sudo sysctl` needed (256K ≈ 4 GB KV also fits)
 
 Oversized prompts are rejected with **HTTP 400 `context_length_exceeded`** before
 any allocation (no OOM). Image tokens are counted for real (a 4K image ≈ 10k
-tokens), so vision prompts are validated accurately, not undercounted.
+tokens), so vision prompts are validated accurately, not undercounted; the
+prepared inputs (image preprocessing included) are then fed straight into
+generation, so images are processed once, not twice.
 
 **Fitting the 35B / 27B long context on 32 GB.** Weights are ~16–18 GB; the default
 Metal wired limit (~21.8 GB) leaves almost nothing for KV + prefill activations,
@@ -149,9 +177,19 @@ so big prompts OOM. Three things keep it alive:
   (clamped to the cap — set it *below* the sysctl value, e.g. 27).
 - **Chunked prefill** (`QWEN_PREFILL_STEP=512`) bounds the prefill activation
   peak so a 50K-token prompt doesn't spike memory in one matmul.
-- **`mx.clear_cache()` runs after every generation**, so MLX's buffer pool from
-  one request never carries into the next request's prefill (the cause of the
-  second-request OOM). Verified: 56K-token prompt × 2 back-to-back, no OOM.
+- **Buffer pool** (`QWEN_CLEAR_CACHE`, default `1`; `QWEN_CACHE_LIMIT_GB`,
+  default `3`). Freed Metal buffers sit in MLX's allocator free-list, still
+  resident and counted against the wired working set; the list is size-bucketed
+  and by default unbounded, so request N's prefill activations stay parked
+  while request N+1 allocates fresh ones on top — the second-request OOM.
+  `QWEN_CLEAR_CACHE=1` drops the pool after every generation (verified:
+  56K-token prompt × 2 back-to-back, no OOM). `QWEN_CACHE_LIMIT_GB` is applied
+  at load via `mx.set_cache_limit`, so `QWEN_CLEAR_CACHE=0` keeps a bounded
+  pool across requests instead. Measured on the 9B, 9K-token prompt × 2:
+  clear=1 → footprint 11 GB, TTFT 31.3 / 29.8 s; clear=0 → footprint 14 GB
+  (pool pinned at the 3 GB limit), TTFT 30.7 / 29.2 s. Peak MLX memory
+  12.0 / 12.8 GB in both modes. The pool buys ~2% on TTFT for 3 GB of
+  footprint, hence the default stays `1`; the tight 35B/27B setups must keep it.
 
 The **9B-8bit** model needs none of this — ~10 GB resident leaves plenty of
 headroom on 32 GB.
@@ -189,4 +227,6 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` (off) |
 | `QWEN_PRESENCE_PENALTY` | worker | `1.5` (set `0` for reasoning/benchmarks) |
 | `QWEN_PRESENCE_CONTEXT` | worker | `512` |
+| `QWEN_PROMPT_CACHE` | worker | `0` (set `1` to reuse the previous prompt's prefill) |
+| `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` |
