@@ -266,12 +266,22 @@ def make_sampler(sampling, seed=None):
 CLEAR_CACHE = os.environ.get("QWEN_CLEAR_CACHE", "1") == "1"
 CACHE_LIMIT_GB = float(os.environ.get("QWEN_CACHE_LIMIT_GB", "3"))
 
-# Prompt cache (QWEN_PROMPT_CACHE=1): single-slot snapshot of the KV/recurrent
-# state taken after the prefill of the previous text-only prompt. The next
-# prompt that extends it (multi-turn chat) only prefills the delta. No prefix
-# trimming: the gated-delta-net layers keep a recurrent ArraysCache that cannot
-# be rewound, and quantized KV keys are tuples the library's trim mishandles.
+# Prompt cache (QWEN_PROMPT_CACHE=1): multi-slot prefix cache over text-only
+# prompts. Each entry holds the cache state after the prefill of prompt[:-1].
+# Full-attention KV can be cut to ANY prefix by slicing; the gated-delta-net
+# layers keep a recurrent state that cannot be rewound, so that one is
+# checkpointed during prefill (~52 MB each on the 9B: 24 layers x fp32
+# 32x128x128) at every QWEN_PROMPT_CACHE_STRIDE tokens and at the point where
+# the prompt diverged from the closest cached one (the likely end of a shared
+# system prompt / tool block). A new prompt resumes from the deepest checkpoint
+# inside its longest common prefix with any entry, so a different conversation
+# over the same system prompt, an edited history or interleaved sessions all
+# hit. Entries are LRU-evicted past QWEN_PROMPT_CACHE_GB (the newest always
+# stays). The library's own trim is never used (broken for quantized tuples).
 PROMPT_CACHE = os.environ.get("QWEN_PROMPT_CACHE", "0") == "1"
+PROMPT_CACHE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_GB", "3"))
+PROMPT_CACHE_STRIDE = int(os.environ.get("QWEN_PROMPT_CACHE_STRIDE", "2048"))
+PROMPT_CACHE_CKPTS = int(os.environ.get("QWEN_PROMPT_CACHE_CKPTS", "12"))
 
 # Compute dtype (QWEN_FP16=1): cast every bfloat16 parameter (quant scales/
 # biases, norms, embeddings, A_log...) to float16 after load. M1/M2-class GPUs
@@ -298,30 +308,40 @@ DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
 DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
 
 
-def _copy_cache(caches):
+def _copy_cache(caches, upto=None, states=None):
     """Fresh cache objects holding the same (immutable) arrays.
+
+    `upto` cuts the KV to that many tokens and `states` (a recurrent-state
+    checkpoint taken at the same position) replaces the ArraysCache contents.
 
     MLX `a[idx] = v` rebinds the Python array object in place, so two cache
     objects must not share array objects — slicing gives new ones over the same
     buffer (copy-on-write from there). ArraysCache entries are replaced whole
     by the model, so a new list is enough."""
     out = []
+    states = iter(states) if states is not None else None
     for c in caches:
         if hasattr(c, "cache"):                       # ArraysCache (recurrent state)
             n = type(c)(size=len(c.cache))
-            n.cache = list(c.cache)
-        elif isinstance(c.keys, tuple):               # QuantizedKVCache
+            n.cache = list(next(states)) if states is not None else list(c.cache)
+            out.append(n)
+            continue
+        end = c.offset if upto is None else upto
+        if isinstance(c.keys, tuple):                 # QuantizedKVCache
             n = type(c)(group_size=c.group_size, bits=c.bits)
-            n.keys = tuple(k[..., : c.offset, :] for k in c.keys)
-            n.values = tuple(v[..., : c.offset, :] for v in c.values)
-            n.offset = c.offset
+            n.keys = tuple(k[..., :end, :] for k in c.keys)
+            n.values = tuple(v[..., :end, :] for v in c.values)
         else:                                         # KVCache
             n = type(c)()
-            n.keys = c.keys[..., : c.offset, :]
-            n.values = c.values[..., : c.offset, :]
-            n.offset = c.offset
+            n.keys = c.keys[..., :end, :]
+            n.values = c.values[..., :end, :]
+        n.offset = end
         out.append(n)
     return out
+
+
+def _recurrent_states(caches):
+    return [list(c.cache) for c in caches if hasattr(c, "cache")]
 
 
 def _cache_arrays(caches):
@@ -335,13 +355,89 @@ def _cache_arrays(caches):
     return arrs
 
 
-class _Snapshot:
-    def __init__(self, ids, cache):
+def _lcp(a, b):
+    n = min(len(a), len(b))
+    if a[:n] == b[:n]:
+        return n
+    lo, hi = 0, n                                     # a[:lo] == b[:lo], a[:hi] != b[:hi]
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if a[:mid] == b[:mid]:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+class _Entry:
+    def __init__(self, ids, cache, ckpts):
         self.ids = ids
         self.cache = cache
+        self.ckpts = ckpts                            # pos -> recurrent states, pos < len(ids)
+        self.used = time.time()
         arrs = _cache_arrays(cache)
         mx.eval(arrs)
-        self.nbytes = sum(a.nbytes for a in arrs)
+        self.nbytes = sum(a.nbytes for a in arrs) + sum(
+            a.nbytes for st in ckpts.values() for layer in st for a in layer)
+
+    def best(self, ids):
+        """Deepest resumable position within the common prefix (one token is
+        always left to feed)."""
+        common = min(_lcp(self.ids, ids), len(ids) - 1)
+        pos = [p for p in (*self.ckpts, len(self.ids)) if p <= common]
+        return max(pos, default=0), common
+
+
+class _PrefixCache:
+    def __init__(self):
+        self.entries: list[_Entry] = []
+
+    def lookup(self, ids):
+        """-> (entry, resume position, longest common prefix over all entries)."""
+        hit, at, split = None, 0, 0
+        for e in self.entries:
+            pos, common = e.best(ids)
+            split = max(split, common)
+            if pos > at:
+                hit, at = e, pos
+        if hit is not None:
+            hit.used = time.time()
+        return hit, at, split
+
+    def restore(self, entry, at):
+        if at == len(entry.ids):
+            return _copy_cache(entry.cache)
+        return _copy_cache(entry.cache, upto=at, states=entry.ckpts[at])
+
+    def store(self, ids, cache, ckpts, parent=None, at=0):
+        if parent is not None:                        # inherit the shared part
+            ckpts = {**{p: s for p, s in parent.ckpts.items() if p <= at}, **ckpts}
+            if at == len(parent.ids) and at < len(ids):
+                ckpts[at] = _recurrent_states(parent.cache)
+        ckpts.pop(len(ids), None)
+        while len(ckpts) > PROMPT_CACHE_CKPTS:        # thin: drop the closest pair's left one
+            ps = sorted(ckpts)
+            gaps = [(ps[i + 1] - (ps[i - 1] if i else 0), ps[i]) for i in range(len(ps) - 1)]
+            ckpts.pop(min(gaps)[1])
+        new = _Entry(ids, _copy_cache(cache), ckpts)
+        # An entry that is a prefix of the new one is fully covered by it.
+        self.entries = [e for e in self.entries
+                        if not (len(e.ids) <= len(ids) and ids[: len(e.ids)] == e.ids
+                                and (len(e.ids) in ckpts or len(e.ids) == len(ids)))]
+        self.entries.append(new)
+        budget = PROMPT_CACHE_GB * 1024**3
+        while len(self.entries) > 1 and sum(e.nbytes for e in self.entries) > budget:
+            self.entries.remove(min(self.entries[:-1], key=lambda e: e.used))
+        return new
+
+
+def _slab(pos, left, cuts):
+    """Prefill slab at absolute position `pos`: shrunk with context (the
+    attention scratch scales with slab x context; a 2048 slab at 120K peaked at
+    26.7 GB on the 9B) and ended on the next checkpoint position."""
+    n = max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(pos, 1)))
+    nxt = min((c for c in cuts if c > pos), default=pos + n)
+    return min(n, left, nxt - pos)
 
 
 class _StopFilter:
@@ -387,7 +483,7 @@ class Engine:
         self._lock = threading.Lock()
         self._cancels: dict[str, threading.Event] = {}
         self._cancels_lock = threading.Lock()
-        self._snap: _Snapshot | None = None
+        self._pcache = _PrefixCache()
         self.draft = None
 
     def load(self):
@@ -443,6 +539,8 @@ class Engine:
             log.info("dflash drafter loaded: %s (%s, block %s, target layers %s)", DRAFT,
                      f"{DRAFT_BITS}-bit" if DRAFT_BITS else "fp16", DRAFT_BLOCK or "adaptive",
                      list(draft.config.target_layer_ids))
+        _tok = getattr(self.processor, "tokenizer", self.processor)
+        self._im_start = _tok.convert_tokens_to_ids("<|im_start|>")
         self.load_ms = int((time.time() - t) * 1000)
         if _WIRED_GB > 0:
             want = int(_WIRED_GB * 1024**3)
@@ -510,7 +608,8 @@ class Engine:
         return mx.array([ids]), ids, None, None, {}
 
     def _run(self, input_ids, pixel_values, mask, extra, prompt_cache, *,
-             max_tokens, sampling, thinking, on_prefilled=None):
+             max_tokens, sampling, thinking, on_prefilled=None, start=0, cuts=(),
+             on_ckpt=None):
         """Prefill + decode, yielding (token_id, text) pairs; sets self._finish.
 
         A trimmed-down generate_step/stream_generate from mlx-vlm 0.6.2. Kept
@@ -528,7 +627,8 @@ class Engine:
                 and sampling["temperature"] <= 0 and not sampling["presence_penalty"]
                 and thinking is None):
             yield from self._run_spec(input_ids, prompt_cache, max_tokens=max_tokens,
-                                      on_prefilled=on_prefilled)
+                                      on_prefilled=on_prefilled, start=start, cuts=cuts,
+                                      on_ckpt=on_ckpt)
             return
 
         model = self.model
@@ -566,19 +666,19 @@ class Engine:
                                if k != "inputs_embeds" and v is not None})
                 # Everything but the last prompt token goes through the cache in
                 # PREFILL_STEP slabs; the last token is the first decode step.
+                pos = start if pixel_values is None else \
+                    int(prompt_cache[model.language_model.model.fa_idx].offset)
                 while inputs_embeds.shape[1] > 1:
-                    # Shrink the slab as the context grows: the prefill attention
-                    # scratch scales with slab x context (a 2048 slab at 120K
-                    # peaked at 26.7 GB on the 9B), so cap slab*offset.
-                    offset = int(prompt_cache[model.language_model.model.fa_idx].offset)
-                    slab = max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(offset, 1)))
-                    n = min(slab, inputs_embeds.shape[1] - 1)
+                    n = _slab(pos, inputs_embeds.shape[1] - 1, cuts)
                     # skip_logits: no lm_head over the slab (248K vocab = ~12% of
                     # the per-token FLOPs); only the cache matters here.
                     model.language_model(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n],
                                          cache=prompt_cache, skip_logits=True, **kwargs)
                     quantize(prompt_cache)
                     mx.eval([c.state for c in prompt_cache])
+                    pos += n
+                    if pos in cuts and on_ckpt is not None:
+                        on_ckpt(pos, prompt_cache)
                     inputs_embeds = inputs_embeds[:, n:]
                     input_ids = input_ids[:, n:]
                     if CLEAR_CACHE:
@@ -618,7 +718,8 @@ class Engine:
             if seg:
                 yield None, seg
 
-    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, on_prefilled=None):
+    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, on_prefilled=None,
+                  start=0, cuts=(), on_ckpt=None):
         """Greedy text-only prefill + DFlash speculative decode; same protocol as _run.
 
         Prefill goes through the inner Qwen3_5Model directly so the hidden states
@@ -646,10 +747,9 @@ class Engine:
                 lm._rope_deltas = None
                 ctx = input_ids[:, :-1]
                 hidden = []
+                pos = start
                 while ctx.shape[1] > 0:
-                    offset = int(prompt_cache[lm.model.fa_idx].offset)
-                    slab = max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(offset, 1)))
-                    n = min(slab, ctx.shape[1])
+                    n = _slab(pos, ctx.shape[1], cuts)
                     sink = []
                     lm.model(ctx[:, :n], cache=prompt_cache, capture_layer_ids=layers,
                              hidden_sink=sink, gdn_sink=None)
@@ -658,6 +758,9 @@ class Engine:
                     while sum(t.shape[1] for t in hidden[:-1]) >= win:
                         hidden.pop(0)
                     mx.eval(h, [c.state for c in prompt_cache])
+                    pos += n
+                    if pos in cuts and on_ckpt is not None:
+                        on_ckpt(pos, prompt_cache)
                     ctx = ctx[:, n:]
                     if CLEAR_CACHE:
                         mx.clear_cache()
@@ -792,51 +895,59 @@ class Engine:
                 if p.HasField("seed"):
                     sampling["seed"] = p.seed
 
-                # Prompt cache: reuse the snapshot when the new prompt extends it
-                # (the snapshot holds ids[:-1] of the previous prompt, so an exact
-                # repeat is a hit too). Text-only conversations only.
+                # Prompt cache: resume from the deepest checkpoint shared with a
+                # cached prompt. Text-only conversations only.
                 from mlx_vlm.models.cache import make_prompt_cache
                 lm = self.model.language_model
-                snap = self._snap if (PROMPT_CACHE and not images) else None
-                reused = 0
-                if snap is not None and len(ids) > len(snap.ids) \
-                        and ids[: len(snap.ids)] == snap.ids:
-                    reused = len(snap.ids)
-                    prompt_cache = _copy_cache(snap.cache)
+                use_cache = PROMPT_CACHE and not images
+                parent, reused, split = self._pcache.lookup(ids) if use_cache else (None, 0, 0)
+                if parent is not None:
+                    prompt_cache = self._pcache.restore(parent, reused)
                     input_ids = mx.array([ids[reused:]])
                     # Text-only mRoPE continues from the cache offset with a zero
                     # delta; a preceding vision request leaves its own delta here.
                     lm._rope_deltas = mx.zeros((1, 1), dtype=mx.int32)
                     lm._position_ids = None
-                    log.info("id=%s prompt cache HIT: %d/%d tokens reused, prefilling %d",
-                             req.id, reused, prompt_tokens, prompt_tokens - reused)
+                    log.info("id=%s prompt cache HIT: %d/%d tokens reused (common prefix %d), "
+                             "prefilling %d", req.id, reused, prompt_tokens, split,
+                             prompt_tokens - reused)
                 else:
                     prompt_cache = make_prompt_cache(lm)
-                    if PROMPT_CACHE:
-                        common = 0
-                        if snap is not None:
-                            for a, b in zip(snap.ids, ids):
-                                if a != b:
-                                    break
-                                common += 1
-                        log.info("id=%s prompt cache MISS (common prefix %d, snapshot %d, "
-                                 "images=%d)", req.id, common,
-                                 len(snap.ids) if snap else 0, len(images))
+                    if use_cache:
+                        log.info("id=%s prompt cache MISS (common prefix %d, %d entries)",
+                                 req.id, split, len(self._pcache.entries))
+                cuts, ckpts = set(), {}
+                if use_cache:
+                    end = prompt_tokens - 1
+                    cuts = set(range(PROMPT_CACHE_STRIDE, end, PROMPT_CACHE_STRIDE))
+                    cuts.add(split)
+                    # Message boundaries are where prompts naturally diverge: the
+                    # end of the system/tools block (another conversation) and the
+                    # last two messages (regenerate / edited turn).
+                    starts = [i for i, t in enumerate(ids) if t == self._im_start]
+                    cuts.update(starts[1:2] + starts[-3:-1])
+                    cuts = {c for c in cuts if reused < c < end}
+
+                def checkpoint(pos, cache):
+                    ckpts[pos] = _recurrent_states(cache)
 
                 def snapshot(cache):
-                    if not PROMPT_CACHE or images:
+                    if not use_cache:
                         return
                     if any(getattr(c, "keys", 1) is None for c in cache):
                         return
-                    self._snap = _Snapshot(ids[:-1], _copy_cache(cache))
-                    log.info("id=%s prompt cache snapshot: %d tokens, %.1f MB",
-                             req.id, len(self._snap.ids), self._snap.nbytes / 1e6)
+                    e = self._pcache.store(ids[:-1], cache, ckpts, parent, reused)
+                    log.info("id=%s prompt cache store: %d tokens, %d checkpoints, %.1f MB "
+                             "(%d entries, %.1f MB total)", req.id, len(e.ids), len(e.ckpts),
+                             e.nbytes / 1e6, len(self._pcache.entries),
+                             sum(x.nbytes for x in self._pcache.entries) / 1e6)
 
                 stop = _StopFilter(list(p.stop))
                 answer_buf = []   # tools mode: buffer answer tokens, parse at the end
                 gen = self._run(input_ids, pixel_values, mask, extra, prompt_cache,
                                 max_tokens=max_tokens, sampling=sampling,
-                                thinking=thinking, on_prefilled=snapshot)
+                                thinking=thinking, on_prefilled=snapshot, start=reused,
+                                cuts=cuts, on_ckpt=checkpoint)
                 for tok, text in gen:
                     if cancel_ev.is_set():
                         gen.close()
