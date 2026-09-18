@@ -306,6 +306,15 @@ DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
 # ≈ fp16 acceptance (~60%), and the round gets cheaper (fp16 ~100 ms → 4-bit
 # ~85 ms): decode ×1.16–1.52 (fp16) → ×1.43–1.64 (4-bit).
 DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
+# Sampling / presence-penalty requests can take the speculative path too
+# (QWEN_DRAFT_SAMPLING=1, exact "sample-match" acceptance, see _run_spec), but a
+# round (draft ~15 ms + a 4..16-row verify, flat ~2.6x a 1-row step on M1: the
+# 8-bit qmm is dequantization-bound from 6 to 32 rows) costs about 3 plain
+# steps and acceptance drops with temperature: measured x1.1-1.2 on code and
+# x0.8 on prose (accept ~1.1/round), so it is off by default. Falling back to
+# plain decoding on low acceptance was tried and lost: a probe of 8 rounds
+# costs ~0.5 s, and the drafter restarts cold (~130 ms rounds, lower accept).
+DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 
 
 def _copy_cache(caches, upto=None, states=None):
@@ -623,10 +632,11 @@ class Engine:
                                              wired_limit)
         from mlx_vlm.tokenizer_utils import make_streaming_detokenizer
 
+        greedy = sampling["temperature"] <= 0 and not sampling["presence_penalty"]
         if (self.draft is not None and pixel_values is None and not extra
-                and sampling["temperature"] <= 0 and not sampling["presence_penalty"]
-                and thinking is None):
+                and thinking is None and (greedy or DRAFT_SAMPLING)):
             yield from self._run_spec(input_ids, prompt_cache, max_tokens=max_tokens,
+                                      sampling=sampling,
                                       on_prefilled=on_prefilled, start=start, cuts=cuts,
                                       on_ckpt=on_ckpt)
             return
@@ -718,7 +728,7 @@ class Engine:
             if seg:
                 yield None, seg
 
-    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, on_prefilled=None,
+    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, sampling, on_prefilled=None,
                   start=0, cuts=(), on_ckpt=None):
         """Greedy text-only prefill + DFlash speculative decode; same protocol as _run.
 
@@ -727,11 +737,21 @@ class Engine:
         into its per-token "verify" kernels (LanguageModel.__call__ does that
         whenever capture_layer_ids is set). Only the last sliding_window-1 prompt
         positions are kept: that is all the drafter's rotating cache looks at.
-        Each round then drafts a block, verifies it with one target forward,
-        keeps the longest matching prefix and rolls the caches back.
+        Each round then drafts a block (greedy), verifies it with one target
+        forward, keeps the longest matching prefix and rolls the caches back.
+
+        Sampling is exact ("sample-match"): every verify row is sampled from the
+        target distribution for that position - temperature/top-p/top-k/min-p and
+        the presence penalty over the history plus the drafts before the row -
+        and drafts are kept while they equal the target's own sample. Each
+        emitted token is therefore a target sample given an accepted prefix,
+        i.e. the same distribution as the plain loop; temperature only lowers
+        the acceptance rate.
         """
         from mlx_vlm.generate.common import generation_stream, wired_limit
-        from mlx_vlm.speculative.dflash import _dflash_rounds
+        from mlx_vlm.speculative.common import (_dflash_block_total, _record_speculative_round,
+                                                _speculative_walk)
+        from mlx_vlm.speculative.dflash import _dflash_next_block_size
         from mlx_vlm.tokenizer_utils import make_streaming_detokenizer
 
         model = self.model
@@ -741,6 +761,31 @@ class Engine:
         layers = list(draft.config.target_layer_ids)
         win = draft.config.sliding_window - 1
         argmax = lambda logits: mx.argmax(logits, axis=-1)
+        sampler = make_sampler(sampling, seed=sampling.get("seed"))
+        penalty = sampling["presence_penalty"]
+        pen_ctx = sampling["presence_context_size"]
+        dtype = input_ids.dtype
+        hist = input_ids[0, -1:]          # presence window: last prompt token + output
+
+        def pick(logits, fed):
+            """Target tokens for every row of `logits` (1, T, V); row i follows
+            hist + fed[:i+1]."""
+            nonlocal hist
+            logits = logits[0]
+            if penalty:
+                seen = mx.concatenate([hist, fed[1:]]) if fed.shape[0] > 1 else hist
+                base = seen.shape[0] - logits.shape[0] + 1
+                rows = []
+                for i in range(logits.shape[0]):
+                    idx = seen[max(0, base + i - pen_ctx): base + i]
+                    row = logits[i]
+                    row[idx] = row[idx] - penalty
+                    rows.append(row)
+                logits = mx.stack(rows)
+            if sampling["temperature"] <= 0:
+                return mx.argmax(logits, axis=-1)[None]
+            lp = logits.astype(mx.float32)
+            return sampler(lp - mx.logsumexp(lp, axis=-1, keepdims=True))[None]
 
         with wired_limit(model, [generation_stream]):
             with mx.stream(generation_stream):
@@ -769,7 +814,7 @@ class Engine:
                 out = lm(input_ids[:, -1:], cache=prompt_cache, capture_layer_ids=layers)
                 hidden.append(mx.concatenate(out.hidden_states, axis=-1))
                 hidden = mx.concatenate(hidden, axis=1)[:, -win:]
-                first = argmax(out.logits[:, -1, :])
+                first = pick(out.logits[:, -1:, :], hist)
                 mx.eval(first, hidden)
             first = first.item()
 
@@ -789,22 +834,51 @@ class Engine:
                 if ok:
                     yield first, detok.last_segment
                     n = 1
-                    if n < max_tokens:
-                        for tok, _ in _dflash_rounds(model, draft, prompt_cache, hidden,
-                                                     first_bonus=first, max_tokens=max_tokens,
-                                                     sampler=argmax,
-                                                     draft_block_size=DRAFT_BLOCK or None,
-                                                     token_dtype=input_ids.dtype):
+                    # mlx-vlm 0.6.2 `_dflash_rounds`, with `pick` as the target sampler.
+                    block_total = _dflash_block_total(draft, DRAFT_BLOCK or None)
+                    draft_cache = draft.reset(model)
+                    b, done = first, False
+                    acc, drafted = 0, 0
+                    while n < max_tokens and not done:
+                        bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
+                        if bs <= 1:
+                            break
+                        drafts = draft.draft_block(b, hidden, draft_cache, bs, argmax, dtype)
+                        mx.async_eval(drafts)
+                        with mx.stream(generation_stream):
+                            fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
+                            hist = mx.concatenate([hist, fed[0, :1]])
+                            out = lm(fed, cache=prompt_cache, capture_layer_ids=layers)
+                            hidden = mx.concatenate(out.hidden_states, axis=-1)
+                            targets = pick(out.logits, fed[0])
+                        mx.async_eval(targets, hidden)
+                        accepted, new = _speculative_walk(drafts, targets, max_tokens - n)
+                        _record_speculative_round(draft, accepted, bs - 1)
+                        acc, drafted = acc + accepted, drafted + bs - 1
+                        for tok in new:
                             if not emit(tok):
+                                done = True
                                 break
                             yield tok, detok.last_segment
                             n += 1
-                            if n % 256 == 0 and CLEAR_CACHE:
-                                mx.clear_cache()
-            al, dl = draft.accept_lens, draft.draft_lens
-            if al:
-                log.info("dflash: %d tokens in %d rounds, mean accept %.2f, accept rate %.0f%%",
-                         n, len(al), sum(al) / len(al), 100.0 * sum(al) / max(1, sum(dl)))
+                        if not new:
+                            break
+                        # The window holds every token fed so far; new[-1] joins
+                        # when it is fed as the next round's `b`.
+                        if len(new) > 1:
+                            hist = mx.concatenate([hist, mx.array(new[:-1], dtype=dtype)])
+                        hist = hist[-(pen_ctx + 32):]
+                        b = new[-1]
+                        if accepted < bs - 1:
+                            hidden = hidden[:, : accepted + 1, :]
+                            with mx.stream(generation_stream):
+                                lm.rollback_speculative_cache(prompt_cache, out.gdn_states,
+                                                              accepted, bs)
+                        if n % 256 < len(new) and CLEAR_CACHE:
+                            mx.clear_cache()
+            if max_tokens > 1:
+                log.info("dflash: %d tokens, accept rate %.0f%% (%d/%d drafts)",
+                         n, 100.0 * acc / max(1, drafted), acc, drafted)
             detok.finalize()
             seg = detok.last_segment
             if seg:
