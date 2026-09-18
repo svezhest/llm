@@ -125,23 +125,38 @@ Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/o
 
 ## Prompt cache (`QWEN_PROMPT_CACHE=1`, default off)
 
-One snapshot slot. After the prefill of a text-only prompt the worker keeps a
-copy of the whole cache list (the 16 full-attention KV caches plus the 48
-gated-delta-net recurrent states) together with the prompt ids minus the last
-one. The next request whose ids extend that snapshot — the typical multi-turn
-chat, or an exact regenerate — starts from a copy of it and prefills only the
-delta; anything else is a miss and prefills from scratch. There is no prefix
-trimming on purpose: the recurrent states cannot be rewound, and quantized KV
-keys are tuples that mlx-vlm's own `PromptCacheState` trim breaks on. So a
-shared system prompt followed by a *different* first user turn is a miss.
-Vision requests never touch the cache (neither hit nor snapshot).
+Multi-slot **prefix cache** for text-only prompts. Each entry is the cache
+state after the prefill of `prompt[:-1]`. Full-attention KV can be cut to any
+prefix by slicing; the gated-delta-net recurrent state cannot be rewound, so it
+is **checkpointed during prefill** (~52 MB each on the 9B): every
+`QWEN_PROMPT_CACHE_STRIDE` (2048) tokens, at message boundaries (end of the
+system/tools block, start of the last two messages) and at the point where the
+prompt diverged from the closest cached one. Prefill slabs are cut on those
+positions, so a checkpoint is free. A new prompt resumes from the deepest
+checkpoint inside its longest common prefix with any entry — so a different
+conversation over the same system prompt, an edited / regenerated turn and
+interleaved sessions all hit, not only a strict continuation. Entries are
+LRU-evicted past `QWEN_PROMPT_CACHE_GB` (3; the newest always stays), at most
+`QWEN_PROMPT_CACHE_CKPTS` (12) checkpoints each; an entry that is a prefix of a
+newer one is dropped. mlx-vlm's own trim is never used (broken for quantized KV
+tuples). Vision requests never touch the cache.
 
-Measured on the 9B (q8 KV, ~640-token prompt, temperature 0): turn-2 TTFT
-0.23 s from the snapshot vs 2.25 s cold, output byte-identical to the cold run
-and to mlx-vlm's own `stream_generate`. The snapshot for a ~30-token prompt is
-~52 MB — almost all of it the constant recurrent state; the KV part grows at
-~16 KB/token (9B) / ~32 KB/token (27B). The worker logs `prompt cache HIT
-n/m tokens reused` / `MISS (common prefix k)` and the snapshot size per request.
+Measured on Ornith-1.5 9B (fp16 KV, 7.5K-token system prompt, temperature 0),
+TTFT cold → cached, output byte-identical to the cold run in all five:
+
+| scenario | cold | cached |
+|---|---|---|
+| other conversation, same system prompt | 14.4 s | 0.20 s |
+| back to conversation A after B | 15.6 s | 0.31 s |
+| back to B | 16.5 s | 0.24 s |
+| edited last user message | 17.1 s | 0.22 s |
+
+(the old single-slot snapshot missed the first, second and fourth). No cost on
+a cold prefill (±noise over 3 A/B runs). Through the gateway, 4.3K prompt: 9.4 s
+→ 0.32 s. Resuming from a checkpoint changes slab boundaries, so logits move by
+fp16 noise — on a near-tie the greedy token can differ from a cold run (seen
+once with the DFlash path). Logs: `prompt cache HIT n/m tokens reused (common
+prefix k)` / `MISS` / `store: n tokens, c checkpoints, MB`.
 
 ## Context & memory
 
@@ -238,6 +253,8 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` (off) |
 | `QWEN_PRESENCE_PENALTY` | worker | `1.5` (set `0` for reasoning/benchmarks) |
 | `QWEN_PRESENCE_CONTEXT` | worker | `512` |
-| `QWEN_PROMPT_CACHE` | worker | `0` (set `1` to reuse the previous prompt's prefill) |
+| `QWEN_PROMPT_CACHE` | worker | `0` (set `1`: multi-slot prefix cache with recurrent-state checkpoints) |
+| `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — LRU budget, checkpoint stride, checkpoints per entry |
+| `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` |

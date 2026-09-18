@@ -112,6 +112,20 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 - **KV quantization costs speed** on this model: q8 vs fp16 cache at 32K is −12%
   prefill and −15% decode. The 9B runs fp16 KV (`QWEN_KV_BITS=0`, 32 KB/token,
   ~4 GB @128K). The 27B/35B keep q8/q4 for memory.
+- **Dead ends (measured 2026-09-18, don't retry blindly)**: (1) dequantize→fp16
+  GEMM instead of 8-bit qmm on prefill slabs: +12% on up/gate, −3% on down, ~5%
+  of MLP — the GPU is at ~8 TFLOPS either way. (2) MLX ≤0.32.2 has **no fused
+  SDPA for head_dim 256** (q_len > 8): the fallback materializes scores (8 GB at
+  slab 2048 × 120K — the real reason for `PREFILL_BUDGET`) and is 1.7–1.9×
+  slower than the fused kernel at equal FLOPs (232 vs 136 ms, slab 512 × 120K);
+  attention is ~half of a 120K prefill. MLX `main` lists 256 in the full kernel
+  — **bump mlx when it ships** (expect ~−20% prefill at 120K and slab 2048 at
+  any context); building main needs full Xcode (`metal` compiler; CLT lacks it).
+  (3) 8-bit qmm cost by rows on M1: M=2 ×1.17, M=4 ×1.97, M=6…32 flat ×2.6
+  (dequantization-bound) — a custom verify kernel has ≤1.3× headroom. (4) DFlash
+  with fallback to plain decoding on low acceptance: loses (8-round probe ≈0.5 s,
+  drafter restarts cold); spec for sampling requests is exact but only ×1.1–1.2
+  on code / ×0.8 on prose → opt-in `QWEN_DRAFT_SAMPLING=1`.
 - **Logits on prefill slabs are never computed** (MLX is lazy; `skip_logits=True`
   is passed anyway to keep the graph small) — don't expect a win there.
 - **DFlash speculative decoding** (`QWEN_DRAFT=weights/qwen35-9b-dflash`, the
@@ -152,13 +166,19 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   `finish_reason` `"length"` and pool clearing are ours. Output verified
   byte-identical to `stream_generate` at temperature 0. When bumping mlx-vlm,
   diff `generate/ar.py::generate_step` against `_run`.
-- **Prompt cache** (`QWEN_PROMPT_CACHE=1`): single `_Snapshot(ids[:-1], cache
-  copy)`. Hit = new ids strictly extend the snapshot ids; delta-only prefill from
-  a `_copy_cache` of it. Never trim; never share mx.array *objects* between cache
-  copies (`a[i] = v` rebinds the Python object in place — slice to get a new one,
-  buffers are copy-on-write). On a hit set `language_model._rope_deltas` to zeros
-  (text mRoPE continues from the cache offset; a previous vision request leaves
-  its own delta there). Text-only conversations only.
+- **Prompt cache** (`QWEN_PROMPT_CACHE=1`): multi-slot prefix cache
+  (`_PrefixCache`/`_Entry`). KV is sliceable to any prefix; the GDN recurrent
+  state is not, so `_run`/`_run_spec` checkpoint it (~52 MB, fp32 32×128×128 ×
+  24 layers on the 9B) at slab ends forced onto `cuts`: every 2048 tokens,
+  `<|im_start|>` boundaries (end of system block, last two messages) and the
+  divergence point from the closest entry. Hit = deepest checkpoint ≤ longest
+  common prefix with any entry (`_copy_cache(upto=, states=)`). LRU by
+  `QWEN_PROMPT_CACHE_GB` (3). Never trim with the library; never share mx.array
+  *objects* between cache copies (`a[i] = v` rebinds the Python object in place
+  — slice to get a new one, buffers are copy-on-write). On a hit set
+  `language_model._rope_deltas` to zeros (text mRoPE continues from the cache
+  offset; a previous vision request leaves its own delta there). Text-only.
+  7.5K shared system prompt, new conversation: TTFT 14.4 → 0.20 s, byte-identical.
 - **Buffer pool**: `QWEN_CLEAR_CACHE` (1) / `QWEN_CACHE_LIMIT_GB` (3, via
   `mx.set_cache_limit` at load). See README "Context & memory" for the numbers.
 - **Stop sequences**: `_StopFilter` in the chunk loop keeps back the longest
@@ -202,7 +222,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `2048`, auto-shrunk so slab×offset ≤ `QWEN_PREFILL_BUDGET` (2048×32K) |
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` |
 | `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `1.5` / `512` — **benchmarks/reasoning: `0`** + card sampler (see README) |
-| `QWEN_PROMPT_CACHE` | worker | `0` |
+| `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` / `2048` / `12` |
+| `QWEN_DRAFT_SAMPLING` | worker | `0` |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` (run under sudo) |
 
