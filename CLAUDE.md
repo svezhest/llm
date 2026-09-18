@@ -8,7 +8,7 @@ See `README.md` for run instructions, `BACKLOG.md` for the plan + phase status.
 
 ## Layout (repo root = `/Users/user/Projects/llm`)
 
-- `weights/` — model dirs (git-ignored). `qwen36-35b-a3b-mlx-ud3`, `ornith10-9b-mlx-8bit`,
+- `weights/` — model dirs (git-ignored). `qwen36-35b-a3b-mlx-ud3`, `ornith10-9b-mlx-8bit`, `ornith15-9b-mlx-8bit`,
   `qwen38-27b-mlx-5bit`. Pull with `scripts/hf_pull.sh <repo> <dir>` (resumable aria2c).
 - `src/proto/worker.proto` — gRPC contract (single source of truth; both sides codegen).
 - `src/gateway/` (Rust) — axum HTTP + tonic gRPC client + queue + metrics + tracing.
@@ -50,6 +50,15 @@ resource manager / `footprint` for the real size.
   finetune), dense VL, MLX 8-bit. ~10.4 GB. No wired-limit dance; 8-bit ≈ fp16 quality.
   Card benchmarks (SWE-bench 69%) are self-reported and implausibly high for the
   size — **evaluate empirically, don't trust the card**.
+- **`ornith15-9b-mlx-8bit`** — Ornith-1.5-9B (`ornith-ai/Ornith-1.5-9B-MLX-8bit`, the
+  official MLX quant). Same arch/quant as the 1.0 but the checkpoint is **text-only**:
+  no `vision_config`, no `visual.*` weights, no `preprocessor_config.json`. mlx-vlm
+  0.6.2 still builds the vision tower and `load_weights` is strict, so `Engine.load`
+  detects the missing `vision_config` and loads non-strictly (tower stays random;
+  image requests will not work — text only). ~9.5 GB, 11.6 GB loaded, ~36 tok/s.
+  Empirically (5 coding tasks, temp 0) 1.5 ≥ 1.0: same correctness on 4, and 1.0
+  leaked its thinking into the answer and hit the length cap on the SQL task while
+  1.5 answered cleanly. 1.5 thinks longer on trivial prompts (2–5× more tokens).
 - **`qwen38-27b-mlx-5bit`** — Qwen3.8-27B (lmstudio-community), dense hybrid VL,
   `model_type qwen3_5` like the 9B (64 layers, full attn every 4th, 4 KV heads,
   head_dim 256, native 256K). MLX 5-bit g64, ~18.1 GB. Run: `QWEN_KV_BITS=8` +
@@ -83,6 +92,42 @@ value is **routing + queue + metrics**. Plan: gateway keeps a registry
 `qwen3.6-35b-a3b`→:50051, `ornith-9b`→:50052). Since both current models are
 mlx-vlm, this is "pick one of N same-protocol workers", not multi-protocol —
 keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
+
+## Performance notes (measured 2026-09-11 on M1 Max 32 GB, Ornith-1.5 9B 8-bit)
+
+- **M1/M2 have no native bf16.** All our MLX quants store scales/norms/embeddings
+  in bf16, and an 8-bit `quantized_matmul` with ≥512 rows runs 4.5 TFLOPS in bf16
+  vs 7.8 in fp16. `QWEN_FP16=1` (default) casts the language model to fp16 after
+  load: prefill 8K 26.5→15.5 s, 32K 118→82 s (with the 2048 slab); decode
+  unchanged (bandwidth-bound, ~28 ms/token ≈ 9.5 GB / 400 GB/s). Verified
+  teacher-forced on 3.4K tokens: KL(bf16‖fp16)=0.0003, top-1 agreement 99.4%
+  (9B); 0.0004 / 99.2% on the 27B; 0.0019 / 98.8% on the 35B (3-bit MoE
+  amplifies the noise — still under a Q6 quant's 0.004; set `QWEN_FP16=0` if
+  fidelity beats speed there). 35B prefill 8K: 16.6 → 11.5 s, decode +4%.
+- **Prefill slab**: 512→2048 is +15% at 8K (only matters once fp16 makes the
+  GEMMs the bottleneck); 4096 gains nothing. `QWEN_CLEAR_CACHE` 0/1 is ±2%.
+  Slab shrinks with context (`PREFILL_BUDGET`) — a fixed 2048 at 120K peaked at
+  26.7 GB, the adaptive slab 19.9 GB at the same speed (453 s). Prefill is MLP-bound (~60%), GDN ~22%, attention ~7% at 2K, growing
+  to ~18% at 32K (quadratic). 260 tok/s at 120K, 500 at 8K.
+- **KV quantization costs speed** on this model: q8 vs fp16 cache at 32K is −12%
+  prefill and −15% decode. The 9B runs fp16 KV (`QWEN_KV_BITS=0`, 32 KB/token,
+  ~4 GB @128K). The 27B/35B keep q8/q4 for memory.
+- **Logits on prefill slabs are never computed** (MLX is lazy; `skip_logits=True`
+  is passed anyway to keep the graph small) — don't expect a win there.
+- **DFlash speculative decoding** (`QWEN_DRAFT=weights/qwen35-9b-dflash`, the
+  z-lab drafter for base Qwen3.5-9B, 2.5 GB bf16, quantized to 4-bit at load via
+  `QWEN_DRAFT_BITS`): works on Ornith with ~60% token acceptance (mean 3–5
+  accepted per round), output identical to plain greedy on the test prompts
+  (the target verifies, so drafter precision only moves speed). Decode
+  ×1.43–1.64 on the 5 coding tasks (33 → 47–53 tok/s), 63.7 tok/s end-to-end on
+  a code answer (67% acceptance), ~120 tok/s on trivially predictable text;
+  holds at 8K context. Tiny answers (<10 tokens) come out slower — first rounds
+  have no context. Block size: adaptive (default) ≥ fixed 4/8/16/32. The
+  ceiling is an MLX kernel property: 8-bit qmm with 4–16 rows costs ~2.3× a
+  1-row qmm on M1 (M=32 drops to 1.7×), so a 16-token verify forward ≈ 70 ms vs
+  30 ms decode; the 4-bit drafter block ≈ 15 ms (lm_head over 15 rows alone
+  9 ms). Greedy-only (temperature 0, presence_penalty 0), text-only, no
+  thinking budget, fp16 KV (`QWEN_KV_BITS=0`, else the drafter is ignored).
 
 ## Implementation notes worth keeping
 
@@ -151,8 +196,10 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty (set `json` for Loki) |
 | `LOG_LEVEL` | worker | `INFO` |
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
-| `QWEN_KV_BITS` | worker | `4` (35B); `8` for the 9B and 27B |
-| `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `512` |
+| `QWEN_KV_BITS` | worker | `4` (35B); `0` (fp16 cache) for the 9B; `8` for the 27B |
+| `QWEN_FP16` | worker | `1` (cast bf16→fp16 after load; `0` = bf16) |
+| `QWEN_DRAFT` / `QWEN_DRAFT_BLOCK` | worker | unset / `0` — DFlash drafter dir (`weights/qwen35-9b-dflash`), speculative decode for greedy text requests |
+| `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `2048`, auto-shrunk so slab×offset ≤ `QWEN_PREFILL_BUDGET` (2048×32K) |
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` |
 | `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `1.5` / `512` — **benchmarks/reasoning: `0`** + card sampler (see README) |
 | `QWEN_PROMPT_CACHE` | worker | `0` |
@@ -161,6 +208,18 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 
 ## Gotchas
 
+- **MLX random state is per thread, and mlx_lm's sampler is compiled against the
+  main thread's key.** gRPC handlers run in pool threads, so `mlx_lm.make_sampler`
+  there drew every token from the same never-advancing key: temperature 0.7
+  returned byte-identical answers, and `mx.random.seed` from the handler thread
+  changed nothing. The worker's own `make_sampler` (worker.py) reuses mlx_lm's
+  top_p/min_p/top_k filters but draws with an explicit per-request key split
+  per step; request `seed` feeds that key (reproducible, verified through the
+  gateway). Test any sampler change from a thread, not the REPL main thread.
+- DFlash greedy and the plain loop are greedy-equivalent only up to floating
+  point: the 16-row verify qmm and the 1-row decode qmm round differently, so
+  on a near-tie they can pick different tokens (seen at token ~40 of one
+  prompt: `temperature 0` vs `top_k 1`). Both are deterministic.
 - A scheme-less proxy variable (`HTTP_PROXY=localhost:<port>`) → breaks Python `requests`.
   Use `http://...` or `HF_HUB_OFFLINE=1` (models are cached locally in `weights/`).
 - mac-exporter needs root (`powermetrics`); load it as a `/Library/LaunchDaemons`

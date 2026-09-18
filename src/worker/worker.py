@@ -165,14 +165,26 @@ MAX_CONTEXT = int(os.environ.get("QWEN_MAX_CONTEXT", "131072"))
 # Only the full-attention layers' KVCache is quantized; the linear-attention
 # (Gated DeltaNet) layers keep a small constant recurrent state that mlx-lm's
 # maybe_quantize_kv_cache skips (ArraysCache has no to_quantized).
+# QWEN_KV_BITS=0 disables KV quantization (fp16 cache). Measured on the 9B at
+# 32K: fp16 KV beats q8 on BOTH prefill (72 vs 82 s) and decode (31.9 vs 27.3
+# tok/s) — quantized-cache prefill dequantizes per slab and the q8 decode SDPA
+# kernel is slower than the fp16 one — and it costs 32 KB/token (~4 GB @128K),
+# which the 9B (11.6 GB loaded) can afford. Keep q8 for the 27B (64 KB/token
+# fp16 = 8.4 GB @128K, over budget) and q4 for the 35B.
 KV_BITS = int(os.environ.get("QWEN_KV_BITS", "4"))
-KV_KWARGS = {"kv_bits": KV_BITS, "kv_group_size": 64, "quantized_kv_start": 5000}
+KV_KWARGS = {"kv_bits": KV_BITS or None, "kv_group_size": 64, "quantized_kv_start": 5000}
 
 # Chunked prefill: process a long prompt in N-token slabs instead of one giant
 # matmul, so the prefill ACTIVATION peak (not the KV cache) stays bounded. A 39K
 # prompt prefilled in one shot is what spiked us over the wired limit. 512 is a
 # safe slab; raise via QWEN_PREFILL_STEP if you have headroom and want speed.
-PREFILL_STEP = int(os.environ.get("QWEN_PREFILL_STEP", "512"))
+# Measured on the 9B (fp16): 512 -> 2048 is +15% prefill at 8K; beyond 2048 no
+# gain. The slab is shrunk automatically at long context (see _run) so that
+# slab * cache_offset <= QWEN_PREFILL_BUDGET (default 2048 * 32K); at 120K the
+# slab is ~512.
+PREFILL_STEP = int(os.environ.get("QWEN_PREFILL_STEP", "2048"))
+PREFILL_MIN_STEP = int(os.environ.get("QWEN_PREFILL_MIN_STEP", "256"))
+PREFILL_BUDGET = int(os.environ.get("QWEN_PREFILL_BUDGET", str(2048 * 32768)))
 
 # Metal wired-memory ceiling. Default on a 32 GB Mac is ~21.8 GB — barely above
 # the ~18 GB of 3-bit weights, leaving almost nothing for KV + prefill. Raise it
@@ -199,6 +211,46 @@ SAMPLING_KWARGS = {
     "presence_context_size": int(os.environ.get("QWEN_PRESENCE_CONTEXT", "512")),
 }
 
+
+def make_sampler(sampling, seed=None):
+    """Sampler with an explicit per-request RNG key (mlx_lm's is NOT thread-safe).
+
+    mlx_lm's make_sampler draws through a function compiled with
+    ``inputs=outputs=mx.random.state``; that captures the global key of the
+    thread that first traced it. MLX random state is per thread, so in the
+    gRPC handler threads the captured key is never advanced: every decode step
+    of every request drew with the same key, and temperature 0.7 returned
+    byte-identical answers across requests (``mx.random.seed`` from the handler
+    thread does not help either - same captured state). The top_p/min_p/top_k
+    filters are deterministic and reused; only the draw is ours, from a key
+    split per step. ``seed`` (request field) makes a request reproducible.
+    """
+    from mlx_lm.sample_utils import apply_min_p, apply_top_k, apply_top_p
+    temp = sampling["temperature"]
+    if temp <= 0:
+        return lambda lp: mx.argmax(lp, axis=-1)
+    top_p, min_p, top_k = sampling["top_p"], sampling["min_p"], sampling["top_k"]
+    filters = []
+    if 0 < top_p < 1.0:
+        filters.append(lambda x: apply_top_p(x, top_p))
+    if min_p != 0.0:
+        filters.append(lambda x: apply_min_p(x, min_p))
+    if top_k > 0:
+        filters.append(lambda x: apply_top_k(x, top_k))
+    if seed is None:
+        seed = int.from_bytes(os.urandom(4), "little")
+    key = mx.random.key(int(seed) & 0x7FFF_FFFF_FFFF_FFFF)
+    scale = 1.0 / temp
+
+    def sampler(lp):
+        nonlocal key
+        for f in filters:
+            lp = f(lp)
+        key, sub = mx.random.split(key)
+        return mx.random.categorical(lp * scale, key=sub)
+
+    return sampler
+
 # MLX buffer pool. Freed Metal buffers go to an allocator free-list ("cache")
 # instead of back to the OS; they stay resident and count against the wired
 # working set. The pool limit defaults to the memory limit, i.e. unbounded in
@@ -220,6 +272,30 @@ CACHE_LIMIT_GB = float(os.environ.get("QWEN_CACHE_LIMIT_GB", "3"))
 # trimming: the gated-delta-net layers keep a recurrent ArraysCache that cannot
 # be rewound, and quantized KV keys are tuples the library's trim mishandles.
 PROMPT_CACHE = os.environ.get("QWEN_PROMPT_CACHE", "0") == "1"
+
+# Compute dtype (QWEN_FP16=1): cast every bfloat16 parameter (quant scales/
+# biases, norms, embeddings, A_log...) to float16 after load. M1/M2-class GPUs
+# have no native bf16: an 8-bit quantized_matmul with M>=512 rows runs ~1.7x
+# slower in bf16 than fp16 (4.5 vs 7.8 TFLOPS on M1 Max), so PREFILL is ~1.5x
+# faster in fp16; decode (M=1, bandwidth-bound) is unchanged. Weights stay 8/5/3
+# bit; only the fp16 range (65504) is a risk. Verified on the 9B (teacher-forced,
+# 3.4K tokens): KL(bf16||fp16) = 0.0003, top-1 agreement 99.4% — below the
+# 8-bit weight quantization noise itself. QWEN_FP16=0 restores bf16.
+FP16 = os.environ.get("QWEN_FP16", "1") == "1"
+
+# Speculative decoding (QWEN_DRAFT=<dir>): a DFlash block-diffusion drafter
+# (e.g. z-lab/Qwen3.5-9B-DFlash, trained on the base Qwen3.5-9B — it also works
+# on the Ornith finetunes, ~60% token acceptance). Exact-greedy walk, so it is
+# only used when the request is greedy (temperature 0, no presence penalty),
+# text-only and without a thinking budget; otherwise the plain loop runs.
+# Output is identical to the plain greedy loop up to fp16 noise.
+DRAFT = os.environ.get("QWEN_DRAFT", "")
+DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
+# Drafter weight bits (0 = keep fp16). The target verifies every draft, so the
+# drafter's precision only moves acceptance, not output: measured 4-bit ≈ 8-bit
+# ≈ fp16 acceptance (~60%), and the round gets cheaper (fp16 ~100 ms → 4-bit
+# ~85 ms): decode ×1.16–1.52 (fp16) → ×1.43–1.64 (4-bit).
+DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
 
 
 def _copy_cache(caches):
@@ -312,6 +388,7 @@ class Engine:
         self._cancels: dict[str, threading.Event] = {}
         self._cancels_lock = threading.Lock()
         self._snap: _Snapshot | None = None
+        self.draft = None
 
     def load(self):
         from mlx_vlm import load
@@ -320,8 +397,52 @@ class Engine:
 
         log.info("loading model: %s", self.model_path)
         t = time.time()
-        self.model, self.processor = load(self.model_path)
         self.config = load_config(self.model_path)
+        if "vision_config" not in self.config:
+            # Text-only checkpoint of a VL architecture (e.g. Ornith-1.5-9B-MLX):
+            # mlx-vlm still builds the vision tower and load_weights() is strict,
+            # so let the tower keep its random init. Never used for text.
+            log.warning("no vision_config: text-only checkpoint, loading weights non-strictly "
+                        "(vision tower uninitialised; image requests will not work)")
+            import mlx.nn as nn
+            _orig = nn.Module.load_weights
+            nn.Module.load_weights = lambda m, w, strict=True: _orig(m, w, strict=False)
+            try:
+                self.model, self.processor = load(self.model_path)
+            finally:
+                nn.Module.load_weights = _orig
+        else:
+            self.model, self.processor = load(self.model_path)
+        if FP16:
+            lm = self.model.language_model
+            lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
+            mx.eval(lm.parameters())
+            log.info("language model cast to float16 (QWEN_FP16=1)")
+        if DRAFT and KV_KWARGS["kv_bits"] is not None:
+            # The spec loop never re-quantizes the cache and rollback trims a
+            # quantized cache wrongly; the drafter is only worth it on the 9B,
+            # which runs an fp16 cache anyway.
+            log.warning("QWEN_DRAFT ignored: speculative decoding needs QWEN_KV_BITS=0")
+        elif DRAFT:
+            from mlx_vlm.speculative.drafters import load_drafter, validate_drafter_compatibility
+            draft, kind = load_drafter(DRAFT)
+            if kind != "dflash":
+                raise RuntimeError(f"unsupported drafter kind {kind!r} (only dflash)")
+            validate_drafter_compatibility(self.model, draft, kind)
+            if FP16:
+                draft.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
+            if DRAFT_BITS:
+                import mlx.nn as nn
+                nn.quantize(draft, group_size=64, bits=DRAFT_BITS,
+                            class_predicate=lambda _p, m: isinstance(m, nn.Linear)
+                            and m.weight.shape[1] % 64 == 0)
+            mx.eval(draft.parameters())
+            if DRAFT_BLOCK:
+                draft.prefer_requested_block_size = True
+            self.draft = draft
+            log.info("dflash drafter loaded: %s (%s, block %s, target layers %s)", DRAFT,
+                     f"{DRAFT_BITS}-bit" if DRAFT_BITS else "fp16", DRAFT_BLOCK or "adaptive",
+                     list(draft.config.target_layer_ids))
         self.load_ms = int((time.time() - t) * 1000)
         if _WIRED_GB > 0:
             want = int(_WIRED_GB * 1024**3)
@@ -398,15 +519,21 @@ class Engine:
         else, (b) pre-tokenized vision inputs go in directly, and (c) the
         finish reason and buffer-pool clearing are under our control.
         """
-        from mlx_lm.sample_utils import make_logits_processors, make_sampler
+        from mlx_lm.sample_utils import make_logits_processors
         from mlx_vlm.generate.common import (generation_stream, maybe_quantize_kv_cache,
                                              wired_limit)
         from mlx_vlm.tokenizer_utils import make_streaming_detokenizer
 
+        if (self.draft is not None and pixel_values is None and not extra
+                and sampling["temperature"] <= 0 and not sampling["presence_penalty"]
+                and thinking is None):
+            yield from self._run_spec(input_ids, prompt_cache, max_tokens=max_tokens,
+                                      on_prefilled=on_prefilled)
+            return
+
         model = self.model
         tokenizer = getattr(self.processor, "tokenizer", self.processor)
-        sampler = make_sampler(temp=sampling["temperature"], top_p=sampling["top_p"],
-                               min_p=sampling["min_p"], top_k=sampling["top_k"])
+        sampler = make_sampler(sampling, seed=sampling.get("seed"))
         processors = make_logits_processors(
             presence_penalty=sampling["presence_penalty"] or None,
             presence_context_size=sampling["presence_context_size"])
@@ -440,9 +567,16 @@ class Engine:
                 # Everything but the last prompt token goes through the cache in
                 # PREFILL_STEP slabs; the last token is the first decode step.
                 while inputs_embeds.shape[1] > 1:
-                    n = min(PREFILL_STEP, inputs_embeds.shape[1] - 1)
+                    # Shrink the slab as the context grows: the prefill attention
+                    # scratch scales with slab x context (a 2048 slab at 120K
+                    # peaked at 26.7 GB on the 9B), so cap slab*offset.
+                    offset = int(prompt_cache[model.language_model.model.fa_idx].offset)
+                    slab = max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(offset, 1)))
+                    n = min(slab, inputs_embeds.shape[1] - 1)
+                    # skip_logits: no lm_head over the slab (248K vocab = ~12% of
+                    # the per-token FLOPs); only the cache matters here.
                     model.language_model(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n],
-                                         cache=prompt_cache, **kwargs)
+                                         cache=prompt_cache, skip_logits=True, **kwargs)
                     quantize(prompt_cache)
                     mx.eval([c.state for c in prompt_cache])
                     inputs_embeds = inputs_embeds[:, n:]
@@ -481,6 +615,95 @@ class Engine:
                 n += 1
             detok.finalize()
             seg = detok.last_segment   # property with side effects: read once
+            if seg:
+                yield None, seg
+
+    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, on_prefilled=None):
+        """Greedy text-only prefill + DFlash speculative decode; same protocol as _run.
+
+        Prefill goes through the inner Qwen3_5Model directly so the hidden states
+        of the drafter's target layers can be captured WITHOUT flipping the model
+        into its per-token "verify" kernels (LanguageModel.__call__ does that
+        whenever capture_layer_ids is set). Only the last sliding_window-1 prompt
+        positions are kept: that is all the drafter's rotating cache looks at.
+        Each round then drafts a block, verifies it with one target forward,
+        keeps the longest matching prefix and rolls the caches back.
+        """
+        from mlx_vlm.generate.common import generation_stream, wired_limit
+        from mlx_vlm.speculative.dflash import _dflash_rounds
+        from mlx_vlm.tokenizer_utils import make_streaming_detokenizer
+
+        model = self.model
+        lm = model.language_model
+        tokenizer = getattr(self.processor, "tokenizer", self.processor)
+        draft = self.draft
+        layers = list(draft.config.target_layer_ids)
+        win = draft.config.sliding_window - 1
+        argmax = lambda logits: mx.argmax(logits, axis=-1)
+
+        with wired_limit(model, [generation_stream]):
+            with mx.stream(generation_stream):
+                lm._rope_deltas = None
+                ctx = input_ids[:, :-1]
+                hidden = []
+                while ctx.shape[1] > 0:
+                    offset = int(prompt_cache[lm.model.fa_idx].offset)
+                    slab = max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(offset, 1)))
+                    n = min(slab, ctx.shape[1])
+                    sink = []
+                    lm.model(ctx[:, :n], cache=prompt_cache, capture_layer_ids=layers,
+                             hidden_sink=sink, gdn_sink=None)
+                    h = mx.concatenate(sink, axis=-1)
+                    hidden.append(h)
+                    while sum(t.shape[1] for t in hidden[:-1]) >= win:
+                        hidden.pop(0)
+                    mx.eval(h, [c.state for c in prompt_cache])
+                    ctx = ctx[:, n:]
+                    if CLEAR_CACHE:
+                        mx.clear_cache()
+                if on_prefilled is not None:
+                    on_prefilled(prompt_cache)
+                out = lm(input_ids[:, -1:], cache=prompt_cache, capture_layer_ids=layers)
+                hidden.append(mx.concatenate(out.hidden_states, axis=-1))
+                hidden = mx.concatenate(hidden, axis=1)[:, -win:]
+                first = argmax(out.logits[:, -1, :])
+                mx.eval(first, hidden)
+            first = first.item()
+
+            detok = make_streaming_detokenizer(self.processor)
+            self._finish = "length"
+            n = 0
+
+            def emit(tok):
+                if tokenizer.stopping_criteria(tok):
+                    self._finish = "stop"
+                    return False
+                detok.add_token(tok)
+                return True
+
+            if max_tokens > 0:
+                ok = emit(first)
+                if ok:
+                    yield first, detok.last_segment
+                    n = 1
+                    if n < max_tokens:
+                        for tok, _ in _dflash_rounds(model, draft, prompt_cache, hidden,
+                                                     first_bonus=first, max_tokens=max_tokens,
+                                                     sampler=argmax,
+                                                     draft_block_size=DRAFT_BLOCK or None,
+                                                     token_dtype=input_ids.dtype):
+                            if not emit(tok):
+                                break
+                            yield tok, detok.last_segment
+                            n += 1
+                            if n % 256 == 0 and CLEAR_CACHE:
+                                mx.clear_cache()
+            al, dl = draft.accept_lens, draft.draft_lens
+            if al:
+                log.info("dflash: %d tokens in %d rounds, mean accept %.2f, accept rate %.0f%%",
+                         n, len(al), sum(al) / len(al), 100.0 * sum(al) / max(1, sum(dl)))
+            detok.finalize()
+            seg = detok.last_segment
             if seg:
                 yield None, seg
 
@@ -567,7 +790,7 @@ class Engine:
                 if p.HasField("presence_penalty"):
                     sampling["presence_penalty"] = p.presence_penalty
                 if p.HasField("seed"):
-                    mx.random.seed(p.seed)
+                    sampling["seed"] = p.seed
 
                 # Prompt cache: reuse the snapshot when the new prompt extends it
                 # (the snapshot holds ids[:-1] of the previous prompt, so an exact
