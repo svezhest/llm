@@ -1,4 +1,5 @@
 mod api;
+mod journal;
 mod logging;
 mod metrics;
 mod pb;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub client: Client,
     pub metrics: metrics_exporter_prometheus::PrometheusHandle,
     pub model_name: String,
+    pub journal: Option<journal::Journal>,
 }
 
 #[tokio::main]
@@ -37,7 +39,11 @@ async fn main() -> anyhow::Result<()> {
         client,
         metrics: metrics_handle,
         model_name: env::var("MODEL_NAME").unwrap_or_else(|_| "qwen3.6-35b-a3b".into()),
+        journal: journal::Journal::from_env()?,
     };
+    if state.journal.is_some() {
+        info!(path = %env::var("GATEWAY_JOURNAL").unwrap_or_default(), "request journal on");
+    }
 
     let metrics_state = state.clone();
     let app = Router::new()

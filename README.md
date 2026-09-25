@@ -243,6 +243,7 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `MAX_QUEUE` | gateway | `32` |
 | `MODEL_NAME` | gateway | `qwen3.6-35b-a3b` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
+| `GATEWAY_JOURNAL` | gateway | unset — path of a JSONL journal: one line per request, `{ts, id, request, response}`; `request` is the body as sent, `response` the chat.completion (streamed ones assembled, `"stream": true`) |
 | `LOG_LEVEL` | worker | `INFO` |
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
 | `QWEN_KV_BITS` | worker | `4` (35B); `0` = fp16 cache for the 9B, `8` for the 27B |

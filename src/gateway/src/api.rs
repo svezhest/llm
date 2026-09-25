@@ -2,6 +2,7 @@ use std::convert::Infallible;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
+    body::Bytes,
     extract::State,
     http::StatusCode,
     response::sse::{Event as SseEvent, Sse},
@@ -183,10 +184,20 @@ fn now_unix() -> u64 {
 
 // ---- handlers -------------------------------------------------------------
 
-pub async fn chat_completions(
-    State(st): State<AppState>,
-    Json(req): Json<ChatRequest>,
-) -> Response {
+pub async fn chat_completions(State(st): State<AppState>, body: Bytes) -> Response {
+    // Parsed by hand (not the Json extractor) so the journal gets the body as it came.
+    let req: ChatRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            let status = if e.classify() == serde_json::error::Category::Data {
+                StatusCode::UNPROCESSABLE_ENTITY
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            return (status, Json(json!({"error": {"message": e.to_string(), "type": "invalid_request"}})))
+                .into_response();
+        }
+    };
     let admit = match st.pool.try_admit() {
         Some(p) => p,
         None => {
@@ -199,9 +210,9 @@ pub async fn chat_completions(
     let model = req.model.clone().unwrap_or_else(|| st.model_name.clone());
 
     if req.stream {
-        stream_response(st, admit, id, model, pbreq).await.into_response()
+        stream_response(st, admit, id, model, pbreq, body).await.into_response()
     } else {
-        json_response(st, admit, id, model, pbreq).await.into_response()
+        json_response(st, admit, id, model, pbreq, body).await.into_response()
     }
 }
 
@@ -239,6 +250,7 @@ async fn stream_response(
     id: String,
     model: String,
     pbreq: pb::Request,
+    body: Bytes,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     let body = async_stream::stream! {
         let inflight = st.pool.acquire_inflight().await;
@@ -250,6 +262,8 @@ async fn stream_response(
         let created = now_unix();
         let mut ttft_done = false;
         let mut first_role = true;
+        // Only for the journal: the whole answer, assembled from the chunks.
+        let mut acc = Acc::default();
 
         let mut client = st.client.clone();
         match client.generate(pbreq).await {
@@ -258,6 +272,7 @@ async fn stream_response(
                 loop {
                     match stream.message().await {
                         Ok(Some(ev)) => {
+                            if st.journal.is_some() { acc.add(&ev); }
                             if let Some(sse) = event_to_sse(&id, &model, created, ev,
                                                             &mut ttft_done, &start, &mut first_role) {
                                 yield Ok(sse);
@@ -267,6 +282,7 @@ async fn stream_response(
                         Err(e) => {
                             warn!(error = %e, "worker stream error");
                             metrics::counter!("qwen_errors_total", "kind" => "stream").increment(1);
+                            acc.err = Some(("stream".into(), e.to_string()));
                             yield Ok(SseEvent::default().data(
                                 json!({"error": {"message": e.to_string()}}).to_string()));
                             break;
@@ -276,6 +292,7 @@ async fn stream_response(
             }
             Err(e) => {
                 metrics::counter!("qwen_errors_total", "kind" => "rpc").increment(1);
+                acc.err = Some(("rpc".into(), e.to_string()));
                 yield Ok(SseEvent::default().data(
                     json!({"error": {"message": e.to_string()}}).to_string()));
             }
@@ -284,6 +301,11 @@ async fn stream_response(
         metrics::histogram!("qwen_request_duration_seconds").record(start.elapsed().as_secs_f64());
         metrics::counter!("qwen_requests_total", "status" => "ok").increment(1);
         guard.armed = false;   // completed cleanly -> guard drop frees slots, no cancel
+        if let Some(j) = &st.journal {
+            let mut resp = acc.response(&id, &model, created);
+            resp["stream"] = json!(true);
+            j.write(&id, &body, &resp);
+        }
         yield Ok(SseEvent::default().data("[DONE]"));
         drop(guard);
     };
@@ -359,6 +381,7 @@ async fn json_response(
     id: String,
     model: String,
     pbreq: pb::Request,
+    body: Bytes,
 ) -> Response {
     let inflight = st.pool.acquire_inflight().await;
     let mut guard = ReqGuard {
@@ -368,42 +391,27 @@ async fn json_response(
     let start = Instant::now();
     let created = now_unix();
 
-    let mut content = String::new();
-    let mut reasoning = String::new();
-    let mut finish = "stop".to_string();
-    let mut usage = pb::Usage::default();
-    let mut tool_calls: Vec<pb::ToolCall> = vec![];
-
+    let mut acc = Acc::default();
     let mut client = st.client.clone();
-    let result = match client.generate(pbreq).await {
+    match client.generate(pbreq).await {
         Ok(resp) => {
             let mut stream = resp.into_inner();
-            let mut err: Option<(String, String)> = None;
             while let Ok(Some(ev)) = stream.message().await {
-                match ev.kind {
-                    Some(pb::event::Kind::Token(t)) => {
-                        if t.thinking { reasoning.push_str(&t.text); }
-                        else { content.push_str(&t.text); }
-                    }
-                    Some(pb::event::Kind::Done(d)) => {
-                        tool_calls = d.tool_calls;
-                        finish = d.finish;
-                        if let Some(u) = d.usage { usage = u; }
-                    }
-                    Some(pb::event::Kind::Error(e)) => { err = Some((e.kind, e.msg)); }
-                    _ => {}
-                }
+                acc.add(&ev);
             }
-            err
         }
-        Err(e) => Some(("rpc".into(), e.to_string())),
-    };
+        Err(e) => acc.err = Some(("rpc".into(), e.to_string())),
+    }
 
     metrics::histogram!("qwen_request_duration_seconds").record(start.elapsed().as_secs_f64());
     guard.armed = false;
     drop(guard);
 
-    if let Some((kind, msg)) = result {
+    let out = acc.response(&id, &model, created);
+    if let Some(j) = &st.journal {
+        j.write(&id, &body, &out);
+    }
+    if let Some((kind, _)) = &acc.err {
         metrics::counter!("qwen_requests_total", "status" => "error").increment(1);
         // Client errors (e.g. oversized prompt) → 400; worker faults → 502.
         let status = if kind == "context_length_exceeded" {
@@ -411,37 +419,72 @@ async fn json_response(
         } else {
             StatusCode::BAD_GATEWAY
         };
-        return (status, Json(json!({"error": {"message": msg, "type": kind}})))
-            .into_response();
+        return (status, Json(out)).into_response();
     }
     metrics::counter!("qwen_requests_total", "status" => "ok").increment(1);
+    Json(out).into_response()
+}
 
-    let mut msg = serde_json::Map::new();
-    msg.insert("role".into(), json!("assistant"));
-    if tool_calls.is_empty() {
-        msg.insert("content".into(), json!(content));
-    } else {
-        // OpenAI: content is null when the assistant makes tool calls.
-        msg.insert("content".into(),
-                   if content.is_empty() { Value::Null } else { json!(content) });
-        msg.insert("tool_calls".into(), json!(tool_calls_json(&tool_calls)));
+/// Worker events of one request folded into a chat.completion.
+#[derive(Default)]
+struct Acc {
+    content: String,
+    reasoning: String,
+    finish: Option<String>,
+    usage: pb::Usage,
+    tool_calls: Vec<pb::ToolCall>,
+    err: Option<(String, String)>,
+}
+
+impl Acc {
+    fn add(&mut self, ev: &pb::Event) {
+        match &ev.kind {
+            Some(pb::event::Kind::Token(t)) => {
+                if t.thinking { self.reasoning.push_str(&t.text); }
+                else { self.content.push_str(&t.text); }
+            }
+            Some(pb::event::Kind::Done(d)) => {
+                self.tool_calls = d.tool_calls.clone();
+                self.finish = Some(d.finish.clone());
+                if let Some(u) = &d.usage { self.usage = u.clone(); }
+            }
+            Some(pb::event::Kind::Error(e)) => { self.err = Some((e.kind.clone(), e.msg.clone())); }
+            _ => {}
+        }
     }
-    if !reasoning.is_empty() {
-        msg.insert("reasoning_content".into(), json!(reasoning));
+
+    fn response(&self, id: &str, model: &str, created: u64) -> Value {
+        if let Some((kind, msg)) = &self.err {
+            return json!({"error": {"message": msg, "type": kind}});
+        }
+        let mut msg = serde_json::Map::new();
+        msg.insert("role".into(), json!("assistant"));
+        if self.tool_calls.is_empty() {
+            msg.insert("content".into(), json!(self.content));
+        } else {
+            // OpenAI: content is null when the assistant makes tool calls.
+            msg.insert("content".into(),
+                       if self.content.is_empty() { Value::Null } else { json!(self.content) });
+            msg.insert("tool_calls".into(), json!(tool_calls_json(&self.tool_calls)));
+        }
+        if !self.reasoning.is_empty() {
+            msg.insert("reasoning_content".into(), json!(self.reasoning));
+        }
+        let u = &self.usage;
+        json!({
+            "id": id,
+            "object": "chat.completion",
+            "created": created,
+            "model": model,
+            "choices": [{"index": 0, "message": Value::Object(msg),
+                         "finish_reason": self.finish.as_deref().unwrap_or("stop")}],
+            "usage": {
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.gen_tokens,
+                "total_tokens": u.prompt_tokens + u.gen_tokens,
+            },
+        })
     }
-    Json(json!({
-        "id": id,
-        "object": "chat.completion",
-        "created": created,
-        "model": model,
-        "choices": [{"index": 0, "message": Value::Object(msg), "finish_reason": finish}],
-        "usage": {
-            "prompt_tokens": usage.prompt_tokens,
-            "completion_tokens": usage.gen_tokens,
-            "total_tokens": usage.prompt_tokens + usage.gen_tokens,
-        },
-    }))
-    .into_response()
 }
 
 // ---- misc endpoints -------------------------------------------------------
