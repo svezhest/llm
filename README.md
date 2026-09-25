@@ -245,6 +245,7 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | `16384` — generation limit when the request has neither `max_tokens` nor `max_completion_tokens` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
 | `GATEWAY_JOURNAL` | gateway | unset — path of a JSONL journal: one line per request, `{ts, id, request, response}`; `request` is the body as sent, `response` the chat.completion (streamed ones assembled, `"stream": true`) |
+| `GATEWAY_OPENAI_DEFAULTS` | gateway | unset — `1`: a request without `temperature` / `top_p` / `presence_penalty` gets the OpenAI API defaults `1.0` / `1.0` / `0` instead of the worker's (greedy, presence penalty 1.5) |
 | `LOG_LEVEL` | worker | `INFO` |
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
 | `QWEN_KV_BITS` | worker | `4` (35B); `0` = fp16 cache for the 9B, `8` for the 27B |

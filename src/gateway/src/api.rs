@@ -130,6 +130,13 @@ fn default_max_tokens() -> u32 {
     })
 }
 
+/// GATEWAY_OPENAI_DEFAULTS=1: omitted temperature/top_p/presence_penalty take the OpenAI API
+/// defaults (1.0 / 1.0 / 0) instead of the worker's (greedy, presence penalty 1.5).
+fn openai_defaults() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("GATEWAY_OPENAI_DEFAULTS").map(|s| s == "1").unwrap_or(false))
+}
+
 fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
     let mut images = vec![];
     let mut messages = vec![];
@@ -154,14 +161,16 @@ fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
         Some(v) => v.to_string(),
         None => String::new(),
     };
+    let openai = openai_defaults();
     pb::Request {
         id: id.to_string(),
         messages,
         images,
         params: Some(pb::Params {
             max_tokens: req.max_tokens.or(req.max_completion_tokens).unwrap_or_else(default_max_tokens),
-            temperature: req.temperature.unwrap_or(-1.0), // -1 => worker default
-            top_p: req.top_p.unwrap_or(0.0),            // 0 => worker default
+            // -1 / 0 => worker default
+            temperature: req.temperature.unwrap_or(if openai { 1.0 } else { -1.0 }),
+            top_p: req.top_p.unwrap_or(if openai { 1.0 } else { 0.0 }),
             enable_thinking: req.enable_thinking,
             thinking_budget: req.thinking_budget,
             seed: req.seed,
@@ -170,7 +179,7 @@ fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
             tool_choice,
             top_k: req.top_k,
             min_p: req.min_p,
-            presence_penalty: req.presence_penalty,
+            presence_penalty: req.presence_penalty.or(if openai { Some(0.0) } else { None }),
         }),
     }
 }
