@@ -242,6 +242,7 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `GATEWAY_ADDR` | gateway | `0.0.0.0:8080` |
 | `MAX_QUEUE` | gateway | `32` |
 | `MODEL_NAME` | gateway | `qwen3.6-35b-a3b` |
+| `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | `16384` — generation limit when the request has neither `max_tokens` nor `max_completion_tokens` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
 | `GATEWAY_JOURNAL` | gateway | unset — path of a JSONL journal: one line per request, `{ts, id, request, response}`; `request` is the body as sent, `response` the chat.completion (streamed ones assembled, `"stream": true`) |
 | `LOG_LEVEL` | worker | `INFO` |

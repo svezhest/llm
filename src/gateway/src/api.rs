@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::sync::OnceLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
@@ -117,6 +118,18 @@ fn flatten_content(v: &Value) -> (String, Vec<String>) {
     }
 }
 
+/// Generation limit when the request sets neither max_tokens nor max_completion_tokens
+/// (GATEWAY_DEFAULT_MAX_TOKENS, default 16384; OpenAI itself only bounds such requests by the context).
+fn default_max_tokens() -> u32 {
+    static LIMIT: OnceLock<u32> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("GATEWAY_DEFAULT_MAX_TOKENS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16384)
+    })
+}
+
 fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
     let mut images = vec![];
     let mut messages = vec![];
@@ -146,7 +159,7 @@ fn build_pb_request(id: &str, req: &ChatRequest) -> pb::Request {
         messages,
         images,
         params: Some(pb::Params {
-            max_tokens: req.max_tokens.or(req.max_completion_tokens).unwrap_or(1024),
+            max_tokens: req.max_tokens.or(req.max_completion_tokens).unwrap_or_else(default_max_tokens),
             temperature: req.temperature.unwrap_or(-1.0), // -1 => worker default
             top_p: req.top_p.unwrap_or(0.0),            // 0 => worker default
             enable_thinking: req.enable_thinking,
