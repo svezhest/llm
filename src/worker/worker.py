@@ -336,10 +336,10 @@ def _copy_cache(caches, upto=None, states=None):
             out.append(n)
             continue
         end = c.offset if upto is None else upto
-        if isinstance(c.keys, tuple):                 # QuantizedKVCache
+        if isinstance(c.keys, (tuple, list)):         # QuantizedKVCache (list after its tree_map resize)
             n = type(c)(group_size=c.group_size, bits=c.bits)
-            n.keys = tuple(k[..., :end, :] for k in c.keys)
-            n.values = tuple(v[..., :end, :] for v in c.values)
+            n.keys = type(c.keys)(k[..., :end, :] for k in c.keys)
+            n.values = type(c.values)(v[..., :end, :] for v in c.values)
         else:                                         # KVCache
             n = type(c)()
             n.keys = c.keys[..., :end, :]
@@ -360,7 +360,7 @@ def _cache_arrays(caches):
             arrs += [a for a in c.cache if a is not None]
         else:
             for x in (c.keys, c.values):
-                arrs += list(x) if isinstance(x, tuple) else [x]
+                arrs += list(x) if isinstance(x, (tuple, list)) else [x]
     return arrs
 
 
