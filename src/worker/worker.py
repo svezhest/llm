@@ -16,6 +16,7 @@ Run:
 """
 import argparse
 import base64
+import bisect
 import functools
 import json
 import logging
@@ -384,16 +385,21 @@ class _Entry:
         self.cache = cache
         self.ckpts = ckpts                            # pos -> recurrent states, pos < len(ids)
         self.used = time.time()
+        self.quantized = any(isinstance(getattr(c, "keys", None), (tuple, list)) for c in cache)
         arrs = _cache_arrays(cache)
         mx.eval(arrs)
         self.nbytes = sum(a.nbytes for a in arrs) + sum(
             a.nbytes for st in ckpts.values() for layer in st for a in layer)
 
-    def best(self, ids):
+    def best(self, ids, ends):
         """Deepest resumable position within the common prefix (one token is
-        always left to feed)."""
+        always left to feed). Only a slab end of the new prompt (`ends`) will
+        do: resuming anywhere else would cut the rest of the prefill
+        differently from a cold run. A quantized KV cut below the
+        quantization start would not match a cold run either."""
         common = min(_lcp(self.ids, ids), len(ids) - 1)
-        pos = [p for p in (*self.ckpts, len(self.ids)) if p <= common]
+        low = KV_KWARGS["quantized_kv_start"] if self.quantized else 0
+        pos = [p for p in (*self.ckpts, len(self.ids)) if low <= p <= common and p in ends]
         return max(pos, default=0), common
 
 
@@ -401,11 +407,11 @@ class _PrefixCache:
     def __init__(self):
         self.entries: list[_Entry] = []
 
-    def lookup(self, ids):
+    def lookup(self, ids, ends):
         """-> (entry, resume position, longest common prefix over all entries)."""
         hit, at, split = None, 0, 0
         for e in self.entries:
-            pos, common = e.best(ids)
+            pos, common = e.best(ids, ends)
             split = max(split, common)
             if pos > at:
                 hit, at = e, pos
@@ -440,13 +446,35 @@ class _PrefixCache:
         return new
 
 
+def _step(pos):
+    # shrunk with context: the attention scratch scales with slab x context
+    # (a 2048 slab at 120K peaked at 26.7 GB on the 9B)
+    return max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(pos, 1)))
+
+
 def _slab(pos, left, cuts):
-    """Prefill slab at absolute position `pos`: shrunk with context (the
-    attention scratch scales with slab x context; a 2048 slab at 120K peaked at
-    26.7 GB on the 9B) and ended on the next checkpoint position."""
-    n = max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(pos, 1)))
+    """Prefill slab at absolute position `pos`, ended on the next cut."""
+    n = _step(pos)
     nxt = min((c for c in cuts if c > pos), default=pos + n)
     return min(n, left, nxt - pos)
+
+
+def _bounds(ids, mark):
+    """Slab ends for the prefill of ids[:-1]: a message start (`mark`) at least
+    PREFILL_MIN_STEP past the previous end, else a full step.
+
+    The kernels round differently depending on the slab shape (split-K in the
+    thin fp16 matmuls, SDPA over a key length that is not a multiple of the key
+    block), so the same prompt cut into other slabs gives other logits, and a
+    greedy answer can flip. Every end here depends only on the tokens before
+    it, so a prompt resumed from a cached prefix is cut exactly as a cold one
+    and the output does not depend on what the prompt cache holds."""
+    out, last = [], 0
+    for i in range(1, len(ids) - 1):
+        if i - last >= _step(last) or (ids[i] == mark and i - last >= PREFILL_MIN_STEP):
+            out.append(i)
+            last = i
+    return out
 
 
 class _StopFilter:
@@ -974,7 +1002,10 @@ class Engine:
                 from mlx_vlm.models.cache import make_prompt_cache
                 lm = self.model.language_model
                 use_cache = PROMPT_CACHE and not images
-                parent, reused, split = self._pcache.lookup(ids) if use_cache else (None, 0, 0)
+                bounds = [] if images else _bounds(ids, self._im_start)
+                ends = set(bounds) | {prompt_tokens - 1}
+                parent, reused, split = (self._pcache.lookup(ids, ends) if use_cache
+                                         else (None, 0, 0))
                 if parent is not None:
                     prompt_cache = self._pcache.restore(parent, reused)
                     input_ids = mx.array([ids[reused:]])
@@ -990,20 +1021,26 @@ class Engine:
                     if use_cache:
                         log.info("id=%s prompt cache MISS (common prefix %d, %d entries)",
                                  req.id, split, len(self._pcache.entries))
-                cuts, ckpts = set(), {}
+                keep, ckpts = set(), {}
                 if use_cache:
                     end = prompt_tokens - 1
-                    cuts = set(range(PROMPT_CACHE_STRIDE, end, PROMPT_CACHE_STRIDE))
-                    cuts.add(split)
+                    want = set(range(PROMPT_CACHE_STRIDE, end, PROMPT_CACHE_STRIDE))
+                    want.add(split)
                     # Message boundaries are where prompts naturally diverge: the
-                    # end of the system/tools block (another conversation) and the
-                    # last two messages (regenerate / edited turn).
+                    # end of the system/tools block (another conversation), the
+                    # last two messages (regenerate / edited turn) and the reply
+                    # (the next turn appends to it).
                     starts = [i for i, t in enumerate(ids) if t == self._im_start]
-                    cuts.update(starts[1:2] + starts[-3:-1])
-                    cuts = {c for c in cuts if reused < c < end}
+                    want.update(starts[1:2] + starts[-3:])
+                    # checkpoints only at slab ends: the closest one at or below
+                    for c in want:
+                        k = bisect.bisect_right(bounds, c)
+                        if k and reused < bounds[k - 1] < end:
+                            keep.add(bounds[k - 1])
 
                 def checkpoint(pos, cache):
-                    ckpts[pos] = _recurrent_states(cache)
+                    if pos in keep:
+                        ckpts[pos] = _recurrent_states(cache)
 
                 def snapshot(cache):
                     if not use_cache:
@@ -1021,7 +1058,7 @@ class Engine:
                 gen = self._run(input_ids, pixel_values, mask, extra, prompt_cache,
                                 max_tokens=max_tokens, sampling=sampling,
                                 thinking=thinking, on_prefilled=snapshot, start=reused,
-                                cuts=cuts, on_ckpt=checkpoint)
+                                cuts=set(bounds), on_ckpt=checkpoint)
                 for tok, text in gen:
                     if cancel_ev.is_set():
                         gen.close()

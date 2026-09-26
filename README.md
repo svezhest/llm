@@ -128,12 +128,17 @@ Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/o
 Multi-slot **prefix cache** for text-only prompts. Each entry is the cache
 state after the prefill of `prompt[:-1]`. Full-attention KV can be cut to any
 prefix by slicing; the gated-delta-net recurrent state cannot be rewound, so it
-is **checkpointed during prefill** (~52 MB each on the 9B): every
-`QWEN_PROMPT_CACHE_STRIDE` (2048) tokens, at message boundaries (end of the
-system/tools block, start of the last two messages) and at the point where the
-prompt diverged from the closest cached one. Prefill slabs are cut on those
-positions, so a checkpoint is free. A new prompt resumes from the deepest
-checkpoint inside its longest common prefix with any entry — so a different
+is **checkpointed during prefill** (~52 MB each on the 9B) at the slab end
+closest below: every `QWEN_PROMPT_CACHE_STRIDE` (2048) tokens, message
+boundaries (end of the system/tools block, start of the last two messages and
+of the reply) and the point where the prompt diverged from the closest cached
+one. Slab ends depend only on the tokens before them (a message start at least
+`QWEN_PREFILL_MIN_STEP` past the previous end, else a full step), with or
+without the cache: the kernels round differently for another slab shape
+(split-K in thin matmuls, SDPA key blocks), and cache-dependent cuts used to
+flip greedy answers. A new prompt resumes from the deepest checkpoint that is
+also its own slab end inside its longest common prefix with any entry, so the
+output is bitwise the same as a cold run whatever the cache holds. A different
 conversation over the same system prompt, an edited / regenerated turn and
 interleaved sessions all hit, not only a strict continuation. Entries are
 LRU-evicted past `QWEN_PROMPT_CACHE_GB` (3; the newest always stays), at most
@@ -153,9 +158,9 @@ TTFT cold → cached, output byte-identical to the cold run in all five:
 
 (the old single-slot snapshot missed the first, second and fourth). No cost on
 a cold prefill (±noise over 3 A/B runs). Through the gateway, 4.3K prompt: 9.4 s
-→ 0.32 s. Resuming from a checkpoint changes slab boundaries, so logits move by
-fp16 noise — on a near-tie the greedy token can differ from a cold run (seen
-once with the DFlash path). Logs: `prompt cache HIT n/m tokens reused (common
+→ 0.32 s. First-token logprobs checked bitwise equal (9K-token prompt, q4 KV
+past 5K): cold, `QWEN_PROMPT_CACHE=0`, exact repeat, next turn, same system
+prompt only. Logs: `prompt cache HIT n/m tokens reused (common
 prefix k)` / `MISS` / `store: n tokens, c checkpoints, MB`.
 
 ## Context & memory
