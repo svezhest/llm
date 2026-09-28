@@ -477,6 +477,16 @@ def _bounds(ids, mark):
     return out
 
 
+def _eos_ids(config):
+    """Все eos_token_id из конфига модели: верхний (уже с generation_config) и text_config."""
+    ids = set()
+    for c in (config, config.get("text_config") or {}):
+        e = c.get("eos_token_id")
+        if e is not None:
+            ids.update(e if isinstance(e, list) else [e])
+    return ids
+
+
 class _StopFilter:
     """Holds back the tail of the stream that could be the start of a stop
     sequence, so a stop split across chunks is still caught and never emitted."""
@@ -577,6 +587,11 @@ class Engine:
                      f"{DRAFT_BITS}-bit" if DRAFT_BITS else "fp16", DRAFT_BLOCK or "adaptive",
                      list(draft.config.target_layer_ids))
         _tok = getattr(self.processor, "tokenizer", self.processor)
+        # mlx-vlm стопит только на верхнем eos_token_id; у qwen их два
+        # (<|im_end|> и <|endoftext|>), стоп на всех — как в HF/vLLM
+        crit = _tok.stopping_criteria
+        crit.eos_token_ids = sorted(set(crit.eos_token_ids or []) | _eos_ids(self.config))
+        log.info("eos token ids: %s", crit.eos_token_ids)
         self._im_start = _tok.convert_tokens_to_ids("<|im_start|>")
         self.load_ms = int((time.time() - t) * 1000)
         if _WIRED_GB > 0:
