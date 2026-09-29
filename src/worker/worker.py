@@ -30,6 +30,7 @@ from concurrent import futures
 
 import grpc
 import mlx.core as mx
+from mlx_vlm.tokenizer_utils import BPEStreamingDetokenizer, _remove_space
 
 import worker_pb2 as pb
 import worker_pb2_grpc as pb_grpc
@@ -487,6 +488,32 @@ def _eos_ids(config):
     return ids
 
 
+class _BPEDetokenizer(BPEStreamingDetokenizer):
+    """BPE-детокенизатор mlx-vlm 0.6.2, но байты, не складывающиеся в UTF-8,
+    заменяются на U+FFFD (как tokenizer.decode в HF и детокенизатор mlx-lm),
+    а не роняют генерацию. Недописанный символ по-прежнему ждёт следующих
+    байтов: слово сбрасывается только на токене, начинающемся с пробела."""
+
+    def _flush(self):
+        text = bytearray(self._byte_decoder[c] for c in self._unflushed).decode(
+            "utf-8", errors="replace")
+        self.text += text if self.text or not self.trim_space else _remove_space(text)
+
+    def add_token(self, token, skip_special_token_ids=()):
+        if token in skip_special_token_ids:
+            return
+        v = self.tokenmap[token]
+        if self._byte_decoder[v[0]] == 32:
+            self._flush()
+            self._unflushed = v
+        else:
+            self._unflushed += v
+
+    def finalize(self):
+        self._flush()
+        self._unflushed = ""
+
+
 class _StopFilter:
     """Holds back the tail of the stream that could be the start of a stop
     sequence, so a stop split across chunks is still caught and never emitted."""
@@ -593,6 +620,9 @@ class Engine:
         crit.eos_token_ids = sorted(set(crit.eos_token_ids or []) | _eos_ids(self.config))
         log.info("eos token ids: %s", crit.eos_token_ids)
         self._im_start = _tok.convert_tokens_to_ids("<|im_start|>")
+        d = self.processor.detokenizer
+        if type(d) is BPEStreamingDetokenizer:
+            self.processor.detokenizer = _BPEDetokenizer(_tok, trim_space=d.trim_space)
         self.load_ms = int((time.time() - t) * 1000)
         if _WIRED_GB > 0:
             want = int(_WIRED_GB * 1024**3)
@@ -767,7 +797,8 @@ class Engine:
                 y, logprobs = next_y, next_lp
                 n += 1
             detok.finalize()
-            seg = detok.last_segment   # property with side effects: read once
+            # не last_segment: он придерживает текст, кончающийся на U+FFFD
+            seg = detok.text[detok.offset:]
             if seg:
                 yield None, seg
 
@@ -923,7 +954,7 @@ class Engine:
                 log.info("dflash: %d tokens, accept rate %.0f%% (%d/%d drafts)",
                          n, 100.0 * acc / max(1, drafted), acc, drafted)
             detok.finalize()
-            seg = detok.last_segment
+            seg = detok.text[detok.offset:]
             if seg:
                 yield None, seg
 
