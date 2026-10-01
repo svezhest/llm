@@ -12,7 +12,7 @@ See `README.md` for run instructions, `BACKLOG.md` for the plan + phase status.
   `qwen38-27b-mlx-5bit`. Pull with `scripts/hf_pull.sh <repo> <dir>` (resumable aria2c).
 - `src/proto/worker.proto` — gRPC contract (single source of truth; both sides codegen).
 - `src/gateway/` (Rust) — axum HTTP + tonic gRPC client + queue + metrics + tracing.
-  `src/{main,api,pool,metrics,worker_client,logging,pb}.rs`.
+  `src/{main,api,request,pool,metrics,worker_client,logging,journal,pb}.rs`.
 - `src/worker/` (Python) — grpcio server, mlx-vlm; load + generate only. Own uv project.
 - `src/exporter/` (Rust) — `powermetrics` → `/metrics` (GPU/ANE/watts; needs root).
 - `deploy/` — docker-compose (prometheus/grafana/loki/promtail) + launchd plists.
@@ -182,27 +182,75 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 - **Buffer pool**: `QWEN_CLEAR_CACHE` (1) / `QWEN_CACHE_LIMIT_GB` (3, via
   `mx.set_cache_limit` at load). See README "Context & memory" for the numbers.
 - **Stop sequences**: `_StopFilter` in the chunk loop keeps back the longest
-  stream tail that is a prefix of a stop string; applied to answer text only.
+  stream tail that is a prefix of a stop string; earliest match wins; applied to the
+  whole output, reasoning included (vLLM's detokenizer does the same).
 - **OOM avoidance on 32 GB** (all three needed for the 35B at long context):
   `sudo sysctl iogpu.wired_limit_mb=28672` (kernel cap) + `QWEN_WIRED_LIMIT_GB=27`
   (MLX wired limit, clamped to cap) + `QWEN_PREFILL_STEP=512` (chunked prefill
   bounds the activation peak) + `mx.clear_cache()` after every generation (else
   request N's buffer pool carries into request N+1's prefill → the second-request
   OOM). Verified: 56K-token prompt × 2 back-to-back, no OOM.
-- **Reasoning budget = native mlx-vlm `thinking_budget` kwarg** (forces `\n</think>`
+- **Reasoning budget = native mlx-vlm `ThinkingBudgetCriteria`** (forces `\n</think>`
   into the token stream; KV cache stays consistent). Do NOT hand-splice + restart
-  generation — the earlier crutch corrupted answers and is removed. Also pass
-  `enable_thinking`; the chat template *pre-opens* `<think>` so generation STARTS
-  inside the think block (literal `<think>` never emitted; `_GenState` seeds
-  `in_thinking=enable_thinking`). Thinking → `delta.reasoning_content`, answer → `delta.content`.
+  generation — the earlier crutch corrupted answers and is removed. Thinking on/off
+  is the template's `enable_thinking` (gateway: chat_template_kwargs / reasoning_effort
+  / GATEWAY_THINKING; unset = template default = thinking). The template *pre-opens*
+  `<think>`, so the worker decides "generation starts inside reasoning" from the
+  prompt ids (last of `<think>`/`</think>` is an open one), not from a flag.
+  `_GenState` = vLLM's `qwen3` reasoning parser (see README).
 - **Prompt-length validation** (worker, before generation → `context_length_exceeded`
   → HTTP 400): count image tokens via `mlx_vlm.utils.prepare_inputs(...).input_ids.shape[-1]`,
   NOT a text-only `encode` — a 4096×2645 image expands to ~10644 tokens (text-only
   would say ~15). **No text fallback for vision** (would undercount → OOM); raises
   `prompt_count_failed` instead. Text-only uses a plain `encode`.
-- **Tool calls**: Qwen3 emits them inside `<tool_call>…</tool_call>`; this MLX build
-  uses the **Hermes-XML** payload form (`<function=NAME><parameter=KEY>V</parameter>…`),
-  not JSON. Parser handles both.
+- **Tool calls**: Qwen3.5 emits `<tool_call>\n<function=NAME>\n<parameter=K>\nV\n
+  </parameter>\n</function>\n</tool_call>`. `parse_tool_calls` is a port of vLLM's
+  `qwen3_xml` (vllm/parser/qwen3.py + parser_engine coercion, v0.30): one newline
+  trimmed each side, types only from the tool schema (`coerce_to_schema_type` order
+  null > integer > number > boolean > object/array > string, else json.loads, else
+  the string). No `json.loads` of schema-less values — `"false"` stays a string.
+- **Behaviour reference = vLLM v0.30** (`vllm serve` + card recipe: qwen3_xml tool
+  parser, qwen3 reasoning parser). Anything vLLM does that we don't is a 400, never
+  "accept and ignore"; vLLM-unknown fields are ignored + logged (as vLLM, which logs
+  at debug). Request checks: gateway `request.rs` (field table, SamplingParams ranges,
+  tool_choice rules) + worker `Check` RPC (template, context length, grammars, images
+  on text-only) before queueing → 400 for streams too.
+- **Sampler** = vLLM order on float32: penalties (presence/frequency over generated
+  tokens, repetition over prompt+output; `_Penalties`) → temperature → min_p → top_k →
+  top_p → draw (`make_sampler`, per-request key). Greedy stays argmax of
+  `logits - logsumexp` in the model dtype — byte-identical to the old path. The old
+  512-token presence window is gone (vLLM has none).
+- **Structured output / constrained tools** = **llguidance** (already an mlx-vlm 0.6.2
+  dependency; Metal bitmask kernel; no grammar compile step, mask ~0.05–0.2 ms on the
+  248K vocab; best JSON Schema coverage). `_Guide` masks logits before the sampler, so
+  seed/sampler semantics are unchanged. The mask for token n+1 needs token n, so the
+  guided loop does **not** queue the next step ahead (a step-ahead + separate masked
+  sample measured 18 tok/s and degrading; mask-in-step is 30 vs 31 plain). Thinking:
+  grammar activates on `</think>` (or a `<tool_call>` ending reasoning), before it only
+  EOS is masked. JSON whitespace free (llguidance's lexer skips whitespace, so a
+  `whitespace_pattern` does NOT bound runs — `QWEN_JSON_MAX_WS` masks by leading
+  whitespace per token instead). Tool grammars (`_grammar`, Lark): one rule per
+  function in xgrammar's `qwen_3_coder` layout, params in schema order, string values
+  lazy raw text up to `\n</parameter>\n`, others `%json`. llguidance treats every
+  added token as special: `<tool_call>` goes by id (`<[248058]>`), and free-text
+  regexes can never produce it. DFlash is skipped for grammar requests.
+  `required` = call first, no text before (parallel_tool_calls false: one call, nothing
+  after); named = exactly that call; checked against xgrammar 0.2.8's own
+  `get_model_structural_tag("qwen_3_coder")`. Schemas go through `_strict`
+  (xgrammar strict_mode: no extra keys unless the schema allows them).
+- **Request shaping as vLLM's renderer**: `developer` → `system` + all system messages
+  merged at the front (`_developer_to_system`, renderers/hf.py); chat_template_kwargs:
+  `chat_template`/`tokenize` → 400, keys not in the template dropped (logged), the
+  request's `add_generation_prompt`/`continue_final_message` win (gateway). `Check`
+  never 502s on a worker exception: template errors → 400, anything else → 500.
+  No tools: `<tool_call>` + all text after it is cut from the answer (vLLM's parser).
+- **Key order**: gateway serde_json has `preserve_order` — tools, tool_call history,
+  response_format reach the worker in the client's order (sorted before: a tools
+  prompt changed under the client's feet; schema property order is what the grammar
+  emits).
+- **Model id** = the worker's weights dir name (Health.model, Start.model, Check.model);
+  `model` in a request must be it or a GATEWAY_SERVED_MODEL_NAMES alias, else 404
+  (vLLM). `MODEL_NAME` is gone.
 - **Gateway `ReqGuard`** (Drop) owns both semaphore permits — frees them, refreshes
   the queue/in-flight gauges, AND fires `Worker.Cancel` on client disconnect. Without
   owning the permits there, `queue_depth` stuck non-zero after a mid-stream disconnect.
@@ -212,7 +260,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | var | where | default |
 |---|---|---|
 | `QWEN_MODEL` | worker | `weights/qwen36-35b-a3b-mlx-ud3` (repo-relative) |
-| `WORKER_ADDR` / `GATEWAY_ADDR` / `MAX_QUEUE` / `MODEL_NAME` | gateway | `127.0.0.1:50051` / `0.0.0.0:8080` / `32` / `qwen3.6-35b-a3b` |
+| `WORKER_ADDR` / `GATEWAY_ADDR` / `MAX_QUEUE` | gateway | `127.0.0.1:50051` / `0.0.0.0:8080` / `32` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty (set `json` for Loki) |
 | `LOG_LEVEL` | worker | `INFO` |
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
@@ -221,7 +269,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_DRAFT` / `QWEN_DRAFT_BLOCK` | worker | unset / `0` — DFlash drafter dir (`weights/qwen35-9b-dflash`), speculative decode for greedy text requests |
 | `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `2048`, auto-shrunk so slab×offset ≤ `QWEN_PREFILL_BUDGET` (2048×32K) |
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` |
-| `QWEN_PRESENCE_PENALTY` / `QWEN_PRESENCE_CONTEXT` | worker | `1.5` / `512` — **benchmarks/reasoning: `0`** + card sampler (see README) |
+| `QWEN_PRESENCE_PENALTY` / `QWEN_FREQUENCY_PENALTY` / `QWEN_REPETITION_PENALTY` | worker | `1.5` / `0` / `1.0` — **benchmarks/reasoning: presence `0`** + card sampler (see README) |
+| `QWEN_JSON_MAX_WS` | worker | `0` (off) — whitespace-run cap in response_format answers |
+| `GATEWAY_OPENAI_DEFAULTS` / `GATEWAY_THINKING` / `GATEWAY_SERVED_MODEL_NAMES` / `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | unset / unset (`on`/`off` forces) / unset / `0` (= rest of context) — see README |
 | `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` / `2048` / `12` |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
@@ -241,6 +291,11 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   point: the 16-row verify qmm and the 1-row decode qmm round differently, so
   on a near-tie they can pick different tokens (seen at token ~40 of one
   prompt: `temperature 0` vs `top_k 1`). Both are deterministic.
+- DFlash's verify block is adaptive on acceptance stats kept across requests, so the
+  same greedy request can round differently (near-tie flip) between runs: seen once
+  in 2026-10 (first pair differed, the next 5 identical). A fixed `QWEN_DRAFT_BLOCK`
+  should avoid it (not verified); the plain loop is unaffected.
+- The gateway waits for the worker's Health before it listens: no worker = no 8080.
 - A scheme-less proxy variable (`HTTP_PROXY=localhost:<port>`) → breaks Python `requests`.
   Use `http://...` or `HF_HUB_OFFLINE=1` (models are cached locally in `weights/`).
 - mac-exporter needs root (`powermetrics`); load it as a `/Library/LaunchDaemons`

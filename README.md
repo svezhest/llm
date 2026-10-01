@@ -53,7 +53,7 @@ resident, no wired-limit tuning needed). The 35B and 27B are the heavier alterna
 1. **Worker** — run the 9B (override the built-in default 35B path via `QWEN_MODEL`):
    ```zsh
    cd src/worker
-   uv run --group proto bash gen_proto.sh    # once: codegen worker_pb2*.py
+   uv run --group proto bash gen_proto.sh    # once (and after a proto change): codegen worker_pb2*.py
    QWEN_MODEL=../../weights/ornith15-9b-mlx-8bit QWEN_KV_BITS=0 \
      uv run python worker.py                  # serves 127.0.0.1:50051
    # optional, greedy requests only: +DFlash speculative decoding (~1.4–1.6x decode)
@@ -63,13 +63,13 @@ resident, no wired-limit tuning needed). The 35B and 27B are the heavier alterna
 2. **Gateway** (after the worker logs "model loaded"):
    ```zsh
    cargo build --release
-   RUST_LOG=info MODEL_NAME=ornith10-9b ./target/release/qwen-gateway   # 0.0.0.0:8080
+   RUST_LOG=info ./target/release/qwen-gateway   # 0.0.0.0:8080
    ```
 
 3. **Call it** (OpenAI-compatible):
    ```zsh
    curl -N http://localhost:8080/v1/chat/completions -H 'content-type: application/json' -d '{
-     "model": "ornith10-9b", "stream": true,
+     "model": "ornith15-9b-mlx-8bit", "stream": true,
      "messages": [{"role":"user","content":"Привет! Кто ты?"}]
    }'
    ```
@@ -80,7 +80,6 @@ the Metal wired-limit bump first (once per boot, resets on reboot — see
 ```zsh
 sudo sysctl iogpu.wired_limit_mb=28672    # 28 GB cap (default ~21.8 GB)
 QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py   # q4 KV (default)
-# gateway: leave MODEL_NAME at its default qwen3.6-35b-a3b; call with that model name.
 ```
 
 **Qwen3.8-27B (5-bit)** — the strongest dense option; ~24 GB resident at 128K, so
@@ -91,25 +90,99 @@ cd src/worker
 QWEN_MODEL=../../weights/qwen38-27b-mlx-5bit QWEN_KV_BITS=8 \
   QWEN_WIRED_LIMIT_GB=27 QWEN_PREFILL_STEP=512 uv run python worker.py
 # gateway (after "model loaded"):
-RUST_LOG=info MODEL_NAME=qwen3.8-27b ./target/release/qwen-gateway
+RUST_LOG=info ./target/release/qwen-gateway
 ```
-`MODEL_NAME` is only the label the gateway answers to (`"model"` in requests and
-`/v1/models`); the worker's `QWEN_MODEL` path decides what's loaded. Keep the pair
-consistent: `ornith10-9b` ⇄ `ornith10-9b-mlx-8bit`, `qwen3.6-35b-a3b` ⇄
-`qwen36-35b-a3b-mlx-ud3`, `qwen3.8-27b` ⇄ `qwen38-27b-mlx-5bit`.
+The model id (`/v1/models`, `"model"` in every response) is the worker's weights
+dir name — `ornith15-9b-mlx-8bit`, `qwen38-27b-mlx-5bit`, … — reported by the worker
+itself (Health, and the Start of each generation), so it always names what is
+loaded; `/v1/models` is 503 while the worker is down. The request's `"model"` must
+be that id or a `GATEWAY_SERVED_MODEL_NAMES` alias, anything else is a 404 (see
+**model** below).
 
-**Sampling**: env sets the process-wide defaults; a request may override
-`temperature`, `top_p`, `top_k`, `min_p` and `presence_penalty` (the last three
-are the usual llama.cpp/vLLM extensions); `seed` makes a sampled request
-reproducible (same seed + params ⇒ same text). `stop` (string or array) is honoured:
-the worker holds back the stream tail until it knows a stop sequence is not
-starting there, so a stop split across tokens is caught and never emitted;
-`finish_reason` is `"stop"` for EOS/stop-string, `"length"` for `max_tokens`.
-Stop sequences apply to the answer, not to `reasoning_content`. The shipped
-default is argmax + presence penalty 1.5 over 512 tokens — the Qwen card's
-*non-thinking* setting, and **wrong for reasoning and benchmarks**: it
-suppresses repeated tokens inside long `<think>` traces. For evals run the
-card's thinking-mode sampler:
+**API behaviour = vLLM.** The reference is `vllm serve` (v0.30) with the card's
+recipe (`--tool-call-parser qwen3_xml --reasoning-parser qwen3`); where this gateway
+cannot do what vLLM does it says so with a 400 instead of ignoring the field.
+- **Sampling** (vLLM order, float32): penalties → temperature → min_p → top_k → top_p
+  (over the top_k survivors) → draw; temperature 0 = argmax, (0, 0.01) is raised to
+  0.01. `presence_penalty` / `frequency_penalty` are additive over all generated
+  tokens, `repetition_penalty` multiplicative over prompt + output. Ranges as vLLM
+  (400 otherwise): temperature [0, 2], top_p (0, 1] (`top_p: 0` is a 400), top_k ≥ -1,
+  min_p [0, 1], presence/frequency [-2, 2], repetition > 0, max_tokens ≥ 1. A request
+  that omits a field gets the worker env default (`GATEWAY_OPENAI_DEFAULTS=1`: vLLM's
+  defaults — T 1, top_p 1, top_k 0, min_p 0, penalties 0 / 1). `seed` makes a sampled
+  request reproducible (`-1` = none).
+- **Length**: `max_tokens` / `max_completion_tokens` (the latter wins) beyond what
+  the context leaves is a 400 with vLLM's message; omitted = the rest of the context
+  (`GATEWAY_DEFAULT_MAX_TOKENS` caps it if set).
+- **stop** (string or array): the earliest match wins, over the whole output —
+  reasoning included, as vLLM; a stop split across tokens is caught and never emitted.
+- **Reasoning**: no setting = the chat template's default, which for these models is
+  *thinking on*. `chat_template_kwargs: {"enable_thinking": false}`, `reasoning_effort`
+  (`"none"` = off, anything else = on; also passed to the template) or this gateway's
+  top-level `enable_thinking` set it; `GATEWAY_THINKING=on|off` forces it for every
+  request (and logs when it overrides one). Budget: `thinking_token_budget` (vLLM;
+  -1 = unlimited) or `thinking_budget` (0 = unlimited). The answer is split like
+  vLLM's `qwen3` parser: reasoning → `reasoning` (and `reasoning_content`, the older
+  name), no tags in either; no `</think>` at all → everything is reasoning and
+  `content` is null; `include_reasoning: false` drops it; a `<tool_call>` inside the
+  reasoning ends it (the call goes to the answer); with thinking off a stray `</think>`
+  is dropped from `content`. `usage.completion_tokens_details.reasoning_tokens` counts
+  the generated tokens before the token that ends the reasoning. History: an assistant
+  message's `reasoning` / `reasoning_content` goes back into the template.
+- **chat_template_kwargs**: `chat_template` / `tokenize` there are a 400 (vLLM's
+  message); keys the template does not use are ignored (logged), as vLLM;
+  `add_generation_prompt` / `continue_final_message` there are overridden by the
+  request's own fields (vLLM's `merge_kwargs`). A template error is a 400.
+- **Roles**: `developer` becomes `system` (this template does not know it), and all
+  system messages are merged into one at the front, `"\n\n"`-joined — vLLM's
+  renderers/hf.py.
+- **Tool calls**: parsed as vLLM's `qwen3_xml`: values lose exactly one leading and
+  one trailing newline; types come only from the tool's schema (a `"false"` string
+  parameter stays a string; a parameter not in the schema stays a string); content is
+  the text before the first call (null if empty), text after a call is dropped (logged);
+  a `<tool_call>` with no `<function=` is no call: it is dropped up to its `</tool_call>`
+  (logged) and the text before and after it stays `content`; a call cut off by `max_tokens` is still a call and `finish_reason`
+  is `tool_calls`. Without `tools` a `<tool_call>` in the answer is cut from `content`
+  together with everything after it (vLLM's parser runs anyway; no calls returned).
+  `tool_choice`: `"none"` keeps the tools in the prompt and returns no calls;
+  `"required"` / a named function / a `strict` tool are grammar-constrained as
+  xgrammar's `qwen_3_coder` structural tag (vLLM with VLLM_ENFORCE_STRICT_TOOL_CALLING):
+  declared names, parameters in schema order, required present, values by schema, no
+  keys beyond the schema's. `"required"`: the answer opens with a call — no text
+  before it (`content` null), text and more calls may follow; with
+  `parallel_tool_calls: false` exactly one call and nothing after it. A named function:
+  exactly that one call, nothing before or after; it finishes with `"stop"`, as in
+  vLLM. `"auto"`: `parallel_tool_calls: false` = at most one call. Reasoning stays free
+  in all modes (the grammar starts after it). Call ids are `chatcmpl-tool-<16 hex>`
+  derived from the prompt, seed and answer: the same request gives the same ids.
+- **Streaming**: a first chunk `{"role": "assistant", "content": ""}`, then deltas;
+  `stream_options.include_usage` adds the final usage chunk (`choices: []`). A worker
+  lost mid-answer is an error frame + `[DONE]` (counted as an error), or a 502 without
+  streaming — never a truncated 200.
+- **400 instead of silence**: `n` > 1, `logit_bias`, `logprobs` / `top_logprobs`, legacy
+  `functions` / `function_call`, content parts other than text / image, images on a
+  text-only checkpoint, roles the template rejects, `response_format.json_schema`
+  without `name`, a `tool_choice` object whose `type` is not `"function"`, and every
+  other vLLM field set to a non-default value (`echo`, `use_beam_search`,
+  `truncate_prompt_tokens`, `structured_outputs`, `documents`, …). Fields vLLM does
+  not know are ignored, as in vLLM, but logged.
+- **Also as vLLM**: `request_id` (the response id becomes `chatcmpl-<request_id>`),
+  `min_tokens` (EOS / `stop_token_ids` / stop strings held off until then),
+  `stop_token_ids`, `ignore_eos`, `bad_words`, `allowed_token_ids`,
+  `include_stop_str_in_output`, `continue_final_message`, `add_generation_prompt:
+  false`, `stream_options: {}` without streaming, a tool without `"type"`, numbers sent
+  as strings; `skip_special_tokens` / `spaces_between_special_tokens` / `cache_salt`
+  are accepted and have no effect (vLLM's qwen3 parser turns special-token skipping
+  off itself; the prompt cache never changes an answer). The same checks run before queueing (worker `Check` RPC), so streams get the
+  400 too. Errors have vLLM's shape `{"error": {"message", "type", "param", "code"}}`.
+- **model**: the loaded model's id (its weights dir name) or a name in
+  `GATEWAY_SERVED_MODEL_NAMES` (vLLM's `--served-model-name`); anything else is a
+  404 `The model ... does not exist.`, as vLLM.
+
+The worker env's own default is argmax + presence penalty 1.5 — the Qwen card's
+*non-thinking* setting, and **wrong for reasoning and benchmarks**: it suppresses
+repeated tokens inside long `<think>` traces. For evals run the card's
+thinking-mode sampler:
 ```zsh
 QWEN_PRESENCE_PENALTY=0 QWEN_TEMPERATURE=1.0 QWEN_TOP_P=0.95 QWEN_TOP_K=20 QWEN_MIN_P=0 \
   QWEN_MODEL=... uv run python worker.py
@@ -117,9 +190,25 @@ QWEN_PRESENCE_PENALTY=0 QWEN_TEMPERATURE=1.0 QWEN_TOP_P=0.95 QWEN_TOP_K=20 QWEN_
 (Qwen3.8 card: thinking = T 1.0 / top_p 0.95 / top_k 20 / min_p 0 / presence 0;
 instruct = T 0.7 / top_p 0.80 / top_k 20 / presence 1.5.)
 
-Vision (any model): put an `image_url` part in the message content. Reasoning:
-`"enable_thinking": true, "thinking_budget": 256` (0 = unlimited). Thinking streams
-as `delta.reasoning_content`, the answer as `delta.content`.
+Vision (VL checkpoints): put an `image_url` part in the message content.
+
+**Structured output** (`response_format`): `{"type": "json_schema", "json_schema":
+{"schema": {...}}}` decodes under the schema's grammar (llguidance token masks),
+`{"type": "json_object"}` under "any JSON object", `"text"` as before. Required keys
+are present; keys beyond `properties` are **not** allowed unless the schema says so
+(`additionalProperties` / `unevaluatedProperties` / `patternProperties`), as vLLM
+compiles schemas (xgrammar `strict_mode=True`); types, enums, `const`, lengths and
+item counts hold. `strict` is implied. EOS is allowed only where the JSON is complete; a `max_tokens` cut still
+ends mid-JSON (`finish_reason: "length"`). Thinking: the grammar starts after
+`</think>`. Whitespace is free, as in vLLM (pretty-printed JSON is fine);
+`QWEN_JSON_MAX_WS=N` caps a whitespace run at N characters if a model starts
+padding. With `tools` and `tool_choice: "auto"` the answer is either the schema JSON
+or constrained tool calls (vLLM would make tool calls impossible here); the model
+is not told the format — without an instruction in the prompt it tends to keep
+calling tools (that is its choice, not a grammar fault). An unknown type or a schema
+that does not compile is a 400, streaming included. Grammar requests skip DFlash
+(logged). Cost: ~0.2 ms of CPU per token, no step-ahead in the decode loop — 9B
+31 → 30 tok/s.
 
 Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/ornith10-9b-mlx-8bit`.
 
@@ -246,11 +335,12 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `WORKER_ADDR` | gateway | `127.0.0.1:50051` |
 | `GATEWAY_ADDR` | gateway | `0.0.0.0:8080` |
 | `MAX_QUEUE` | gateway | `32` |
-| `MODEL_NAME` | gateway | `qwen3.6-35b-a3b` |
-| `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | `16384` — generation limit when the request has neither `max_tokens` nor `max_completion_tokens` |
+| `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | `0` = the rest of the context (vLLM) — generation limit when the request has neither `max_tokens` nor `max_completion_tokens` |
 | `RUST_LOG` / `LOG_FORMAT` | gateway | `info` / pretty |
 | `GATEWAY_JOURNAL` | gateway | unset — path of a JSONL journal: one line per request, `{ts, id, request, response}`; `request` is the body as sent, `response` the chat.completion (streamed ones assembled, `"stream": true`) |
-| `GATEWAY_OPENAI_DEFAULTS` | gateway | unset — `1`: a request without `temperature` / `top_p` / `presence_penalty` gets the OpenAI API defaults `1.0` / `1.0` / `0` instead of the worker's (greedy, presence penalty 1.5) |
+| `GATEWAY_OPENAI_DEFAULTS` | gateway | unset — `1`: omitted sampling fields get the OpenAI / vLLM defaults (temperature 1, top_p 1, top_k 0, min_p 0, presence / frequency 0, repetition 1) instead of the worker's env (greedy, presence penalty 1.5) |
+| `GATEWAY_THINKING` | gateway | unset (as the request says, else the template default: thinking) — `on` / `off` forces it for every request, logged when it overrides one |
+| `GATEWAY_SERVED_MODEL_NAMES` | gateway | unset — comma-separated extra names `model` may carry (vLLM `--served-model-name`); the loaded id is always accepted, anything else is a 404 |
 | `LOG_LEVEL` | worker | `INFO` |
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
 | `QWEN_KV_BITS` | worker | `4` (35B); `0` = fp16 cache for the 9B, `8` for the 27B |
@@ -260,7 +350,8 @@ agents, exporter as a root daemon). `watchdog.sh` kickstarts the gateway if
 | `QWEN_PREFILL_STEP` / `QWEN_PREFILL_BUDGET` / `QWEN_PREFILL_MIN_STEP` | worker | `2048` / `67108864` (2048×32K) / `256` — slab shrinks so slab×context ≤ budget |
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` (off) |
 | `QWEN_PRESENCE_PENALTY` | worker | `1.5` (set `0` for reasoning/benchmarks) |
-| `QWEN_PRESENCE_CONTEXT` | worker | `512` |
+| `QWEN_FREQUENCY_PENALTY` / `QWEN_REPETITION_PENALTY` | worker | `0` / `1.0` |
+| `QWEN_JSON_MAX_WS` | worker | `0` (off) — cap on a whitespace run in a `response_format` answer |
 | `QWEN_PROMPT_CACHE` | worker | `0` (set `1`: multi-slot prefix cache with recurrent-state checkpoints) |
 | `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — LRU budget, checkpoint stride, checkpoints per entry |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |

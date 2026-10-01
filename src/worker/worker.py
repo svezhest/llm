@@ -18,14 +18,15 @@ import argparse
 import base64
 import bisect
 import functools
+import hashlib
 import json
 import logging
+import math
 import os
 import re
 import tempfile
 import threading
 import time
-import uuid
 from concurrent import futures
 
 import grpc
@@ -48,57 +49,226 @@ DEFAULT_MODEL = os.environ.get(
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
 
-# Qwen3 emits tool calls inside <tool_call>...</tool_call>. The payload is EITHER
-# JSON ({"name":..,"arguments":{..}}) OR Hermes XML (<function=NAME>
-# <parameter=KEY>VALUE</parameter>...</function>) — this MLX build uses the XML form.
-_TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
-_FUNC_RE = re.compile(r"<function=([^>]+)>(.*?)</function>", re.DOTALL)
-_PARAM_RE = re.compile(r"<parameter=([^>]+)>(.*?)</parameter>", re.DOTALL)
+TOOL_OPEN = "<tool_call>"
+TOOL_CLOSE = "</tool_call>"
+FUNC_OPEN = "<function="
+FUNC_CLOSE = "</function>"
+
+# Tool calls, parsed as vLLM's `qwen3_xml` parser does (vllm/parser/qwen3.py,
+# v0.30): <tool_call>\n<function=NAME>\n<parameter=KEY>\nVALUE\n</parameter>\n
+# </function>\n</tool_call>. A value loses exactly one leading and one trailing
+# newline and nothing else; a parameter ends at </parameter> or at the next
+# <parameter= (an unterminated last one is dropped).
+_PARAM_RE = re.compile(r"<\s*parameter\s*=\s*([^>]*)>(.*?)(?:<\s*/\s*parameter\s*>|(?=<\s*parameter\s*=))",
+                       re.DOTALL)
+_TAG_RE = re.compile("|".join(re.escape(t) for t in (TOOL_OPEN, TOOL_CLOSE, FUNC_OPEN, FUNC_CLOSE)))
 
 
-def _coerce(v: str):
-    """Best-effort: turn a parameter string into a JSON scalar (number/bool/obj),
-       else keep it as a string."""
-    v = v.strip()
-    try:
-        return json.loads(v)
-    except (json.JSONDecodeError, ValueError):
-        return v
+def _trim_newlines(v):
+    if v.startswith("\n"):
+        v = v[1:]
+    if v.endswith("\n"):
+        v = v[:-1]
+    return v
 
 
-def _parse_one(payload: str):
-    """Parse one tool_call body (JSON or Hermes XML) -> (name, arguments_dict)."""
-    body = payload.strip()
-    if body.startswith("{"):                         # JSON form
-        try:
-            obj = json.loads(body)
-            return obj.get("name", ""), obj.get("arguments", {})
-        except json.JSONDecodeError:
-            pass
-    fm = _FUNC_RE.search(body)                        # Hermes XML form
-    if fm:
-        name = fm.group(1).strip()
-        args = {k.strip(): _coerce(val) for k, val in _PARAM_RE.findall(fm.group(2))}
-        return name, args
-    return None, None
+def _schema_types(schema):
+    """vLLM's extract_types_from_schema: type / enum / anyOf-oneOf-allOf, else string."""
+    if not isinstance(schema, dict):
+        return ["string"]
+    types = set()
+    t = schema.get("type")
+    if isinstance(t, str):
+        types.add(t)
+    elif isinstance(t, list):
+        types.update(x for x in t if isinstance(x, str))
+    for v in schema.get("enum") or []:
+        types.add("null" if v is None else "boolean" if isinstance(v, bool)
+                  else "integer" if isinstance(v, int) else "number" if isinstance(v, float)
+                  else "string" if isinstance(v, str) else "array" if isinstance(v, list)
+                  else "object")
+    for k in ("anyOf", "oneOf", "allOf"):
+        for sub in schema.get(k) or []:
+            types.update(_schema_types(sub))
+    return list(types) if types else ["string"]
 
 
-def parse_tool_calls(text: str):
-    """Extract tool calls from generated text (handles both JSON and Hermes XML).
+_TYPE_ALIASES = {"str": "string", "text": "string", "varchar": "string", "char": "string",
+                 "enum": "string", "int": "integer", "int32": "integer", "int64": "integer",
+                 "uint": "integer", "uint32": "integer", "uint64": "integer", "long": "integer",
+                 "short": "integer", "unsigned": "integer", "float": "number", "float32": "number",
+                 "float64": "number", "double": "number", "bool": "boolean", "dict": "object",
+                 "arr": "array", "list": "array", "sequence": "array"}
 
-    Returns (tool_calls, leftover_text): tool_calls is a list of pb.ToolCall
-    (arguments serialized to a JSON string, per the OpenAI shape); leftover_text
-    is the answer with the tool_call blocks stripped out."""
-    calls = []
-    for m in _TOOL_CALL_RE.finditer(text):
-        name, args = _parse_one(m.group(1))
-        if not name:
+
+def _finite(x):
+    if isinstance(x, float):
+        return math.isfinite(x)
+    if isinstance(x, list):
+        return all(_finite(v) for v in x)
+    if isinstance(x, dict):
+        return all(_finite(v) for v in x.values())
+    return True
+
+
+def _coerce(value, types):
+    """vLLM's coerce_to_schema_type: the first type (null > integer > number >
+    boolean > object > array > string) the raw string parses as; else JSON if
+    it is JSON, else the string itself."""
+    norm = {_TYPE_ALIASES.get(t.strip().lower(), t.strip().lower()) for t in types}
+    for t in ("null", "integer", "number", "boolean", "object", "array", "string"):
+        if t not in norm:
             continue
-        args_str = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-        calls.append(pb.ToolCall(
-            id=f"call_{uuid.uuid4().hex[:24]}", name=name, arguments=args_str))
-    leftover = _TOOL_CALL_RE.sub("", text).strip()
-    return calls, leftover
+        if t == "null" and value.lower() == "null":
+            return None
+        if t == "string":
+            return value
+        if t == "integer":
+            try:
+                return int(value)
+            except ValueError:
+                continue
+        if t == "number":
+            try:
+                f = float(value)
+            except ValueError:
+                continue
+            if math.isfinite(f):
+                return int(f) if f == int(f) else f
+        if t == "boolean":
+            if value.lower().strip() in ("true", "1"):
+                return True
+            if value.lower().strip() in ("false", "0"):
+                return False
+        if t in ("object", "array"):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if _finite(parsed):
+                return parsed
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return value
+    return parsed if _finite(parsed) else value
+
+
+def _coerce_value(value, schema):
+    if isinstance(value, str):
+        return _coerce(value, _schema_types(schema))
+    if isinstance(value, dict) and isinstance(schema.get("properties"), dict):
+        return {k: _coerce_value(v, schema["properties"][k])
+                if isinstance(schema["properties"].get(k), dict) else v for k, v in value.items()}
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [_coerce_value(v, schema["items"]) for v in value]
+    return value
+
+
+def _tool_properties(tools, name):
+    for t in tools or []:
+        fn = t.get("function") if isinstance(t, dict) else None
+        if isinstance(fn, dict) and fn.get("name") == name:
+            return (fn.get("parameters") or {}).get("properties") or {}
+    return {}
+
+
+def _call_id(seed_key, index):
+    """Deterministic tool-call id in vLLM's format (chatcmpl-tool-<16 hex>): the
+    same request (prompt, seed) and the same answer give the same ids."""
+    return "chatcmpl-tool-" + hashlib.sha256(f"{seed_key}:{index}".encode()).hexdigest()[:16]
+
+
+def parse_tool_calls(text, tools, seed_key):
+    """vLLM qwen3_xml, non-streaming. -> (content, [(name, arguments_json)]).
+
+    content is the text before the first call, stripped (None if empty) when
+    there are calls, the whole text otherwise. Text between </function> and
+    </tool_call> and after a call is not content (vLLM defers it and never
+    flushes it in a non-streaming answer); it is logged, not silently lost.
+    A call cut off by the end of the output is still a call (its unterminated
+    last parameter dropped); a <tool_call> with no <function= is no call."""
+    calls, before, dropped = [], None, []
+    state, name, args, pos = "content", "", "", 0
+
+    def end_call():
+        nonlocal name, args
+        nm = name.strip()
+        if nm:
+            params = {m.group(1): _trim_newlines(m.group(2)) for m in _PARAM_RE.finditer(args)}
+            props = _tool_properties(tools, nm)
+            params = {k: _coerce_value(v, props[k]) if isinstance(props.get(k), dict) else v
+                      for k, v in params.items()}
+            calls.append((nm, json.dumps(params, ensure_ascii=False)))
+        name, args = "", ""
+
+    for m in _TAG_RE.finditer(text):
+        chunk, tag = text[pos:m.start()], m.group()
+        pos = m.end()
+        if state == "name":                       # NAME> closes the name
+            name, chunk = name + chunk, ""
+            if ">" in name:
+                name, _, args = name.partition(">")
+                state = "args"
+        if state == "content":
+            if before is None and tag not in (TOOL_OPEN, FUNC_OPEN):
+                continue                          # a stray closing tag stays text
+            if before is None:
+                before = text[:m.start()]
+            elif not calls:                       # after a <tool_call> that held no call
+                before += chunk if tag in (TOOL_OPEN, FUNC_OPEN) else chunk + tag
+                if tag not in (TOOL_OPEN, FUNC_OPEN):
+                    continue
+            elif chunk.strip():
+                dropped.append(chunk)
+            if tag in (TOOL_OPEN, FUNC_OPEN):
+                state = "preamble" if tag == TOOL_OPEN else "name"
+            else:
+                dropped.append(tag)
+        elif state in ("preamble", "between"):
+            if chunk.strip():
+                dropped.append(chunk)
+            if tag == TOOL_CLOSE:
+                state = "content"
+            elif tag == FUNC_OPEN:
+                state = "name"
+            elif tag == TOOL_OPEN:
+                state = "preamble"
+        elif state == "name":                     # malformed: no '>' before this tag
+            if tag == FUNC_CLOSE:
+                end_call()
+                state = "between"
+            else:
+                name += tag
+        elif state == "args":
+            args += chunk
+            if tag == FUNC_CLOSE:
+                end_call()
+                state = "between"
+            else:
+                args += tag
+    rest = text[pos:]
+    if before is None:
+        return text, []
+    if state == "name":
+        name += rest
+        if ">" in name:
+            name, _, args = name.partition(">")
+        end_call()
+    elif state == "args":
+        args += rest
+        end_call()
+    elif not calls and state == "content":
+        before += rest
+    elif rest.strip():
+        dropped.append(rest)
+    if dropped:
+        log.warning("tool calls: text outside the calls not returned (as vLLM): %r",
+                    "".join(dropped)[:500])
+    if not calls:
+        return before or None, []
+    return before.strip() or None, [pb.ToolCall(id=_call_id(seed_key, i), name=n, arguments=a)
+                                    for i, (n, a) in enumerate(calls)]
 
 
 def materialize_images(images):
@@ -124,6 +294,17 @@ def materialize_images(images):
     return out, tmp
 
 
+def _developer_to_system(messages):
+    """vLLM (renderers/hf.py): developer -> system, then every system message merged
+    into one at the front ("\n\n"-joined), since this template wants it first."""
+    msgs = [dict(m, role="system") if m["role"] == "developer" else m for m in messages]
+    sys_ = [m for m in msgs if m["role"] == "system"]
+    if len(sys_) <= 1 and (not sys_ or msgs[0]["role"] == "system"):
+        return msgs
+    merged = {"role": "system", "content": "\n\n".join(m["content"] for m in sys_ if m["content"])}
+    return [merged] + [m for m in msgs if m["role"] != "system"]
+
+
 def _rebuild_messages(pb_messages):
     """pb.Message -> OpenAI-style dicts for the tokenizer chat template, preserving
        tool-call history (assistant tool_calls, tool-result messages)."""
@@ -135,10 +316,21 @@ def _rebuild_messages(pb_messages):
         if m.tool_call_id:
             d["tool_call_id"] = m.tool_call_id
         if m.tool_calls_json:
-            try:
-                d["tool_calls"] = json.loads(m.tool_calls_json)
-            except json.JSONDecodeError:
-                pass
+            d["tool_calls"] = json.loads(m.tool_calls_json)   # the gateway checked the shape
+            for c in d["tool_calls"]:
+                args = (c.get("function") or {}).get("arguments")
+                if isinstance(args, str) and args:
+                    try:
+                        ok = isinstance(json.loads(args), dict)
+                    except ValueError:
+                        ok = False
+                    if not ok:
+                        # mlx-vlm renders it as {} (vLLM does the same, with this warning)
+                        log.warning("tool call %r in the history: arguments are not a JSON "
+                                    "object; rendered as {}", (c.get("function") or {}).get("name"))
+        if m.HasField("reasoning"):
+            # the template reads reasoning_content; vLLM passes both names
+            d["reasoning"] = d["reasoning_content"] = m.reasoning
         out.append(d)
     return out
 
@@ -195,63 +387,105 @@ PREFILL_BUDGET = int(os.environ.get("QWEN_PREFILL_BUDGET", str(2048 * 32768)))
 # cannot exceed what the kernel allows.
 _WIRED_GB = float(os.environ.get("QWEN_WIRED_LIMIT_GB", "0") or "0")
 
-# Sampling (native mlx-lm sampler + logits processors via mlx-vlm — no custom code).
-# Env sets the process-wide defaults; a request's temperature/top_p (sentinel
-# -1 / 0 from the gateway when omitted) and top_k/min_p/presence_penalty
-# (proto optional fields) override them. Default:
-# greedy/argmax (temperature=0 => top_p/top_k/min_p irrelevant) with an ADDITIVE
-# presence penalty 1.5 over a 512-token window (the Qwen card's *non-thinking*
-# setting). Multiplicative repetition penalty is OFF.
-# For reasoning / benchmarks set QWEN_PRESENCE_PENALTY=0 and the card's sampler
-# (thinking: temperature 1.0, top_p 0.95, top_k 20, min_p 0) — see README.
+# Sampling, as vLLM does it (the reference server for these models). Env sets
+# the process-wide defaults, a request overrides each field it sets (proto
+# `optional` fields; absent = env default). Order, all on float32 logits:
+# penalties (presence/frequency over the generated tokens, repetition over
+# prompt + generated) -> temperature -> min_p -> top_k -> top_p -> draw; each
+# filter sees the distribution the previous one left. Temperature 0 = argmax
+# of the penalized logits. Default: greedy with an additive presence penalty
+# 1.5 (the Qwen card's *non-thinking* setting). For reasoning / benchmarks set
+# QWEN_PRESENCE_PENALTY=0 and the card's sampler (thinking: temperature 1.0,
+# top_p 0.95, top_k 20, min_p 0) — see README.
 SAMPLING_KWARGS = {
     "temperature": float(os.environ.get("QWEN_TEMPERATURE", "0.0")),    # 0 => argmax
     "top_p": float(os.environ.get("QWEN_TOP_P", "1.0")),                # 1.0 => off
     "top_k": int(os.environ.get("QWEN_TOP_K", "0")),                    # 0 => off
     "min_p": float(os.environ.get("QWEN_MIN_P", "0.0")),                # 0 => off
     "presence_penalty": float(os.environ.get("QWEN_PRESENCE_PENALTY", "1.5")),
-    "presence_context_size": int(os.environ.get("QWEN_PRESENCE_CONTEXT", "512")),
+    "frequency_penalty": float(os.environ.get("QWEN_FREQUENCY_PENALTY", "0.0")),
+    "repetition_penalty": float(os.environ.get("QWEN_REPETITION_PENALTY", "1.0")),
 }
 
 
 def make_sampler(sampling, seed=None):
-    """Sampler with an explicit per-request RNG key (mlx_lm's is NOT thread-safe).
+    """logits (rows, V) -> token ids, with an explicit per-request RNG key.
 
-    mlx_lm's make_sampler draws through a function compiled with
-    ``inputs=outputs=mx.random.state``; that captures the global key of the
-    thread that first traced it. MLX random state is per thread, so in the
-    gRPC handler threads the captured key is never advanced: every decode step
-    of every request drew with the same key, and temperature 0.7 returned
-    byte-identical answers across requests (``mx.random.seed`` from the handler
-    thread does not help either - same captured state). The top_p/min_p/top_k
-    filters are deterministic and reused; only the draw is ours, from a key
-    split per step. ``seed`` (request field) makes a request reproducible.
+    vLLM's order: temperature, then min_p, top_k and top_p, each on the
+    distribution the previous one left (top_p over the top_k survivors,
+    renormalized; at least one token always survives).
+
+    The key is ours, not the global one: mlx_lm's sampler draws through a
+    function compiled with ``inputs=outputs=mx.random.state``, which captures
+    the global key of the thread that first traced it. MLX random state is per
+    thread, so in the gRPC handler threads the captured key never advanced and
+    temperature 0.7 returned byte-identical answers. Here the key is split per
+    step; ``seed`` (request field) makes a request reproducible.
     """
-    from mlx_lm.sample_utils import apply_min_p, apply_top_k, apply_top_p
     temp = sampling["temperature"]
-    if temp <= 0:
-        return lambda lp: mx.argmax(lp, axis=-1)
+    if temp <= 0:                       # vLLM: 0 = greedy, (0, 0.01) is raised to 0.01
+        return lambda logits: mx.argmax(logits - mx.logsumexp(logits, axis=-1, keepdims=True),
+                                        axis=-1)
     top_p, min_p, top_k = sampling["top_p"], sampling["min_p"], sampling["top_k"]
-    filters = []
-    if 0 < top_p < 1.0:
-        filters.append(lambda x: apply_top_p(x, top_p))
-    if min_p != 0.0:
-        filters.append(lambda x: apply_min_p(x, min_p))
-    if top_k > 0:
-        filters.append(lambda x: apply_top_k(x, top_k))
     if seed is None:
         seed = int.from_bytes(os.urandom(4), "little")
     key = mx.random.key(int(seed) & 0x7FFF_FFFF_FFFF_FFFF)
-    scale = 1.0 / temp
+    temp = max(temp, 0.01)
+    ninf = mx.array(-float("inf"), dtype=mx.float32)
 
-    def sampler(lp):
+    def sampler(logits):
         nonlocal key
-        for f in filters:
-            lp = f(lp)
+        x = logits.astype(mx.float32) / temp
+        if min_p > 0:
+            p = mx.softmax(x, axis=-1)
+            x = mx.where(p < p.max(axis=-1, keepdims=True) * min_p, ninf, x)
+        if 0 < top_k < x.shape[-1]:
+            kth = mx.topk(x, top_k, axis=-1).min(axis=-1, keepdims=True)
+            x = mx.where(x < kth, ninf, x)
+        if top_p < 1.0:
+            idx = mx.argsort(x, axis=-1)
+            xs = mx.take_along_axis(x, idx, axis=-1)
+            drop = mx.cumsum(mx.softmax(xs, axis=-1), axis=-1) <= 1 - top_p
+            drop[..., -1] = False
+            x = mx.put_along_axis(x, idx, mx.where(drop, ninf, xs), axis=-1)
         key, sub = mx.random.split(key)
-        return mx.random.categorical(lp * scale, key=sub)
+        return mx.random.categorical(x, key=sub)
 
     return sampler
+
+
+class _Penalties:
+    """vLLM's (= OpenAI's) penalties on the raw logits: presence and frequency
+    are additive over the tokens generated so far; repetition is the
+    multiplicative HF/vLLM one (positive logits / p, negative * p) over every
+    token seen in the prompt or the output. `extra` adds per-row counts (the
+    drafts before each verify row in speculative decoding)."""
+
+    def __init__(self, sampling, prompt_ids, vocab):
+        self.presence = sampling["presence_penalty"]
+        self.frequency = sampling["frequency_penalty"]
+        self.repetition = sampling["repetition_penalty"]
+        self.active = bool(self.presence or self.frequency or self.repetition != 1.0)
+        self.counts = mx.zeros((vocab,), dtype=mx.float32)
+        self.prompt = None
+        if self.repetition != 1.0:
+            self.prompt = mx.zeros((vocab,), dtype=mx.bool_)
+            self.prompt[mx.array(prompt_ids)] = True
+
+    def add(self, toks):
+        self.counts = self.counts.at[toks.reshape(-1)].add(1.0)
+
+    def __call__(self, logits, extra=None):
+        x = logits.astype(mx.float32)
+        c = self.counts if extra is None else self.counts + extra
+        if self.repetition != 1.0:
+            seen = (c > 0) | self.prompt
+            x = mx.where(seen, mx.where(x > 0, x / self.repetition, x * self.repetition), x)
+        if self.frequency:
+            x = x - self.frequency * c
+        if self.presence:
+            x = x - self.presence * (c > 0)
+        return x
 
 # MLX buffer pool. Freed Metal buffers go to an allocator free-list ("cache")
 # instead of back to the OS; they stay resident and count against the wired
@@ -518,8 +752,9 @@ class _StopFilter:
     """Holds back the tail of the stream that could be the start of a stop
     sequence, so a stop split across chunks is still caught and never emitted."""
 
-    def __init__(self, stops):
+    def __init__(self, stops, keep=False):
         self.stops = [x for x in stops if x]
+        self.keep = keep        # include_stop_str_in_output
         self.buf = ""
         self.hit = False
 
@@ -527,12 +762,13 @@ class _StopFilter:
         if not self.stops:
             return text
         self.buf += text
-        for st in self.stops:
-            i = self.buf.find(st)
-            if i >= 0:
-                self.hit = True
-                out, self.buf = self.buf[:i], ""
-                return out
+        # the earliest match wins, whichever stop string it is
+        hits = [(j, st) for st in self.stops if (j := self.buf.find(st)) >= 0]
+        if hits:
+            i, st = min(hits, key=lambda h: (h[0] + len(h[1]), h[0]))   # first to complete
+            self.hit = True
+            out, self.buf = self.buf[:i + len(st) if self.keep else i], ""
+            return out
         keep = 0
         for st in self.stops:
             for k in range(min(len(st) - 1, len(self.buf)), 0, -1):
@@ -547,11 +783,265 @@ class _StopFilter:
         return out
 
 
+# Structured output (`response_format`, constrained tool calls) is decoded
+# under a grammar by llguidance: mlx-vlm 0.6.2 already depends on it (its
+# server's json_schema path), it ships a Metal kernel for the bitmask, needs no
+# grammar compile step (the mask is computed lazily, ~50 us per token on the 9B
+# vocab) and covers JSON Schema well ($ref/$defs, anyOf, const/enum, min/max
+# length and items). JSON whitespace is free, as with vLLM (xgrammar
+# any_whitespace=True). QWEN_JSON_MAX_WS=N caps a run of whitespace in a
+# response_format answer at N characters (inside strings too; 0 = off): a token
+# may continue a run only while its leading whitespace fits under the cap.
+# Not applied to tool-call grammars (raw values, \n</parameter> terminators).
+JSON_MAX_WS = int(os.environ.get("QWEN_JSON_MAX_WS", "0"))
+
+
+def _response_schema(fmt_json):
+    """OpenAI `response_format` JSON -> the JSON schema to enforce, None for text.
+    Raises ValueError for anything else."""
+    if not fmt_json:
+        return None
+    try:
+        rf = json.loads(fmt_json)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"response_format is not valid JSON: {e}") from None
+    kind = rf.get("type") if isinstance(rf, dict) else None
+    if kind == "text":
+        return None
+    if kind == "json_object":
+        return {"type": "object"}
+    if kind == "json_schema":
+        js = rf.get("json_schema")
+        schema = js.get("schema") if isinstance(js, dict) else None
+        if not isinstance(schema, dict):
+            raise ValueError("response_format.json_schema.schema must be a JSON Schema object")
+        return _strict(schema)
+    raise ValueError(f"unsupported response_format type {kind!r} "
+                     "(supported: text, json_object, json_schema)")
+
+
+def _strict(schema):
+    """vLLM compiles json_schema with xgrammar's strict_mode=True: an object that does
+    not say otherwise takes no properties beyond its `properties` (additionalProperties
+    and unevaluatedProperties default to false). llguidance follows JSON Schema (extra
+    keys allowed), so the default is written into the schema."""
+    if isinstance(schema, list):
+        return [_strict(x) for x in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for k, v in schema.items():
+        if k in ("properties", "$defs", "definitions", "patternProperties", "dependentSchemas"):
+            out[k] = {n: _strict(x) for n, x in v.items()} if isinstance(v, dict) else v
+        elif k in ("const", "enum", "default", "examples", "required"):
+            out[k] = v
+        else:
+            out[k] = _strict(v)
+    t = out.get("type")
+    is_obj = t == "object" or (isinstance(t, list) and "object" in t) or "properties" in out
+    if is_obj and "additionalProperties" not in out and "unevaluatedProperties" not in out \
+            and "patternProperties" not in out:
+        out["additionalProperties"] = False
+    return out
+
+
+def _tool_choice(p):
+    """-> ("auto" | "none" | "required" | "named", function name or None)."""
+    tc = p.tool_choice
+    if tc in ("", "auto", "none", "required"):
+        return tc or "auto", None
+    try:
+        return "named", json.loads(tc)["function"]["name"]
+    except (ValueError, KeyError, TypeError):
+        raise ValueError(f"invalid tool_choice: {tc!r}") from None
+
+
+def _lit(s):
+    return json.dumps(s, ensure_ascii=False)
+
+
+def _tool_call_rules(tools, tags, rules):
+    """Lark rules for <tool_call> blocks, one per function: the name is fixed
+    and the parameters follow its JSON schema in the qwen_xml layout xgrammar's
+    `qwen_3_coder` structural tag uses (what vLLM constrains required / named /
+    strict tools with): properties in schema order, required ones present, no
+    others; a string value is raw text up to \n</parameter>, anything else is
+    JSON under its sub-schema. A function whose parameters are not an object
+    with properties takes any parameters. -> {name: rule}."""
+    out = {}
+    for i, t in enumerate(tools):
+        fn = t.get("function") or {}
+        params = fn.get("parameters")
+        if fn.get("strict") is False or not isinstance(params, dict):
+            params = {}
+        defs = {k: params[k] for k in ("$defs", "definitions") if k in params}
+        props = params.get("properties") if isinstance(params.get("properties"), dict) else None
+        body = []
+        if props is None or not props:
+            if params.get("additionalProperties") is not False and props is None:
+                rules.append(f'any_{i}: "<parameter=" /[^>\\n]+/ ">\\n" any_v_{i}')
+                rules.append(f'any_v_{i}[lazy]: /(?s:.*)\\n<\\/parameter>\\n/')
+                body.append(f"any_{i}*")
+        else:
+            required = set(params.get("required") or [])
+            for j, (k, sub) in enumerate(props.items()):
+                rules.append(f"p_{i}_{j}: {_lit('<parameter=' + k + '>' + chr(10))} v_{i}_{j}")
+                rules.append(_value_rule(f"v_{i}_{j}", sub, defs))
+                body.append(f"p_{i}_{j}" + ("" if k in required else "?"))
+        rules.append(f"call_{i}: <[{tags[0]}]> {_lit(chr(10) + '<function=' + fn.get('name', '') + '>' + chr(10))} "
+                     f"{' '.join(body)} {_lit('</function>' + chr(10))} <[{tags[1]}]>")
+        out[fn.get("name")] = f"call_{i}"
+    return out
+
+
+def _value_rule(rule, schema, defs):
+    end = r"\n<\/parameter>\n"
+    sch = schema if isinstance(schema, dict) else {}
+    ref = sch.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/") and len(sch) == 1:
+        node = {**defs}
+        for part in ref[2:].split("/"):
+            node = node.get(part, {}) if isinstance(node, dict) else {}
+        sch = node if isinstance(node, dict) else {}
+    types = set(_schema_types(sch))
+    if types == {"string"} and isinstance(sch.get("enum"), list) and sch["enum"]:
+        return f"{rule}: " + " | ".join(_lit(v + "\n</parameter>\n") for v in sch["enum"])
+    if types == {"string"} and isinstance(sch.get("const"), str):
+        return f"{rule}: {_lit(sch['const'] + chr(10) + '</parameter>' + chr(10))}"
+    if "string" in types:                          # raw text (vLLM keeps it a string)
+        return f"{rule}[lazy]: /(?s:.*){end}/"
+    return f'{rule}: %json {json.dumps(_strict({**schema, **defs}), ensure_ascii=False)} "\\n</parameter>\\n"'
+
+
+def _grammar(answer, tools, choice, name, parallel, tags):
+    """llguidance grammar for one request, None when nothing is constrained.
+
+    - response_format only: the JSON schema.
+    - tools, choice "required": a call first, then text / more calls (exactly one
+      call if parallel_tool_calls is false); "named": exactly that call, nothing else
+      (xgrammar's qwen_3_coder tags, as vLLM applies them).
+    - tools, "auto": constrained only when a tool is `strict` (text with calls
+      anywhere, as vLLM) or with a response_format: then the answer is either
+      the JSON or tool calls (vLLM would apply the JSON grammar to the whole
+      output and make tool calls impossible).
+    - "none": only response_format, if any; tools stay in the prompt."""
+    from llguidance import LLMatcher
+    strict = any((t.get("function") or {}).get("strict") is True for t in tools)
+    if not tools or choice == "none" or (choice == "auto" and not strict and answer is None):
+        return None if answer is None else LLMatcher.grammar_from_json_schema(answer)
+    if tags is None:
+        raise ValueError("constrained tool calls need <tool_call> tokens in the vocabulary")
+    rules = []
+    calls = _tool_call_rules(tools, tags, rules)
+    rules.append("call: " + " | ".join(calls.values()))
+    rules.append("TEXT: /(?s:.+)/")
+    many = 'call (WS? call)*' if parallel else 'call'
+    rules.append("WS: /[ \\t\\r\\n]+/")
+    if choice == "named":
+        if name not in calls:
+            raise ValueError(f"tool_choice names an unknown function: {name!r}")
+        start = calls[name]
+    elif choice == "required":
+        # xgrammar's qwen_3_coder "required": the output opens with a call (no text
+        # before it, so the model cannot talk until max_tokens), text may follow;
+        # parallel_tool_calls false (stop_after_first): that one call, nothing after
+        start = "call (TEXT? call)* TEXT?" if parallel else "call"
+    elif answer is not None:
+        rules.append(f"answer: %json {json.dumps(answer, ensure_ascii=False)}")
+        start = f"answer | {many}"
+    else:
+        start = "TEXT? (call TEXT?)*" if parallel else "TEXT? (call)?"
+    return LLMatcher.grammar_from_lark("\n".join([f"start: {start}"] + rules) + "\n")
+
+
+class _Guide:
+    """Grammar-constrained sampling for one request.
+
+    `sample` masks the logits with the grammar state after the tokens
+    consumed so far (the mask is computed on the CPU when the graph is built,
+    ~0.2 ms per token on the 9B vocab). When generation begins inside the
+    thinking block the grammar starts after </think> (or at a <tool_call> that
+    ends the reasoning, as vLLM's parser treats it); until then only EOS is
+    masked out, so the answer cannot be skipped. EOS is allowed by the grammar
+    only where the output is complete."""
+
+    def __init__(self, llg_tok, grammar, *, active, think_close, tool_open=None, ws=None):
+        import llguidance
+        import llguidance.numpy
+        self.llg_tok = llg_tok
+        self.matcher = llguidance.LLMatcher(llg_tok, grammar)
+        if self.matcher.is_error():
+            raise ValueError(self.matcher.get_error())
+        self.n_vocab = llg_tok.vocab_size
+        self.active = active
+        self.think_close = think_close
+        self.tool_open = tool_open
+        self.no_eos = llguidance.numpy.allocate_token_bitmask(1, self.n_vocab)
+        bits = self.no_eos.view("uint32")
+        for t in llg_tok.eos_tokens:
+            bits[0, t // 32] &= ~(1 << (t % 32)) & 0xFFFFFFFF
+        self.ws_masks = ws      # QWEN_JSON_MAX_WS: [r] = tokens with <= r leading whitespace
+        self.ws_run = 0
+
+    def consume(self, tok):
+        if not self.active:
+            if tok == self.think_close:
+                self.active = True
+                return
+            if tok != self.tool_open:
+                return
+            self.active = True
+        if not self.matcher.consume_token(tok):
+            raise RuntimeError(f"grammar: token {tok} rejected: {self.matcher.get_error()}")
+        if self.ws_masks is not None:
+            b = self.llg_tok.decode_bytes([tok])
+            tail = len(b) - len(b.rstrip(b" \t\r\n"))
+            self.ws_run = self.ws_run + len(b) if tail == len(b) else tail
+
+    def sample(self, logits, sampler):
+        import llguidance.mlx
+        import llguidance.numpy
+        if self.active:
+            mask = llguidance.numpy.allocate_token_bitmask(1, self.n_vocab)
+            llguidance.numpy.fill_next_token_bitmask(self.matcher, mask)
+            if self.matcher.is_error():
+                raise RuntimeError(f"grammar: {self.matcher.get_error()}")
+            if self.ws_masks is not None:
+                capped = mask & self.ws_masks[max(0, JSON_MAX_WS - self.ws_run)]
+                if capped.any():                  # never leave the grammar no way out
+                    mask = capped
+        else:
+            mask = self.no_eos
+        return sampler(llguidance.mlx.apply_token_bitmask(logits, mask))
+
+
+def _ws_masks(llg_tok, cap):
+    """[r] = bitmask of the tokens that start with at most r whitespace chars
+    (a whitespace-only token counts whole), r = 0..cap, for QWEN_JSON_MAX_WS:
+    a token may continue a whitespace run only as far as the cap. A token's
+    own trailing whitespace is not bounded (rare in practice)."""
+    import llguidance.numpy
+    import numpy as np
+    n = 32 * ((llg_tok.vocab_size + 31) // 32)
+    lead = np.zeros(n, dtype=np.int64)
+    for t in range(llg_tok.vocab_size):
+        b = llg_tok.decode_bytes([t])
+        lead[t] = len(b) - len(b.lstrip(b" \t\r\n"))
+    out = []
+    for r in range(cap + 1):
+        mask = llguidance.numpy.allocate_token_bitmask(1, llg_tok.vocab_size)
+        mask[0] = np.packbits(lead <= r, bitorder="little").view(np.int32)
+        out.append(mask)
+    return out
+
+
 class Engine:
     """Owns the MLX model and runs (serialized) generations."""
 
     def __init__(self, model_path: str):
         self.model_path = model_path
+        # the id clients see (/v1/models, "model" in responses): the weights dir name
+        self.model_id = os.path.basename(os.path.normpath(model_path))
         self.ready = False
         self.load_ms = 0
         self._lock = threading.Lock()
@@ -620,6 +1110,33 @@ class Engine:
         crit.eos_token_ids = sorted(set(crit.eos_token_ids or []) | _eos_ids(self.config))
         log.info("eos token ids: %s", crit.eos_token_ids)
         self._im_start = _tok.convert_tokens_to_ids("<|im_start|>")
+        tpl = getattr(self.processor, "chat_template", None) or getattr(_tok, "chat_template", "") or ""
+        import jinja2
+        import jinja2.meta
+        self._template_vars = jinja2.meta.find_undeclared_variables(
+            jinja2.Environment().parse(tpl)) - {"messages", "tools", "add_generation_prompt"}
+        # vLLM: a template that never names "developer" gets it as system
+        self._developer = '"developer"' in tpl or "'developer'" in tpl
+        self._think = [_tok.convert_tokens_to_ids(t) for t in (THINK_OPEN, THINK_CLOSE)]
+        tags = [_tok.convert_tokens_to_ids(t) for t in ("<tool_call>", "</tool_call>")]
+        self._tool_tags = tags if _tok.convert_ids_to_tokens(tags) == ["<tool_call>", "</tool_call>"] \
+            else None
+        # response_format: llguidance's view of the vocab (~2 s to build, once).
+        # Masks are as wide as the logits; EOS = every id the loop stops on.
+        # logits width (the embedding is padded past the tokenizer's vocab)
+        self.vocab = int((self.config.get("text_config") or {}).get("vocab_size")
+                         or self.config["vocab_size"])
+        try:
+            import llguidance.hf
+            self._llg_tok = llguidance.hf.from_tokenizer(
+                _tok, n_vocab=self.vocab, eos_token=crit.eos_token_ids)
+        except Exception:  # noqa: BLE001 — the rest of the worker does not need it
+            log.exception("llguidance tokenizer failed; response_format requests will be rejected")
+            self._llg_tok = None
+        self._not_ws = None
+        if JSON_MAX_WS and self._llg_tok is not None:
+            self._not_ws = _ws_masks(self._llg_tok, JSON_MAX_WS)
+            log.info("constrained answers: whitespace runs capped at %d chars", JSON_MAX_WS)
         d = self.processor.detokenizer
         if type(d) is BPEStreamingDetokenizer:
             self.processor.detokenizer = _BPEDetokenizer(_tok, trim_space=d.trim_space)
@@ -662,6 +1179,107 @@ class Engine:
         with self._cancels_lock:
             self._cancels.pop(req_id, None)
 
+    # --- structured output --------------------------------------------------
+    def grammar_for(self, p: pb.Params):
+        """llguidance grammar for the request's response_format / tool calls
+        (None = unconstrained). Raises ValueError when a format is unsupported
+        or does not compile."""
+        answer = _response_schema(p.response_format_json)
+        choice, name = _tool_choice(p)
+        tools = json.loads(p.tools_json) if p.tools_json else []
+        parallel = not p.HasField("parallel_tool_calls") or p.parallel_tool_calls
+        what = "response_format" if answer is not None else "tools"
+        try:
+            grammar = _grammar(answer, tools, choice, name, parallel, self._tool_tags)
+        except ValueError as e:
+            raise ValueError(f"{what}: {e}") from None
+        if grammar is None:
+            return None
+        if self._llg_tok is None:
+            raise ValueError(f"{what}: constrained decoding unavailable (no llguidance tokenizer)")
+        from llguidance import LLMatcher
+        bad, msgs = LLMatcher.validate_grammar_with_warnings(grammar, self._llg_tok)
+        if bad:
+            raise ValueError(f"{what}: schema does not compile: {msgs[0]}")
+        for m in msgs:
+            log.warning("%s: %s", what, m)
+        return grammar
+
+    def _render(self, req, images):
+        """Checks that need no model, then the chat template -> (prompt, grammar).
+        Shared by Check and Generate; raises _Reject."""
+        from mlx_vlm.prompt_utils import apply_chat_template
+        p = req.params
+        if images and "vision_config" not in self.config:
+            raise _Reject("invalid_request", f"{self.model_id} is a text-only checkpoint: "
+                          "image inputs are not supported")
+        try:
+            grammar = self.grammar_for(p)
+        except ValueError as e:
+            raise _Reject("invalid_request", str(e)) from None
+        kwargs = json.loads(p.chat_template_kwargs_json) if p.chat_template_kwargs_json else {}
+        # vLLM's resolve_chat_template_kwargs: these two are refused, the rest is
+        # kept only if the template uses it (the request's own fields win)
+        bad = {"chat_template", "tokenize"} & kwargs.keys()
+        if bad:
+            raise _Reject("invalid_request",
+                          f"Found unexpected chat template kwargs from request: {bad}")
+        dropped = [k for k in kwargs if k not in self._template_vars]
+        if dropped:
+            log.info("chat_template_kwargs not used by the template, ignored (as vLLM): %s", dropped)
+        kwargs = {k: v for k, v in kwargs.items() if k in self._template_vars}
+        if p.tools_json:
+            # also for tool_choice "none": vLLM keeps the tools in the prompt
+            kwargs["tools"] = json.loads(p.tools_json)
+        add_gen = not p.HasField("add_generation_prompt") or p.add_generation_prompt
+        if p.continue_final_message:
+            kwargs["continue_final_message"] = True
+        messages = _rebuild_messages(req.messages)
+        if any(m["role"] == "developer" for m in messages) and not self._developer:
+            messages = _developer_to_system(messages)
+        try:
+            formatted = apply_chat_template(self.processor, self.config, messages,
+                                            add_generation_prompt=add_gen,
+                                            num_images=len(images), **kwargs)
+        except Exception as e:  # noqa: BLE001 — the template's own raise_exception, bad kwargs
+            raise _Reject("invalid_request", f"chat template: {e}") from None
+        return formatted, grammar
+
+    def _limit(self, p, prompt_tokens):
+        """Generation limit for a prompt this long; vLLM's rules and messages."""
+        if p.HasField("max_tokens"):
+            if prompt_tokens + p.max_tokens > MAX_CONTEXT:
+                raise _Reject("context_length_exceeded",
+                              f"This model's maximum context length is {MAX_CONTEXT} tokens. "
+                              f"However, you requested {p.max_tokens} output tokens and your "
+                              f"prompt contains {prompt_tokens} input tokens, for a total of "
+                              f"{prompt_tokens + p.max_tokens} tokens. Please reduce the length "
+                              "of the input prompt or the number of requested output tokens.")
+            return p.max_tokens
+        remaining = MAX_CONTEXT - prompt_tokens
+        if remaining < 1:
+            raise _Reject("context_length_exceeded",
+                          f"This model's maximum context length is {MAX_CONTEXT} tokens. "
+                          f"However, your request has {prompt_tokens} input tokens. "
+                          "Please reduce the length of the input messages.")
+        return min(p.default_max_tokens or remaining, remaining)
+
+    def check(self, req: pb.Request) -> str:
+        """What Generate would reject before generating, without the model lock
+        (text prompts are tokenized to check the length; image prompts only
+        when the worker runs them)."""
+        try:
+            formatted, _ = self._render(req, list(req.images))
+            if not req.images:
+                tokenizer = getattr(self.processor, "tokenizer", self.processor)
+                self._limit(req.params, len(tokenizer.encode(formatted)))
+        except _Reject as e:
+            return str(e), False
+        except Exception as e:  # noqa: BLE001 — a worker fault, not the request's
+            log.exception("check failed: %s", req.id)
+            return f"{type(e).__name__}: {e}", True
+        return "", False
+
     # --- prompt preparation ----------------------------------------------
     def _prepare(self, formatted: str, images: list):
         """Tokenize once -> (input_ids, id list, pixel_values, mask, extra kwargs).
@@ -691,7 +1309,7 @@ class Engine:
 
     def _run(self, input_ids, pixel_values, mask, extra, prompt_cache, *,
              max_tokens, sampling, thinking, on_prefilled=None, start=0, cuts=(),
-             on_ckpt=None):
+             on_ckpt=None, guide=None, pen=None, ctl=None):
         """Prefill + decode, yielding (token_id, text) pairs; sets self._finish.
 
         A trimmed-down generate_step/stream_generate from mlx-vlm 0.6.2. Kept
@@ -699,17 +1317,25 @@ class Engine:
         point where the cache holds the prompt minus its last token and nothing
         else, (b) pre-tokenized vision inputs go in directly, and (c) the
         finish reason and buffer-pool clearing are under our control.
+
+        With a `guide` (response_format) the mask for a token needs the one
+        before it on the CPU, so the next step is queued only once the token is
+        known (the detokenizer and the yield still overlap the forward pass).
         """
-        from mlx_lm.sample_utils import make_logits_processors
         from mlx_vlm.generate.common import (generation_stream, maybe_quantize_kv_cache,
                                              wired_limit)
         from mlx_vlm.tokenizer_utils import make_streaming_detokenizer
 
-        greedy = sampling["temperature"] <= 0 and not sampling["presence_penalty"]
-        if (self.draft is not None and pixel_values is None and not extra
-                and thinking is None and (greedy or DRAFT_SAMPLING)):
+        greedy = sampling["temperature"] <= 0 and not pen.active
+        spec = (self.draft is not None and pixel_values is None and not extra
+                and thinking is None and (greedy or DRAFT_SAMPLING))
+        if spec and (guide is not None or ctl.active):
+            # DFlash drafts are not grammar-masked: the verify rows would each
+            # need a mask over the draft prefix. Plain decoding instead.
+            log.info("grammar / token options: speculative decoding off for this request")
+        elif spec:
             yield from self._run_spec(input_ids, prompt_cache, max_tokens=max_tokens,
-                                      sampling=sampling,
+                                      sampling=sampling, pen=pen,
                                       on_prefilled=on_prefilled, start=start, cuts=cuts,
                                       on_ckpt=on_ckpt)
             return
@@ -717,29 +1343,30 @@ class Engine:
         model = self.model
         tokenizer = getattr(self.processor, "tokenizer", self.processor)
         sampler = make_sampler(sampling, seed=sampling.get("seed"))
-        processors = make_logits_processors(
-            presence_penalty=sampling["presence_penalty"] or None,
-            presence_context_size=sampling["presence_context_size"])
         quantize = functools.partial(maybe_quantize_kv_cache, **{
             "quantized_kv_start": KV_KWARGS["quantized_kv_start"],
             "kv_group_size": KV_KWARGS["kv_group_size"], "kv_bits": KV_KWARGS["kv_bits"]})
         kwargs = dict(extra)
-        tokens = mx.array([], dtype=input_ids.dtype)
 
         def step(y, inputs_embeds=None):
-            nonlocal tokens, kwargs
+            nonlocal kwargs
             with mx.stream(generation_stream):
                 out = model.language_model(y, inputs_embeds=inputs_embeds,
                                            cache=prompt_cache, **kwargs)
                 logits = out.logits[:, -1, :]
-                if processors:
-                    tokens = mx.concat([tokens, y.flatten()])
-                    for proc in processors:
-                        logits = proc(tokens, logits)
+                if pen.active:
+                    if inputs_embeds is None:         # y is a generated token, not the prompt
+                        pen.add(y)
+                    logits = pen(logits)
+                if ctl.active:
+                    if inputs_embeds is None:
+                        ctl.n += 1
+                    logits = ctl.mask(logits)
                 quantize(prompt_cache)
-                logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
                 kwargs = {}
-                return sampler(logprobs), logprobs.squeeze(0)
+                if guide is not None:
+                    return guide.sample(logits, sampler), None
+                return sampler(logits), None
 
         with wired_limit(model, [generation_stream]):
             with mx.stream(generation_stream):
@@ -774,8 +1401,9 @@ class Engine:
             detok = make_streaming_detokenizer(self.processor)
             self._finish = "length"
             n = 0
+            ahead = guide is None and not ctl.sync    # else the next mask needs this token
             while True:
-                if n != max_tokens:
+                if n != max_tokens and ahead:
                     next_y, next_lp = step(y[None])
                     mx.async_eval(next_y, next_lp)
                 if n == 0:
@@ -785,10 +1413,19 @@ class Engine:
                 tok = y.item()
                 if thinking is not None:
                     thinking(tok)
-                if tokenizer.stopping_criteria(tok):
+                why = ctl.stop(tok) if ctl.active else ("stop" if tokenizer.stopping_criteria(tok)
+                                                        else None)
+                if why == "stop":
                     self._finish = "stop"
                     break
-                detok.add_token(tok)
+                if not ahead:
+                    if guide is not None:
+                        guide.consume(tok)
+                    ctl.history.append(tok)
+                    next_y, next_lp = step(y[None])
+                    mx.async_eval(next_y)
+                if why != "skip":                     # an ignored EOS is not text
+                    detok.add_token(tok)
                 yield tok, detok.last_segment
                 if n % 256 == 0 and CLEAR_CACHE:
                     mx.clear_cache()
@@ -802,7 +1439,7 @@ class Engine:
             if seg:
                 yield None, seg
 
-    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, sampling, on_prefilled=None,
+    def _run_spec(self, input_ids, prompt_cache, *, max_tokens, sampling, pen, on_prefilled=None,
                   start=0, cuts=(), on_ckpt=None):
         """Greedy text-only prefill + DFlash speculative decode; same protocol as _run.
 
@@ -815,8 +1452,8 @@ class Engine:
         forward, keeps the longest matching prefix and rolls the caches back.
 
         Sampling is exact ("sample-match"): every verify row is sampled from the
-        target distribution for that position - temperature/top-p/top-k/min-p and
-        the presence penalty over the history plus the drafts before the row -
+        target distribution for that position - the penalties over the output
+        plus the drafts before the row, then temperature/min-p/top-k/top-p -
         and drafts are kept while they equal the target's own sample. Each
         emitted token is therefore a target sample given an accepted prefix,
         i.e. the same distribution as the plain loop; temperature only lowers
@@ -836,30 +1473,22 @@ class Engine:
         win = draft.config.sliding_window - 1
         argmax = lambda logits: mx.argmax(logits, axis=-1)
         sampler = make_sampler(sampling, seed=sampling.get("seed"))
-        penalty = sampling["presence_penalty"]
-        pen_ctx = sampling["presence_context_size"]
         dtype = input_ids.dtype
-        hist = input_ids[0, -1:]          # presence window: last prompt token + output
 
         def pick(logits, fed):
             """Target tokens for every row of `logits` (1, T, V); row i follows
-            hist + fed[:i+1]."""
-            nonlocal hist
+            the output so far plus the drafts fed[1:i+1]."""
             logits = logits[0]
-            if penalty:
-                seen = mx.concatenate([hist, fed[1:]]) if fed.shape[0] > 1 else hist
-                base = seen.shape[0] - logits.shape[0] + 1
-                rows = []
-                for i in range(logits.shape[0]):
-                    idx = seen[max(0, base + i - pen_ctx): base + i]
-                    row = logits[i]
-                    row[idx] = row[idx] - penalty
-                    rows.append(row)
-                logits = mx.stack(rows)
+            if pen.active:
+                extra = None
+                if fed.shape[0] > 1:
+                    hot = (fed[1:, None] == mx.arange(logits.shape[-1])[None]).astype(mx.float32)
+                    extra = mx.concatenate([mx.zeros((1, logits.shape[-1])),
+                                            mx.cumsum(hot, axis=0)])
+                logits = pen(logits, extra)
             if sampling["temperature"] <= 0:
                 return mx.argmax(logits, axis=-1)[None]
-            lp = logits.astype(mx.float32)
-            return sampler(lp - mx.logsumexp(lp, axis=-1, keepdims=True))[None]
+            return sampler(logits)[None]
 
         with wired_limit(model, [generation_stream]):
             with mx.stream(generation_stream):
@@ -888,7 +1517,7 @@ class Engine:
                 out = lm(input_ids[:, -1:], cache=prompt_cache, capture_layer_ids=layers)
                 hidden.append(mx.concatenate(out.hidden_states, axis=-1))
                 hidden = mx.concatenate(hidden, axis=1)[:, -win:]
-                first = pick(out.logits[:, -1:, :], hist)
+                first = pick(out.logits[:, -1:, :], input_ids[0, -1:])
                 mx.eval(first, hidden)
             first = first.item()
 
@@ -900,6 +1529,8 @@ class Engine:
                 if tokenizer.stopping_criteria(tok):
                     self._finish = "stop"
                     return False
+                if pen.active:
+                    pen.add(mx.array([tok]))
                 detok.add_token(tok)
                 return True
 
@@ -921,7 +1552,6 @@ class Engine:
                         mx.async_eval(drafts)
                         with mx.stream(generation_stream):
                             fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
-                            hist = mx.concatenate([hist, fed[0, :1]])
                             out = lm(fed, cache=prompt_cache, capture_layer_ids=layers)
                             hidden = mx.concatenate(out.hidden_states, axis=-1)
                             targets = pick(out.logits, fed[0])
@@ -937,11 +1567,6 @@ class Engine:
                             n += 1
                         if not new:
                             break
-                        # The window holds every token fed so far; new[-1] joins
-                        # when it is fed as the next round's `b`.
-                        if len(new) > 1:
-                            hist = mx.concatenate([hist, mx.array(new[:-1], dtype=dtype)])
-                        hist = hist[-(pen_ctx + 32):]
                         b = new[-1]
                         if accepted < bs - 1:
                             hidden = hidden[:, : accepted + 1, :]
@@ -961,32 +1586,22 @@ class Engine:
     # --- generation -------------------------------------------------------
     def generate(self, req: pb.Request):
         """Yield pb.Event. Serialized across requests via self._lock."""
-        from mlx_vlm.prompt_utils import apply_chat_template
-
         p = req.params
         cancel_ev = self._register(req.id)
-        # Tools mode: tools provided AND not explicitly disabled. Uses mlx-vlm's
-        # apply_chat_template with the FULL message history + tools (the normal path
-        # only uses the last message); image tokens are still inserted for num_images.
-        tools_mode = bool(p.tools_json) and p.tool_choice != "none"
+        tools = json.loads(p.tools_json) if p.tools_json else []
         tmp_files = []
         try:
             with self._lock:
-                yield pb.Event(id=req.id, start=pb.Start(role="assistant"))
-
+                yield pb.Event(id=req.id, start=pb.Start(role="assistant", model=self.model_id))
                 images, tmp_files = materialize_images(list(req.images))
-                # One path for both modes: mlx-vlm's apply_chat_template takes a FULL
-                # message list (system + history + tool messages), forwards `tools` to
-                # the Qwen Jinja template, AND inserts image tokens for num_images.
-                # The old non-tools branch passed only the LAST message, silently
-                # dropping system prompts and history — a long-standing footgun.
-                oai_messages = _rebuild_messages(req.messages)
-                extra = {"tools": json.loads(p.tools_json)} if tools_mode else {}
-                formatted = apply_chat_template(
-                    self.processor, self.config, oai_messages,
-                    num_images=len(images), enable_thinking=p.enable_thinking,
-                    **extra,
-                )
+                # mlx-vlm's apply_chat_template takes the FULL message list (system +
+                # history + tool messages), forwards `tools` and the template kwargs
+                # to the Jinja template, AND inserts image tokens for num_images.
+                try:
+                    formatted, grammar = self._render(req, images)
+                except _Reject as e:
+                    yield pb.Event(id=req.id, error=pb.Error(kind=e.kind, msg=str(e)))
+                    return
 
                 # Tokenize once (images preprocessed once), reject prompts that
                 # don't fit, and clamp the generation to the remaining budget.
@@ -1001,47 +1616,41 @@ class Engine:
                 prompt_tokens = len(ids)
                 log.info("id=%s prompt_tokens=%d (images=%d)",
                          req.id, prompt_tokens, len(images))
-                if prompt_tokens >= MAX_CONTEXT:
-                    yield pb.Event(id=req.id, error=pb.Error(
-                        kind="context_length_exceeded",
-                        msg=f"prompt is {prompt_tokens} tokens, exceeds context "
-                            f"limit {MAX_CONTEXT}"))
+                try:
+                    max_tokens = self._limit(p, prompt_tokens)
+                except _Reject as e:
+                    yield pb.Event(id=req.id, error=pb.Error(kind=e.kind, msg=str(e)))
                     return
 
-                state = _GenState(p)
+                # Thinking = the prompt leaves <think> open (the template does that
+                # unless enable_thinking is false).
+                inside = next((t == self._think[0] for t in reversed(ids)
+                               if t in self._think), False)
+                state = _GenState(inside)
+                state.counting = inside
                 t0 = time.time()
                 ttft_ms = 0
                 mx.reset_peak_memory()
-
-                remaining = MAX_CONTEXT - prompt_tokens
-                max_tokens = min(p.max_tokens or 1024, remaining)
 
                 # Reasoning budget: forces \n</think> into the token stream when
                 # exceeded (the KV cache stays consistent). Same criteria object
                 # mlx-vlm's stream_generate builds.
                 thinking = None
-                if p.enable_thinking and p.thinking_budget > 0:
+                if inside and p.HasField("thinking_budget"):
                     from mlx_vlm.utils import ThinkingBudgetCriteria
-                    tokenizer = getattr(self.processor, "tokenizer", self.processor)
-                    start_id = tokenizer.encode(THINK_OPEN, add_special_tokens=False)[-1]
                     thinking = ThinkingBudgetCriteria(
-                        tokenizer=tokenizer, thinking_budget=p.thinking_budget,
-                        thinking_end_token=THINK_CLOSE, thinking_start_token=THINK_OPEN,
-                        enable_thinking=start_id in ids)
+                        tokenizer=getattr(self.processor, "tokenizer", self.processor),
+                        thinking_budget=p.thinking_budget, thinking_end_token=THINK_CLOSE,
+                        thinking_start_token=THINK_OPEN, enable_thinking=True)
 
                 sampling = dict(SAMPLING_KWARGS)
-                if p.temperature >= 0:
-                    sampling["temperature"] = p.temperature
-                if p.top_p > 0:
-                    sampling["top_p"] = p.top_p
-                if p.HasField("top_k"):
-                    sampling["top_k"] = p.top_k
-                if p.HasField("min_p"):
-                    sampling["min_p"] = p.min_p
-                if p.HasField("presence_penalty"):
-                    sampling["presence_penalty"] = p.presence_penalty
-                if p.HasField("seed"):
-                    sampling["seed"] = p.seed
+                for f in ("temperature", "top_p", "top_k", "min_p", "presence_penalty",
+                          "frequency_penalty", "repetition_penalty", "seed"):
+                    if p.HasField(f):
+                        sampling[f] = getattr(p, f)
+                pen = _Penalties(sampling, ids, self.vocab)
+                tok_ = getattr(self.processor, "tokenizer", self.processor)
+                ctl = _Control(p, tok_.stopping_criteria.eos_token_ids, tok_, self.vocab)
 
                 # Prompt cache: resume from the deepest checkpoint shared with a
                 # cached prompt. Text-only conversations only.
@@ -1099,12 +1708,44 @@ class Engine:
                              e.nbytes / 1e6, len(self._pcache.entries),
                              sum(x.nbytes for x in self._pcache.entries) / 1e6)
 
-                stop = _StopFilter(list(p.stop))
+                guide = None
+                if grammar is not None:
+                    guide = _Guide(self._llg_tok, grammar, think_close=self._think[1],
+                                   active=not inside, ws=None if tools else self._not_ws,
+                                   tool_open=self._tool_tags[0] if tools and self._tool_tags else None)
+                    log.info("id=%s constrained: response_format=%s tool_choice=%s%s", req.id,
+                             json.loads(p.response_format_json).get("type")
+                             if p.response_format_json else "-", p.tool_choice or "auto",
+                             "" if guide.active else " (after </think>)")
+
+                stop = _StopFilter(list(p.stop), keep=p.include_stop_str_in_output)
                 answer_buf = []   # tools mode: buffer answer tokens, parse at the end
+                cut = []          # no tools: a <tool_call> in the answer was seen
+
+                def split(text):
+                    think_part, ans_part = state.feed(text)
+                    if think_part:
+                        yield pb.Event(id=req.id, token=pb.Token(text=think_part, thinking=True))
+                    if ans_part and not tools and not cut and TOOL_OPEN in ans_part:
+                        # vLLM's parser runs without tools too: the call and all text
+                        # after it leave the answer (tool_calls are not returned)
+                        ans_part, _, rest = ans_part.partition(TOOL_OPEN)
+                        cut.append(TOOL_OPEN + rest)
+                    elif cut:
+                        cut.append(ans_part)
+                        ans_part = ""
+                    if ans_part:
+                        if tools:
+                            # Don't stream raw answer (may contain <tool_call> XML); buffer it.
+                            answer_buf.append(ans_part)
+                        else:
+                            yield pb.Event(id=req.id, token=pb.Token(text=ans_part, thinking=False))
+
                 gen = self._run(input_ids, pixel_values, mask, extra, prompt_cache,
                                 max_tokens=max_tokens, sampling=sampling,
                                 thinking=thinking, on_prefilled=snapshot, start=reused,
-                                cuts=set(bounds), on_ckpt=checkpoint)
+                                cuts=set(bounds), on_ckpt=checkpoint, guide=guide, pen=pen,
+                                ctl=ctl)
                 for tok, text in gen:
                     if cancel_ev.is_set():
                         gen.close()
@@ -1113,23 +1754,16 @@ class Engine:
                     if ttft_ms == 0:
                         ttft_ms = int((time.time() - t0) * 1000)
                     if tok is not None:
-                        state.gen_tokens += 1
-                    think_part, ans_part = state.feed(text)
-                    if think_part:
-                        yield pb.Event(id=req.id, token=pb.Token(text=think_part, thinking=True))
-                    if ans_part:
-                        ans_part = stop.feed(ans_part)
-                    if ans_part:
-                        if tools_mode:
-                            # Don't stream raw answer (may contain <tool_call> XML); buffer it.
-                            answer_buf.append(ans_part)
-                        else:
-                            yield pb.Event(id=req.id, token=pb.Token(text=ans_part, thinking=False))
+                        state.token(tok, self._think[1], self._tool_tags[0] if self._tool_tags else -1)
+                    # vLLM: stop strings apply to the whole output, reasoning included,
+                    # and only once min_tokens are out
+                    yield from split(stop.feed(text) if state.gen_tokens > p.min_tokens else text)
                     if stop.hit:
                         gen.close()
                         break
                 finish = "stop" if stop.hit else self._finish
-                tail = stop.flush() if not stop.hit else ""
+                if not stop.hit:
+                    yield from split(stop.flush())
 
                 gen_s = time.time() - t0 - ttft_ms / 1000
                 tps = state.gen_tokens / gen_s if gen_s > 0 else 0.0
@@ -1139,18 +1773,30 @@ class Engine:
                          mx.get_peak_memory() / 1e9, mx.get_active_memory() / 1e9,
                          mx.get_cache_memory() / 1e9)
 
-                if tools_mode:
-                    answer_buf.append(tail)
-                    tool_calls, leftover = parse_tool_calls("".join(answer_buf))
-                    if leftover:
-                        yield pb.Event(id=req.id, token=pb.Token(text=leftover, thinking=False))
-                    if tool_calls:
+                if cut:
+                    log.info("id=%s no tools: <tool_call> in the answer, it and %d chars after "
+                             "it not returned (as vLLM)", req.id, len("".join(cut)))
+                calls = []
+                if tools:
+                    answer = "".join(answer_buf)
+                    key = hashlib.sha256(f"{ids}|{sampling.get('seed')}|{answer}".encode()).hexdigest()
+                    content, calls = parse_tool_calls(answer, tools, key)
+                    choice, _ = _tool_choice(p)
+                    if calls and choice == "none":
+                        log.info("id=%s tool_choice none: %d tool call(s) not returned",
+                                 req.id, len(calls))
+                        calls = []
+                    if len(calls) > 1 and p.HasField("parallel_tool_calls") and not p.parallel_tool_calls:
+                        log.info("id=%s parallel_tool_calls false: %d calls, first kept",
+                                 req.id, len(calls))
+                        calls = calls[:1]
+                    if content:
+                        yield pb.Event(id=req.id, token=pb.Token(text=content, thinking=False))
+                    # vLLM: auto -> "tool_calls" whenever a call was parsed (even at the
+                    # length limit); required -> only instead of "stop"; named keeps it
+                    if calls and (choice == "auto" or (choice == "required" and finish == "stop")):
                         finish = "tool_calls"
-                    yield _done(req.id, finish, state, t0, ttft_ms, prompt_tokens, tool_calls, tps)
-                else:
-                    if tail:
-                        yield pb.Event(id=req.id, token=pb.Token(text=tail, thinking=False))
-                    yield _done(req.id, finish, state, t0, ttft_ms, prompt_tokens, tps=tps)
+                yield _done(req.id, finish, state, t0, ttft_ms, prompt_tokens, calls, tps)
         except Exception as e:  # noqa: BLE001 — map any failure to a wire Error
             log.exception("generation failed: %s", req.id)
             yield pb.Event(id=req.id, error=pb.Error(kind=type(e).__name__, msg=str(e)))
@@ -1167,44 +1813,132 @@ class Engine:
                 mx.clear_cache()
 
 
-class _GenState:
-    """Tracks whether the current token is reasoning text (for tagging only).
+class _Control:
+    """vLLM's token-level request options: allowed_token_ids, bad_words, min_tokens
+    (EOS and stop_token_ids masked until then), stop_token_ids, ignore_eos.
+    `sync`: a multi-token bad word needs the tokens so far when the mask is built,
+    so the decode loop does not step ahead (as with a grammar)."""
 
-    The reasoning budget itself is enforced natively by mlx-vlm; this just
-    classifies each chunk as thinking vs answer so the gateway can route it to
-    `reasoning_content` vs `content`.
+    def __init__(self, p, eos, tokenizer, vocab):
+        self.eos = set(eos)
+        self.stop_ids = set(p.stop_token_ids)
+        self.ignore_eos = p.ignore_eos
+        self.min_tokens = p.min_tokens
+        self.vocab = vocab
+        self.n = 0
+        self.history = []
+        base = None
+        if p.allowed_token_ids:
+            base = mx.zeros((vocab,), dtype=mx.bool_)
+            base[mx.array(list(p.allowed_token_ids))] = True
+        self.seqs = []                         # (prefix, last) of multi-token bad words
+        single = set()
+        for w in p.bad_words:                  # vLLM: the word and " word"
+            for v in {w, " " + w.lstrip()}:
+                ids = tokenizer.encode(v, add_special_tokens=False)
+                if len(ids) == 1:
+                    single.add(ids[0])
+                elif ids:
+                    self.seqs.append((ids[:-1], ids[-1]))
+        if single:
+            if base is None:
+                base = mx.ones((vocab,), dtype=mx.bool_)
+            base[mx.array(sorted(single))] = False
+        self.base = base
+        self.early = None
+        if self.min_tokens:
+            self.early = mx.ones((vocab,), dtype=mx.bool_)
+            self.early[mx.array(sorted(self.eos | self.stop_ids))] = False
+        self.sync = bool(self.seqs)
+        self.active = base is not None or self.early is not None or self.sync \
+            or bool(self.stop_ids) or self.ignore_eos
+
+    def mask(self, logits):
+        """Token n's logits (n = tokens generated before it)."""
+        ok = self.base
+        if self.early is not None and self.n < self.min_tokens:
+            ok = self.early if ok is None else ok & self.early
+        if self.seqs:
+            ban = [last for pre, last in self.seqs
+                   if len(self.history) >= len(pre) and self.history[-len(pre):] == pre]
+            if ban:
+                m = mx.ones((self.vocab,), dtype=mx.bool_)
+                m[mx.array(ban)] = False
+                ok = m if ok is None else ok & m
+        if ok is None:
+            return logits
+        return mx.where(ok, logits, mx.array(-float("inf"), dtype=logits.dtype))
+
+    def stop(self, tok):
+        """-> "stop" (end, token not shown), "skip" (an ignored EOS: go on, not shown)
+        or None."""
+        if tok in self.stop_ids:
+            return "stop"
+        if tok in self.eos:
+            return "skip" if self.ignore_eos else "stop"
+        return None
+
+
+class _Reject(Exception):
+    """A request Generate refuses before generating (-> HTTP 400)."""
+
+    def __init__(self, kind, msg):
+        super().__init__(msg)
+        self.kind = kind
+
+
+class _GenState:
+    """Splits the output into reasoning and answer as vLLM's `qwen3` parser does
+    (vllm/parser/qwen3.py, v0.30, one grammar for both modes).
+
+    Thinking on (the template pre-opens <think>): the output starts as reasoning;
+    a <think> there is swallowed, </think> ends it, and so does <tool_call> (the
+    tag goes to the answer). In the answer — from the start when thinking is off —
+    a </think> is dropped and a <think> is plain text. No </think> at all =
+    everything is reasoning. Tags are single tokens: a chunk holds a whole tag.
     """
 
-    def __init__(self, params: pb.Params):
-        # When thinking is enabled, the chat template already opens <think> in the
-        # prompt, so generation STARTS inside the reasoning block (the literal
-        # <think> token is never emitted). Seed the state accordingly.
-        self.in_thinking = bool(params.enable_thinking)
+    def __init__(self, thinking: bool):
+        self.in_thinking = thinking
         self.gen_tokens = 0
+        self.reasoning_tokens = 0
 
     def feed(self, text: str) -> tuple[str, str]:
-        """Split a chunk into (thinking_part, answer_part).
-
-        A single chunk can straddle the </think> boundary — notably when
-        thinking_budget force-injects "\\n</think>" and the answer follows in
-        the same chunk. Classifying whole chunks put the answer into
-        reasoning_content and left content empty; split instead.
-        """
-        if THINK_OPEN in text:
-            self.in_thinking = True
-        if self.in_thinking:
-            if THINK_CLOSE in text:
+        """Split a chunk into (thinking_part, answer_part)."""
+        think = []
+        while self.in_thinking and text:
+            ends = [(text.find(t), t) for t in (THINK_OPEN, THINK_CLOSE, TOOL_OPEN)]
+            i, tag = min(((i, t) for i, t in ends if i >= 0), default=(-1, ""))
+            if i < 0:
+                think.append(text)
+                text = ""
+                break
+            think.append(text[:i])
+            if tag == THINK_OPEN:
+                text = text[i + len(tag):]
+            elif tag == THINK_CLOSE:
                 self.in_thinking = False
-                pre, _, post = text.partition(THINK_CLOSE)
-                return (pre + THINK_CLOSE, post)
-            return (text, "")
-        return ("", text)
+                text = text[i + len(tag):]
+            else:                                 # <tool_call>: answer from here on
+                self.in_thinking = False
+                text = text[i:]
+        return "".join(think), text.replace(THINK_CLOSE, "")
+
+    def token(self, tok, think_close, tool_open):
+        """Count a generated token: reasoning until the token that ends it."""
+        self.gen_tokens += 1
+        if self.counting:
+            if tok in (think_close, tool_open):
+                self.counting = False
+            else:
+                self.reasoning_tokens += 1
 
 
 def _done(req_id, finish, state, t0, ttft_ms, prompt_tokens, tool_calls=None, tps=0.0):
     usage = pb.Usage(
         prompt_tokens=prompt_tokens,
         gen_tokens=state.gen_tokens,
+        reasoning_tokens=state.reasoning_tokens,
         tps=tps,
         ttft_ms=ttft_ms,
         peak_gb=mx.get_peak_memory() / 1e9,
@@ -1219,9 +1953,12 @@ class WorkerServicer(pb_grpc.WorkerServicer):
         self.stop_event = stop_event
 
     def Generate(self, request, context):
-        log.info("Generate id=%s images=%d max_tokens=%d think=%s budget=%d",
-                 request.id, len(request.images), request.params.max_tokens,
-                 request.params.enable_thinking, request.params.thinking_budget)
+        p = request.params
+        log.info("Generate id=%s images=%d max_tokens=%s template_kwargs=%s budget=%s",
+                 request.id, len(request.images),
+                 p.max_tokens if p.HasField("max_tokens") else "-",
+                 p.chat_template_kwargs_json or "-",
+                 p.thinking_budget if p.HasField("thinking_budget") else "-")
         yield from self.engine.generate(request)
 
     def Cancel(self, request, context):
@@ -1230,8 +1967,15 @@ class WorkerServicer(pb_grpc.WorkerServicer):
 
     def Health(self, request, context):
         return pb.HealthReply(ready=self.engine.ready,
-                              model=self.engine.model_path,
-                              load_ms=self.engine.load_ms)
+                              model=self.engine.model_id,
+                              load_ms=self.engine.load_ms,
+                              model_path=self.engine.model_path)
+
+    def Check(self, request, context):
+        # Runs beside a generation (own pool thread): template, tokenizer and
+        # grammar checks, nothing that touches MLX.
+        error, internal = self.engine.check(request)
+        return pb.CheckReply(error=error, internal=internal, model=self.engine.model_id)
 
     def Shutdown(self, request, context):
         log.warning("shutdown requested")

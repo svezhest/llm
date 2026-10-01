@@ -4,6 +4,7 @@ mod logging;
 mod metrics;
 mod pb;
 mod pool;
+mod request;
 mod worker_client;
 
 use std::env;
@@ -18,7 +19,9 @@ pub struct AppState {
     pub pool: pool::Pool,
     pub client: Client,
     pub metrics: metrics_exporter_prometheus::PrometheusHandle,
-    pub model_name: String,
+    /// Model id the worker reported at connect; a fallback only — responses carry
+    /// the id from each generation's Start event, /v1/models asks Health.
+    pub worker_model: String,
     pub journal: Option<journal::Journal>,
 }
 
@@ -32,13 +35,13 @@ async fn main() -> anyhow::Result<()> {
     let max_queue: usize = env::var("MAX_QUEUE").ok().and_then(|s| s.parse().ok()).unwrap_or(32);
 
     info!(%worker_addr, %listen, max_queue, "starting gateway");
-    let client = worker_client::connect(worker_addr).await?;
+    let (client, worker_model) = worker_client::connect(worker_addr).await?;
 
     let state = AppState {
         pool: pool::Pool::new(max_queue),
         client,
         metrics: metrics_handle,
-        model_name: env::var("MODEL_NAME").unwrap_or_else(|_| "qwen3.6-35b-a3b".into()),
+        worker_model,
         journal: journal::Journal::from_env()?,
     };
     if state.journal.is_some() {
