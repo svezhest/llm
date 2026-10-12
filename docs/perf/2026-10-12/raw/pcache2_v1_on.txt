@@ -1,0 +1,94 @@
+code0.cold     prompt=46 cached=0 tok=128 finish=length wall=3.86s err=None
+code0.hit      prompt=46 cached=45 tok=128 finish=length wall=3.48s err=None
+code1.cold     prompt=38 cached=0 tok=128 finish=length wall=3.62s err=None
+code1.hit      prompt=38 cached=37 tok=128 finish=length wall=3.48s err=None
+code2.cold     prompt=34 cached=0 tok=128 finish=length wall=3.64s err=None
+code2.hit      prompt=34 cached=33 tok=128 finish=length wall=3.49s err=None
+code3.cold     prompt=39 cached=0 tok=128 finish=length wall=3.62s err=None
+code3.hit      prompt=39 cached=38 tok=128 finish=length wall=3.48s err=None
+code4.cold     prompt=30 cached=0 tok=128 finish=length wall=3.56s err=None
+code4.hit      prompt=30 cached=29 tok=128 finish=length wall=3.48s err=None
+sysA.cold      prompt=7405 cached=0 tok=128 finish=length wall=16.29s err=None
+sysA.hit       prompt=7405 cached=7404 tok=128 finish=length wall=3.62s err=None
+sysB.sib       prompt=7396 cached=7359 tok=128 finish=length wall=3.77s err=None
+sysC.sib       prompt=7395 cached=7359 tok=128 finish=length wall=3.77s err=None
+chatT.1        prompt=2647 cached=0 tok=92 finish=stop wall=7.12s err=None
+chatT.2        prompt=2684 cached=2625 tok=48 finish=stop wall=1.53s err=None
+chatT.3        prompt=2719 cached=2625 tok=42 finish=stop wall=1.42s err=None
+chatN.1        prompt=2643 cached=0 tok=128 finish=length wall=8.17s err=None
+chatN.2        prompt=2791 cached=2625 tok=84 finish=stop wall=2.73s err=None
+chatN.3        prompt=2899 cached=2625 tok=128 finish=length wall=4.26s err=None
+{
+ "start": {
+  "entries": 0,
+  "bytes": 0,
+  "hits": 0,
+  "misses": 0,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "before_chats": {
+  "entries": 8,
+  "bytes": 1351319552,
+  "hits": 8,
+  "misses": 6,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "chatT.1": {
+  "entries": 9,
+  "bytes": 1592557568,
+  "hits": 8,
+  "misses": 7,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "chatT.2": {
+  "entries": 9,
+  "bytes": 1593769984,
+  "hits": 9,
+  "misses": 7,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "chatT.3": {
+  "entries": 9,
+  "bytes": 1594916864,
+  "hits": 10,
+  "misses": 7,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "chatN.1": {
+  "entries": 10,
+  "bytes": 1836023808,
+  "hits": 10,
+  "misses": 8,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "chatN.2": {
+  "entries": 10,
+  "bytes": 1840873472,
+  "hits": 11,
+  "misses": 8,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "chatN.3": {
+  "entries": 10,
+  "bytes": 1895923712,
+  "hits": 12,
+  "misses": 8,
+  "evictions": 0,
+  "max_batch": 16
+ },
+ "end": {
+  "entries": 10,
+  "bytes": 1895923712,
+  "hits": 12,
+  "misses": 8,
+  "evictions": 0,
+  "max_batch": 16
+ }
+}

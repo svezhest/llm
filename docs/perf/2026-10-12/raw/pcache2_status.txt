@@ -1,0 +1,84 @@
+2026-10-12 15:07:12 === start
+2026-10-12 15:07:12 therm:  load: { 2.64 2.67 2.57 }
+2026-10-12 15:07:12 kill gateway 7359
+2026-10-12 15:07:13 kill worker 21452
+2026-10-12 15:07:17 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache2/worker_v1_on.log
+2026-10-12 15:07:23 worker up: 2026-10-12 15:07:22,628 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 15:07:23,096 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 15:07:23 start gateway (new binary)
+2026-10-12 15:07:25 gateway pid 27313
+2026-10-12 15:07:27 phase V1on start
+2026-10-12 15:07:27 therm:  load: { 2.83 2.70 2.58 }
+2026-10-12 15:08:55 phase V1on end rc=0
+2026-10-12 15:08:55 therm:  load: { 3.20 2.89 2.67 }
+2026-10-12 15:08:55 kill worker 27270
+2026-10-12 15:08:59 start worker env:  log: /tmp/scratch/pcache2/worker_v1_off.log
+2026-10-12 15:09:05 worker up: 2026-10-12 15:09:04,210 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False 2026-10-12 15:09:04,650 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache off 
+2026-10-12 15:10:08 gateway: 2026-10-12T12:07:24.573301Z  INFO qwen_gateway::worker_client: worker ready model=ornith15-9b-mlx-8bit path=../../weights/ornith15-9b-mlx-8bit load_ms=3744 max_batch=16 2026-10-12T12:07:24.573344Z  INFO qwen_gateway: in-flight capacity capacity=16 worker_max_batch=16 fixed=false 
+2026-10-12 15:10:08 phase V1off start
+2026-10-12 15:12:03 phase V1off end rc=0
+2026-10-12 15:12:03 therm:  load: { 2.95 3.07 2.80 }
+2026-10-12 15:12:03 V1 cmp rc=0 20/20 identical (text+reasoning+finish+tokens) to the cache-off run
+2026-10-12 15:12:03 kill worker 27654
+2026-10-12 15:12:07 start worker env: QWEN_PROMPT_CACHE=1 QWEN_PROMPT_CACHE_GB=1 log: /tmp/scratch/pcache2/worker_v4_gb1.log
+2026-10-12 15:12:12 worker up: 2026-10-12 15:12:11,988 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 15:12:12,423 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 1.0 GiB, evicted on demand) 
+2026-10-12 15:12:26 gateway: 2026-10-12T12:07:24.573344Z  INFO qwen_gateway: in-flight capacity capacity=16 worker_max_batch=16 fixed=false 2026-10-12T12:12:24.578437Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 15:12:26 phase V4gb1 start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 15:12:26 therm:  load: { 2.82 3.03 2.79 }
+2026-10-12 15:19:18 phase V4gb1 end rc=0
+2026-10-12 15:19:18 therm:  load: { 3.22 3.33 3.04 }
+2026-10-12 15:19:18 health: {"entries": 2, "bytes": 1057128448, "hits": 0, "misses": 18, "evictions": 16, "max_batch": 16}
+2026-10-12 15:19:18 kill worker 28107
+2026-10-12 15:19:22 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache2/worker_v2.log
+2026-10-12 15:19:29 worker up: 2026-10-12 15:19:27,865 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 15:19:28,292 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 15:19:42 gateway: 2026-10-12T12:12:24.578437Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 2026-10-12T12:19:39.578625Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 15:19:42 phase V2s1 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 15:19:42 therm:  load: { 3.06 3.29 3.03 }
+2026-10-12 15:21:43 phase V2s1 end rc=0
+2026-10-12 15:21:43 therm:  load: { 3.32 3.30 3.06 }
+2026-10-12 15:21:44 health: {"entries": 9, "bytes": 3106963456, "hits": 15, "misses": 3, "evictions": 9, "max_batch": 16}
+2026-10-12 15:21:44 phase V2d start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 15:21:44 therm:  load: { 3.32 3.30 3.06 }
+2026-10-12 15:28:40 phase V2d end rc=0
+2026-10-12 15:28:40 therm:  load: { 2.71 3.00 3.03 }
+2026-10-12 15:28:40 health: {"entries": 6, "bytes": 3167125504, "hits": 15, "misses": 21, "evictions": 30, "max_batch": 16}
+2026-10-12 15:28:40 phase V2s2 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 15:28:40 therm:  load: { 2.71 3.00 3.03 }
+2026-10-12 15:30:37 phase V2s2 end rc=0
+2026-10-12 15:30:38 therm:  load: { 2.85 2.83 2.94 }
+2026-10-12 15:30:38 health: {"entries": 9, "bytes": 3119775744, "hits": 30, "misses": 24, "evictions": 45, "max_batch": 16}
+2026-10-12 15:30:38 phase V3 start: --prefix shared --concurrency 1 --requests-per-level 8 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 15:30:38 therm:  load: { 2.85 2.83 2.94 }
+2026-10-12 15:33:03 phase V3 end rc=0
+2026-10-12 15:33:03 therm:  load: { 4.67 3.20 3.04 }
+2026-10-12 15:33:03 health: {"entries": 8, "bytes": 2760048640, "hits": 37, "misses": 27, "evictions": 56, "max_batch": 16}
+2026-10-12 15:33:03 === done (worker left running, cache on, log /tmp/scratch/pcache2/worker_v2.log)
+2026-10-12 15:33:11 === part 2 start
+2026-10-12 15:33:11 therm:  load: { 4.11 3.12 3.02 }
+2026-10-12 15:33:11 phase V4d32k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 15:33:11 therm:  load: { 4.11 3.12 3.02 }
+2026-10-12 15:38:09 phase V4d32k end rc=0
+2026-10-12 15:38:09 therm:  load: { 1.97 2.40 2.71 }
+2026-10-12 15:38:09 health: {"entries": 2, "bytes": 2904784896, "hits": 52, "misses": 30, "evictions": 80, "max_batch": 16}
+2026-10-12 15:38:09 kill worker 28583
+2026-10-12 15:38:13 start worker env:  log: /tmp/scratch/pcache2/worker_v1x_off.log
+2026-10-12 15:38:19 worker up: 2026-10-12 15:38:19,061 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False 2026-10-12 15:38:19,492 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache off 
+2026-10-12 15:38:27 gateway: 2026-10-12T12:19:39.578625Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 2026-10-12T12:38:24.585528Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 15:38:27 phase V1x off start
+2026-10-12 15:40:10 phase V1x off end rc=0
+2026-10-12 15:40:10 kill worker 30640
+2026-10-12 15:40:15 start worker env: QWEN_PROMPT_CACHE=1 QWEN_PROMPT_CACHE_GB=8 QWEN_BATCH_MEM_GB=6 log: /tmp/scratch/pcache2/worker_v4c.log
+2026-10-12 15:40:20 worker up: 2026-10-12 15:40:18,839 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 15:40:19,261 INFO  qwen.worker batching: max_batch 16, KV budget 6.00 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 8.0 GiB, evicted on demand) 
+2026-10-12 15:41:24 gateway: 2026-10-12T12:19:39.578625Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 2026-10-12T12:38:24.585528Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 15:41:24 phase V1x on start
+2026-10-12 15:42:25 phase V1x on end rc=0
+2026-10-12 15:42:25 V1x cmp rc=0 6/6 identical (text+reasoning+finish+tokens) to the cache-off run
+2026-10-12 15:42:25 phase V4c start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 15:42:25 therm:  load: { 2.08 2.48 2.68 }
+2026-10-12 15:48:49 phase V4c end rc=0
+2026-10-12 15:48:49 therm:  load: { 4.15 3.80 3.20 }
+2026-10-12 15:48:49 health: {"entries": 9, "bytes": 4756537344, "hits": 5, "misses": 19, "evictions": 13, "max_batch": 16}
+2026-10-12 15:48:49 kill worker 30882
+2026-10-12 15:48:54 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache2/worker_final.log
+2026-10-12 15:49:00 worker up: 2026-10-12 15:48:59,304 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 15:48:59,752 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 15:49:12 gateway: 2026-10-12T12:38:24.585528Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 2026-10-12T12:49:09.592379Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 15:49:12 === part 2 done (worker left running, cache on, log /tmp/scratch/pcache2/worker_final.log)

@@ -2,15 +2,20 @@
 """Concurrency benchmark for the OpenAI-compatible gateway (stdlib only).
 
 Closed loop per level: N client threads pull requests from a shared list until it
-is empty; every request is a distinct prompt (distinct task + distinct filler
-context) so a prefix cache cannot help. Streaming, temperature 0, presence 0,
+is empty. The ~--prompt-tokens filler context sits in the system message, the user
+message holds only the question. --prefix distinct (default): every request has its
+own filler (distinct task + distinct context) so a prefix cache cannot help;
+--prefix shared: every request of a level shares one filler (one system prompt, the
+worker's prompt cache can reuse it), only the question differs. The probe always
+gets its own filler. Streaming, temperature 0, presence 0,
 thinking off by default, ignore_eos by default so every answer is max_tokens long.
 
 Per request: TTFT (send -> first content/reasoning token; includes queue wait),
 completion tokens (usage of the final chunk), decode tok/s = tokens / (end - first
 token), latency. Per level: wall, aggregate tok/s = sum(tokens) / wall, mean/p95
 TTFT and latency, mean decode tok/s. --worker-log joins the worker's per-request
-log line (peak memory, worker-side ttft/tps) by request id.
+log line (peak memory, worker-side ttft/tps) by request id, and the prompt-cache
+HIT/MISS/store lines (QWEN_PROMPT_CACHE=1) as hit / reused / store_* per request.
 
     uv run python scripts/bench_concurrency.py --concurrency 1,2,4,8 --out bench.json
 """
@@ -76,13 +81,20 @@ def filler(seed: str, n_chars: int) -> str:
     return "\n".join(lines)
 
 
-def make_messages(idx: int, tag: str, n_chars: int) -> list[dict]:
+SYSTEM = "You are a senior software engineer. Answer thoroughly with code where useful."
+
+
+def make_messages(idx: int, tag: str, n_chars: int, shared: bool = False) -> list[dict]:
+    """The filler goes in the system message (its end is an <|im_start|> cut where the
+    worker checkpoints the prompt cache); shared: one filler per `tag`, else per request."""
     task = TASKS[idx % len(TASKS)]
-    ctx = filler(f"{tag}-{idx}", n_chars)
+    ctx = filler(f"{tag}-shared" if shared else f"{tag}-{idx}", n_chars)
+    sys_msg = SYSTEM
+    if n_chars > 0:
+        sys_msg += f"\n\nBackground service log for context (unrelated to the question, ignore it):\n{ctx}"
     return [
-        {"role": "system", "content": "You are a senior software engineer. Answer thoroughly with code where useful."},
-        {"role": "user", "content": f"Background service log for context (unrelated to the question, ignore it):\n{ctx}\n\n"
-                                    f"Question #{idx}: {task} Be detailed and thorough."},
+        {"role": "system", "content": sys_msg},
+        {"role": "user", "content": f"Question #{idx}: {task} Be detailed and thorough."},
     ]
 
 
@@ -160,18 +172,49 @@ def parse_worker_log(path: str, ids: set[str]) -> dict[str, dict]:
     rx = re.compile(r"id=(\S+) finish=(\S+) gen_tokens=(\d+) ttft_ms=(\d+) tps=([\d.]+) cached=(\d+) "
                     r"peak=([\d.]+)GB active=([\d.]+)GB pool=([\d.]+)GB"
                     r"(?: queue_ms=(\d+) batch=([\d.]+))?")
+    # prompt cache (worker.py _Scheduler._prompt_cache)
+    rx_hit = re.compile(r"id=(\S+) prompt cache HIT: (\d+)/(\d+) tokens reused \(common prefix (\d+)\), "
+                        r"prefilling (\d+)")
+    rx_miss = re.compile(r"id=(\S+) prompt cache MISS \(common prefix (\d+), (\d+) entries\)")
+    rx_store = re.compile(r"id=(\S+) prompt cache store: (\d+) tokens, (\d+) checkpoints, ([\d.]+) MB "
+                          r"\((\d+) entries, ([\d.]+) MB total\)")
+
+    def key(wid):
+        # the gateway sends the worker chatcmpl-<request_id>-<12 hex> (a request_id
+        # reused by concurrent requests must not cancel the other one)
+        return wid if wid in ids else re.sub(r"-[0-9a-f]{12}$", "", wid)
+
     out = {}
     try:
         with open(path, errors="replace") as f:
             for line in f:
+                if "prompt cache" in line:
+                    if m := rx_hit.search(line):
+                        k = key(m.group(1))
+                        if k in ids:
+                            out.setdefault(k, {}).update(
+                                hit=True, reused=int(m.group(2)), pc_prompt_tokens=int(m.group(3)),
+                                common_prefix=int(m.group(4)), prefilled=int(m.group(5)))
+                    elif m := rx_miss.search(line):
+                        k = key(m.group(1))
+                        if k in ids:
+                            out.setdefault(k, {}).update(
+                                hit=False, reused=0, common_prefix=int(m.group(2)),
+                                entries_before=int(m.group(3)))
+                    elif m := rx_store.search(line):
+                        k = key(m.group(1))
+                        if k in ids:
+                            out.setdefault(k, {}).update(
+                                store_tokens=int(m.group(2)), store_ckpts=int(m.group(3)),
+                                store_mb=float(m.group(4)), store_entries=int(m.group(5)),
+                                store_total_mb=float(m.group(6)))
+                    continue
                 m = rx.search(line)
-                # the gateway sends the worker chatcmpl-<request_id>-<12 hex> (a request_id
-                # reused by concurrent requests must not cancel the other one)
-                wid = m and (m.group(1) if m.group(1) in ids else re.sub(r"-[0-9a-f]{12}$", "", m.group(1)))
+                wid = m and key(m.group(1))
                 if m and wid in ids:
-                    out[wid] = {"w_ttft_ms": int(m.group(4)), "w_tps": float(m.group(5)),
-                                "w_gen_tokens": int(m.group(3)), "peak_gb": float(m.group(7)),
-                                "active_gb": float(m.group(8)), "pool_gb": float(m.group(9))}
+                    out.setdefault(wid, {}).update(
+                        w_ttft_ms=int(m.group(4)), w_tps=float(m.group(5)), w_gen_tokens=int(m.group(3)), w_cached=int(m.group(6)),
+                        peak_gb=float(m.group(7)), active_gb=float(m.group(8)), pool_gb=float(m.group(9)))
                     if m.group(10) is not None:          # batching worker
                         out[wid].update(queue_ms=int(m.group(10)), batch_mean=float(m.group(11)))
     except OSError as e:
@@ -187,6 +230,9 @@ def main() -> int:
     ap.add_argument("--requests-per-level", type=int, default=0, help="default max(8, 2*concurrency)")
     ap.add_argument("--max-tokens", type=int, default=256)
     ap.add_argument("--prompt-tokens", type=int, default=600, help="target prompt size (approximate)")
+    ap.add_argument("--prefix", choices=["distinct", "shared"], default="distinct",
+                    help="distinct: every request has its own filler context (no prefix reuse); shared: all "
+                         "requests of a level share one filler in the system message (prompt-cache test)")
     ap.add_argument("--thinking", choices=["on", "off"], default="off")
     ap.add_argument("--ignore-eos", choices=["on", "off"], default="on",
                     help="on: every answer is exactly max_tokens (vLLM ignore_eos)")
@@ -224,13 +270,17 @@ def main() -> int:
         return b
 
     # Calibrate characters per prompt token with one short request (also a warmup).
+    # The filler's line labels carry its seed, so the calibration seed has the shape
+    # of the real ones ("<tag>-<rep>-<n>-shared" / "<tag>-<rep>-<n>-<seq>"), else the
+    # tokens per line differ (a "cal<tag>-9999" seed gave 8154 tokens for 8000).
     probe_chars = a.prompt_tokens * 3
-    r = cl.chat(body(make_messages(9999, f"cal{run_tag}", probe_chars), 1 if a.no_warmup else 16,
-                     f"bench-{run_tag}-cal"))
+    r = cl.chat(body(make_messages(99, f"{run_tag}-c-0", probe_chars, a.prefix == "shared"),
+                     1 if a.no_warmup else 16, f"bench-{run_tag}-cal"))
     if not r["prompt_tokens"]:
         print("no usage in the stream: cannot calibrate", file=sys.stderr)
         return 1
-    overhead = len(make_messages(9999, "x", 0)[1]["content"]) // 4 + 40  # rough template + task
+    m0 = make_messages(9999, "x", 1)                 # 1 char: the filler header without the filler
+    overhead = (len(m0[0]["content"]) + len(m0[1]["content"])) // 4 + 40  # rough template + header + task
     cpt = probe_chars / max(1, r["prompt_tokens"] - overhead)
     n_chars = max(0, int((a.prompt_tokens - overhead) * cpt))
     print(f"model={a.model} calibration: {r['prompt_tokens']} prompt tokens for {probe_chars} filler chars "
@@ -260,7 +310,8 @@ def main() -> int:
             for i in range(total):
                 seq += 1
                 rid = f"bench-{run_tag}-r{rep}-c{n}-{i}"
-                jobs.append((rid, body(make_messages(seq, f"{run_tag}-{rep}-{n}", n_chars), a.max_tokens, rid)))
+                jobs.append((rid, body(make_messages(seq, f"{run_tag}-{rep}-{n}", n_chars, a.prefix == "shared"),
+                                       a.max_tokens, rid)))
             lock = threading.Lock()
             recs, errors = [], []
 
@@ -297,6 +348,7 @@ def main() -> int:
             lat = [r["latency_s"] for r in recs]
             toks = sum(r["completion_tokens"] for r in recs)
             peaks = [r["peak_gb"] for r in recs if "peak_gb" in r]
+            pc = [r for r in recs if "hit" in r]
             lv = {
                 "rep": rep, "concurrency": n, "requests": len(recs), "errors": errors, "wall_s": wall,
                 "completion_tokens": toks, "agg_tps": toks / wall if wall else float("nan"),
@@ -310,14 +362,20 @@ def main() -> int:
                 "peak_gb_max": max(peaks) if peaks else None,
                 "probe_decode_tps": probe["decode_tps"] if probe else None,
                 "probe_ttft_s": probe["ttft_s"] if probe else None,
+                "pcache_requests": len(pc),
+                "pcache_hit_rate": sum(r["hit"] for r in pc) / len(pc) if pc else None,
+                "pcache_reused_mean": statistics.mean([r["reused"] for r in pc]) if pc else None,
                 "requests_detail": recs,
             }
             results["levels"].append(lv)
             print(f"rep {rep} c={n}: {len(recs)} req, wall {wall:.1f}s, agg {lv['agg_tps']:.1f} tok/s, "
-                  f"ttft mean {lv['ttft_mean_s'] or 0:.2f}s, errors {len(errors)}", file=sys.stderr)
+                  f"ttft mean {lv['ttft_mean_s'] or 0:.2f}s, errors {len(errors)}"
+                  + (f", pcache hits {sum(r['hit'] for r in pc)}/{len(pc)}" if pc else ""), file=sys.stderr)
 
+    has_pc = any(lv["pcache_requests"] for lv in results["levels"])
     hdr = ("| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | "
-           "lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB |")
+           "lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB |"
+           + (" pcache hit rate / mean reused tok |" if has_pc else ""))
     print("\n" + hdr)
     print("|" + "---|" * (hdr.count("|") - 1))
     for lv in results["levels"]:
@@ -325,7 +383,9 @@ def main() -> int:
         pr = f"{lv['probe_decode_tps']:.1f}" if lv["probe_decode_tps"] is not None else "-"
         print(f"| {lv['rep']} | {lv['concurrency']} | {lv['requests']} | {lv['mean_prompt_tokens'] or 0:.0f} | "
               f"{lv['wall_s']:.1f} | {lv['agg_tps']:.1f} | {lv['ttft_mean_s'] or 0:.2f} | {lv['ttft_p95_s']:.2f} | "
-              f"{lv['lat_mean_s'] or 0:.2f} | {lv['lat_p95_s']:.2f} | {lv['decode_tps_mean'] or 0:.1f} | {pr} | {pk} |")
+              f"{lv['lat_mean_s'] or 0:.2f} | {lv['lat_p95_s']:.2f} | {lv['decode_tps_mean'] or 0:.1f} | {pr} | {pk} |"
+              + ((f" {lv['pcache_hit_rate']:.2f} / {lv['pcache_reused_mean']:.0f} |" if lv["pcache_requests"]
+                  else " - |") if has_pc else ""))
     if a.repeat > 1:
         print("\n| conc | reps | agg tok/s mean (min-max) | agg / probe | TTFT mean s | lat mean s | decode tok/s/req |")
         print("|---|---|---|---|---|---|---|")

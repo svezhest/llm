@@ -75,14 +75,19 @@ message Usage {
   uint32 reasoning_tokens = 6;
   uint32 queue_ms = 7;       // worker-side wait from arrival to the start of prefill
   float batch_mean = 8;      // mean number of rows in the decode steps this request took part in
+  uint32 cached_tokens = 9;  // prompt tokens resumed from the prompt cache (not prefilled)
 }
 
 message CancelReq { string id = 1; }
 // model: id of the loaded model (its weights dir name); model_path: what was loaded.
 // max_batch: how many generations the worker decodes concurrently (1 = serialized).
+// prompt_cache_*: the worker's prompt cache (QWEN_PROMPT_CACHE; all 0 when off):
+// entries and live bytes now, lookups that hit / missed and entries evicted since start.
 message HealthReply {
   bool ready = 1; string model = 2; uint32 load_ms = 3; string model_path = 4;
   uint32 max_batch = 5;
+  uint32 prompt_cache_entries = 6; uint64 prompt_cache_bytes = 7;
+  uint64 prompt_cache_hits = 8; uint64 prompt_cache_misses = 9; uint64 prompt_cache_evictions = 10;
 }
 // error empty = ok; internal: the worker failed (500), else the request is bad (400)
 message CheckReply { string error = 1; string model = 2; bool internal = 3; }

@@ -594,8 +594,17 @@ CACHE_LIMIT_GB = float(os.environ.get("QWEN_CACHE_LIMIT_GB", "3"))
 # system prompt / tool block). A new prompt resumes from the deepest checkpoint
 # inside its longest common prefix with any entry, so a different conversation
 # over the same system prompt, an edited history or interleaved sessions all
-# hit. Entries are LRU-evicted past QWEN_PROMPT_CACHE_GB (the newest always
-# stays). The library's own trim is never used (broken for quantized tuples).
+# hit. An entry whose ids are a prefix of a newer one (the previous turn of a
+# conversation) is absorbed by it: its checkpoints (and its end state where
+# that is a slab end of the new prompt) move to the new entry and it is dropped
+# (not on quantized KV when only the old one is unquantized: it is the one
+# resume point below quantized_kv_start). Past
+# QWEN_PROMPT_CACHE_CKPTS an entry's checkpoints are thinned, never the end of
+# the system block or the last three message starts. QWEN_PROMPT_CACHE_GB is a
+# soft cap: past it entries are LRU-evicted at store (the newest stays, alone
+# if need be); the cache's live bytes count in the batch budget, and an
+# admission or a growing row evicts LRU entries on demand. The library's own
+# trim is never used (broken for quantized tuples).
 PROMPT_CACHE = os.environ.get("QWEN_PROMPT_CACHE", "0") == "1"
 PROMPT_CACHE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_GB", "3"))
 PROMPT_CACHE_STRIDE = int(os.environ.get("QWEN_PROMPT_CACHE_STRIDE", "2048"))
@@ -716,17 +725,42 @@ def _lcp(a, b):
     return lo
 
 
+def _quantized(cache):
+    return any(isinstance(getattr(c, "keys", None), (tuple, list)) for c in cache)
+
+
+def _state_arrays(ckpts):
+    return [a for st in ckpts.values() for layer in st for a in layer if a is not None]
+
+
+def _thin(ckpts, cap, protect=()):
+    """Drop checkpoints until `cap` are left: the left one of the closest
+    pair (span to its neighbours), never the deepest, and among the ones not
+    in `protect` (the end of the system block, the last message starts) while
+    there are any."""
+    while len(ckpts) > cap:
+        ps = sorted(ckpts)
+        cand = [i for i in range(len(ps) - 1) if ps[i] not in protect] or range(len(ps) - 1)
+        if not cand:
+            break
+        i = min(cand, key=lambda i: (ps[i + 1] - (ps[i - 1] if i else 0), ps[i]))
+        ckpts.pop(ps[i])
+    return ckpts
+
+
 class _Entry:
     def __init__(self, ids, cache, ckpts):
         self.ids = ids
         self.cache = cache
         self.ckpts = ckpts                            # pos -> recurrent states, pos < len(ids)
         self.used = time.time()
-        self.quantized = any(isinstance(getattr(c, "keys", None), (tuple, list)) for c in cache)
+        self.quantized = _quantized(cache)
         arrs = _cache_arrays(cache)
         mx.eval(arrs)
-        self.nbytes = sum(a.nbytes for a in arrs) + sum(
-            a.nbytes for st in ckpts.values() for layer in st for a in layer)
+        # every array the entry holds (KV views, its end state, checkpoint
+        # states: the latter are shared objects between entries)
+        self.arrays = arrs + _state_arrays(ckpts)
+        self.nbytes = sum(a.nbytes for a in self.arrays)
 
     def best(self, ids, ends):
         """Deepest resumable position within the common prefix (one token is
@@ -741,8 +775,22 @@ class _Entry:
 
 
 class _PrefixCache:
+    """The entries, LRU. Only the scheduler thread changes it; Health reads
+    the counters (plain ints, kept current by every change)."""
+
     def __init__(self):
         self.entries: list[_Entry] = []
+        self.bytes = 0                  # live bytes: every array once (checkpoints are shared)
+        self.hits = self.misses = self.evictions = 0
+
+    def _recount(self):
+        seen, n = set(), 0
+        for e in self.entries:
+            for a in e.arrays:
+                if id(a) not in seen:
+                    seen.add(id(a))
+                    n += a.nbytes
+        self.bytes = n
 
     def lookup(self, ids, ends):
         """-> (entry, resume position, longest common prefix over all entries)."""
@@ -754,6 +802,9 @@ class _PrefixCache:
                 hit, at = e, pos
         if hit is not None:
             hit.used = time.time()
+            self.hits += 1
+        else:
+            self.misses += 1
         return hit, at, split
 
     def restore(self, entry, at):
@@ -761,26 +812,72 @@ class _PrefixCache:
             return _copy_cache(entry.cache)
         return _copy_cache(entry.cache, upto=at, states=entry.ckpts[at])
 
-    def store(self, ids, cache, ckpts, parent=None, at=0):
+    def closest(self, ids):
+        """-> (the entry sharing the longest prefix with `ids`, its length);
+        (None, 0) when empty."""
+        return max(((e, _lcp(e.ids, ids)) for e in self.entries), key=lambda x: x[1],
+                   default=(None, 0))
+
+    def evict(self, keep=None):
+        """Drop the least recently used entry but `keep` -> False: nothing to drop.
+        Safe while a row resumed from it runs: a restore holds its own views
+        of the entry's arrays (and copies them on its first slab)."""
+        left = [e for e in self.entries if e is not keep]
+        if not left:
+            return False
+        self.entries.remove(min(left, key=lambda e: e.used))
+        self.evictions += 1
+        self._recount()
+        return True
+
+    def store(self, ids, cache, ckpts, parent=None, at=0, ends=(), protect=()):
+        """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
+        and checkpoints. `ends`: the prompt's slab ends; `protect`: the
+        checkpoint positions thinning keeps (see _thin) -> (entry, number of
+        older entries it absorbed).
+
+        A checkpoint at p is valid for this entry only where p is a slab end
+        of this prompt: then the entry's KV over [0, p) is the cold prefill's
+        (cut identically). A parent's checkpoints <= the resume point and an
+        absorbed entry's checkpoints are all slab ends of a shared prefix, so
+        of this prompt too; an absorbed entry's END state only if its length
+        is one of `ends` (usually not: it is the token after the previous
+        turn's <think>, so an exact repeat of that older prompt now resumes
+        at its deepest checkpoint instead)."""
+        ckpts = dict(ckpts)
         if parent is not None:                        # inherit the shared part
-            ckpts = {**{p: s for p, s in parent.ckpts.items() if p <= at}, **ckpts}
+            for p, s in parent.ckpts.items():
+                if p <= at:
+                    ckpts.setdefault(p, s)
             if at == len(parent.ids) and at < len(ids):
                 ckpts[at] = _recurrent_states(parent.cache)
+        # An entry whose ids are a prefix of the new one (the previous turn of
+        # this conversation, an exact repeat) is covered by it: its
+        # checkpoints move over and it goes. Not an unquantized entry for a
+        # quantized new one: its checkpoints below quantized_kv_start are only
+        # resumable from fp16 KV, it is the one resume point there.
+        quantized = _quantized(cache)
+        covered = [e for e in self.entries
+                   if len(e.ids) <= len(ids) and ids[: len(e.ids)] == e.ids
+                   and not (quantized and not e.quantized)]
+        for e in covered:
+            for p, s in e.ckpts.items():
+                ckpts.setdefault(p, s)
+            if len(e.ids) in ends and len(e.ids) < len(ids):
+                ckpts.setdefault(len(e.ids), _recurrent_states(e.cache))
         ckpts.pop(len(ids), None)
-        while len(ckpts) > PROMPT_CACHE_CKPTS:        # thin: drop the closest pair's left one
-            ps = sorted(ckpts)
-            gaps = [(ps[i + 1] - (ps[i - 1] if i else 0), ps[i]) for i in range(len(ps) - 1)]
-            ckpts.pop(min(gaps)[1])
+        _thin(ckpts, PROMPT_CACHE_CKPTS, protect)
         new = _Entry(ids, _copy_cache(cache), ckpts)
-        # An entry that is a prefix of the new one is fully covered by it.
-        self.entries = [e for e in self.entries
-                        if not (len(e.ids) <= len(ids) and ids[: len(e.ids)] == e.ids
-                                and (len(e.ids) in ckpts or len(e.ids) == len(ids)))]
-        self.entries.append(new)
-        budget = PROMPT_CACHE_GB * 1024**3
-        while len(self.entries) > 1 and sum(e.nbytes for e in self.entries) > budget:
-            self.entries.remove(min(self.entries[:-1], key=lambda e: e.used))
-        return new
+        self.entries = [e for e in self.entries if not any(e is c for c in covered)] + [new]
+        self._recount()
+        budget = PROMPT_CACHE_GB * GIB
+        while len(self.entries) > 1 and self.bytes > budget:
+            self.evict(keep=new)
+        if self.bytes > budget:
+            log.warning("prompt cache: the newest entry alone (%d tokens, %.2f GiB) is over "
+                        "QWEN_PROMPT_CACHE_GB=%.1f; kept, evicted on demand", len(ids),
+                        self.bytes / GIB, PROMPT_CACHE_GB)
+        return new, len(covered)
 
 
 _FIXED_SLAB = None    # frozen at load (Engine.load); None = derived from the knobs (tests)
@@ -1307,14 +1404,15 @@ def _batch_budget(cap, active, prefill_reserve):
     is resident (weights + drafter, `active` after load) - the prefill
     activations (the attention scratch PREFILL_BUDGET x q heads x 2 B: the
     head_dim-256 SDPA fallback materializes the scores, + ~0.4 GiB of MLP) -
-    1 GiB slack (logits, KV growth steps) - the prompt cache - the buffer pool
-    when it is kept across requests (QWEN_CLEAR_CACHE=0). The headroom outside
-    the budget (prefill reserve + 1 GiB) is what absorbs rows that outgrow
-    their QWEN_BATCH_RESERVE_TOKENS reservation."""
+    1 GiB slack (logits, KV growth steps) - the buffer pool when it is kept
+    across requests (QWEN_CLEAR_CACHE=0). The headroom outside the budget
+    (prefill reserve + 1 GiB) is what absorbs rows that outgrow their
+    QWEN_BATCH_RESERVE_TOKENS reservation. The prompt cache is not taken off
+    here: its live bytes count against the budget beside the rows'
+    reservations, and it gives way on demand (_Scheduler._fits / _regrow)."""
     if BATCH_MEM_GB > 0:
         return int(BATCH_MEM_GB * GIB)
     budget = (cap - active - prefill_reserve - GIB
-              - (int(PROMPT_CACHE_GB * GIB) if PROMPT_CACHE else 0)
               - (0 if CLEAR_CACHE else int(CACHE_LIMIT_GB * GIB)))
     return max(0, budget)
 
@@ -1925,15 +2023,26 @@ class _Scheduler:
         """Re-account a row that outgrew its reservation (by 1024-token steps,
         up to its own limit): admissions wait while the batch is over budget.
         Growth past the headroom too (budget + prefill reserve; the last 1 GiB
-        stays slack) would end in an OOM of every row, so then the growing row
-        ends with "length" — only when other rows run: a lone row is bounded
-        by MAX_CONTEXT alone, as before batching."""
+        stays slack) would end in an OOM of every row: first the prompt
+        cache gives way (LRU entries evicted while that brings the batch back
+        under the headroom), else the growing row ends with "length" — only
+        when other rows run: a lone row is bounded by MAX_CONTEXT alone, as
+        before batching."""
         if row.pos < row.tokens:
             return
         tokens = min(row.pos + 1024, len(row.req.ids) + row.req.max_tokens + 1)
         need = self._bytes(tokens)
-        if (self.reserved + need - row.reserved > self.budget + self.prefill_reserve
-                and sum(not r.done for r in self.rows) > 1):
+        rows = self.reserved + need - row.reserved
+        headroom = self.budget + self.prefill_reserve
+        pc = self.eng._pcache
+        if rows <= headroom < rows + pc.bytes:
+            n = 0
+            while rows + pc.bytes > headroom and pc.evict():
+                n += 1
+            if n:
+                log.info("prompt cache: %d entries evicted for the growth of id=%s "
+                         "(%.2f GiB left)", n, row.req.id, pc.bytes / GIB)
+        if rows + pc.bytes > headroom and sum(not r.done for r in self.rows) > 1:
             log.warning("id=%s ended at %d tokens: the batch's KV would pass its memory "
                         "headroom (%.2f GiB reserved)", row.req.id, row.n, self.reserved / GIB)
             self._finish(row, "length")
@@ -1943,13 +2052,30 @@ class _Scheduler:
         row.reserved = need
 
     def _fits(self, req, rows):
-        """Would `req` be admitted next to `rows` running rows?"""
+        """Would `req` be admitted next to `rows` running rows? The rows'
+        reservations + the prompt cache's live bytes + `req` within the
+        budget: when only the cache is in the way, its LRU entries are
+        evicted, but not the one `req` would resume from (it waits for a
+        row to end instead of re-prefilling a cached prefix)."""
         if rows == 0:
             return True
         need = self._reserve(req)
+        if rows >= self.max_batch or self.reserved + need > self.budget:
+            return False
+        pc = self.eng._pcache
+        if self.reserved + need + pc.bytes > self.budget:
+            keep, common = pc.closest(req.ids)
+            keep = keep if common >= PREFILL_MIN_STEP else None
+            n = 0
+            while self.reserved + need + pc.bytes > self.budget and pc.evict(keep):
+                n += 1
+            if n:
+                log.info("prompt cache: %d entries evicted to admit id=%s (%.2f GiB left)",
+                         n, req.id, pc.bytes / GIB)
+        if self.reserved + need + pc.bytes > self.budget:
+            return False
         live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
-        return (rows < self.max_batch and self.reserved + need <= self.budget
-                and live + need + self.prefill_reserve <= self.cap)
+        return live + need + self.prefill_reserve <= self.cap
 
     def _admit(self):
         req = self.waiting[0]
@@ -2025,22 +2151,26 @@ class _Scheduler:
                 log.info("id=%s prompt cache MISS (common prefix %d, %d entries)",
                          req.id, split, len(eng._pcache.entries))
         req.reused = reused
-        keep, ckpts = set(), {}
+        keep, protect, ckpts = set(), set(), {}
         if use_cache:
             end = len(ids) - 1
+
+            def below(c):                       # the closest slab end at or below c
+                k = bisect.bisect_right(bounds, c)
+                return bounds[k - 1] if k and bounds[k - 1] < end else None
             want = set(range(PROMPT_CACHE_STRIDE, end, PROMPT_CACHE_STRIDE))
             want.add(split)
             # Message boundaries are where prompts naturally diverge: the
             # end of the system/tools block (another conversation), the
             # last two messages (regenerate / edited turn) and the reply
-            # (the next turn appends to it).
+            # (the next turn appends to it). Thinning keeps these (inherited
+            # ones too); strides and older turns' boundaries go first.
             starts = [i for i, t in enumerate(ids) if t == eng._im_start]
-            want.update(starts[1:2] + starts[-3:])
-            # checkpoints only at slab ends: the closest one at or below
-            for c in want:
-                k = bisect.bisect_right(bounds, c)
-                if k and reused < bounds[k - 1] < end:
-                    keep.add(bounds[k - 1])
+            marks = starts[1:2] + starts[-3:]
+            want.update(marks)
+            protect = {b for b in map(below, marks) if b is not None}
+            # checkpoints only at slab ends
+            keep = {b for b in map(below, want) if b is not None and b > reused}
 
         def checkpoint(pos, cache):
             if pos in keep:
@@ -2049,11 +2179,18 @@ class _Scheduler:
         def snapshot(cache):
             if not use_cache or any(getattr(c, "keys", 1) is None for c in cache):
                 return
-            e = eng._pcache.store(ids[:-1], cache, ckpts, parent, reused)
+            pc = eng._pcache
+            try:
+                e, covered = pc.store(ids[:-1], cache, ckpts, parent, reused, ends, protect)
+            except Exception:  # noqa: BLE001 — the prefill succeeded: the request goes on uncached
+                log.exception("id=%s prompt cache store failed (the request goes on)", req.id)
+                return
+            # "MB total": live bytes, shared checkpoints once; gap: tokens the
+            # cache held but could not resume from (no checkpoint there)
             log.info("id=%s prompt cache store: %d tokens, %d checkpoints, %.1f MB "
-                     "(%d entries, %.1f MB total)", req.id, len(e.ids), len(e.ckpts),
-                     e.nbytes / 1e6, len(eng._pcache.entries),
-                     sum(x.nbytes for x in eng._pcache.entries) / 1e6)
+                     "(%d entries, %.1f MB total) reused=%d gap=%d absorbed=%d", req.id,
+                     len(e.ids), len(e.ckpts), e.nbytes / 1e6, len(pc.entries), pc.bytes / 1e6,
+                     reused, split - reused, covered)
 
         return input_ids, cache, reused, set(bounds), checkpoint, snapshot
 
@@ -2074,6 +2211,7 @@ class _Scheduler:
         directly. When bumping mlx-vlm, diff generate/ar.py::generate_step
         against this + _iterate."""
         req, lm = row.req, self.lm
+        seg = time.time()                       # start of this tick's part of the prefill
         input_ids, cache, start, cuts, on_ckpt, on_prefilled = self._prompt_cache(row)
         pixel_values = mask = None
         kwargs = {}
@@ -2126,12 +2264,18 @@ class _Scheduler:
             if inputs_embeds.shape[1] > 1:      # the last slab joins at once
                 self._slab_done(time.time() - t)
                 yield
+                seg = time.time()
         on_prefilled(cache)
         row.pos = pos
         if deltas is not None:
             row.delta = int(deltas.reshape(-1)[0].item())
         row.y = mx.array(req.ids[-1:])
         self._join(row)
+        # The last slab (a cache hit's only one) is charged too: else the
+        # next waiting request's prefill would start in the next tick, and a
+        # queue of short prefills would hold every running row (and the
+        # first token of the rows that just joined) until it drains.
+        self._slab_done(time.time() - seg)
 
     def _spec(self, row):
         """Greedy text-only prefill + DFlash speculative decode for a lone row
@@ -2516,11 +2660,12 @@ class _Scheduler:
         steps = self.steps - self.log_steps
         if steps or self.rows or self.waiting or self.task:
             log.info("batch: rows=%d waiting=%d prefilling=%s steps/s=%.1f mean_rows=%.2f "
-                     "reserved=%.2f/%.2fGiB active=%.2fGiB",
+                     "reserved=%.2f/%.2fGiB pcache=%.2fGiB active=%.2fGiB",
                      len(self.rows), len(self.waiting),
                      self.task_row.req.id if self.task_row is not None else "-",
                      steps / (now - self.log_at), self.log_rows / steps if steps else 0.0,
-                     self.reserved / GIB, self.budget / GIB, mx.get_active_memory() / GIB)
+                     self.reserved / GIB, self.budget / GIB, self.eng._pcache.bytes / GIB,
+                     mx.get_active_memory() / GIB)
         self.log_at, self.log_steps, self.log_rows = now, self.steps, 0
 
 
@@ -2666,9 +2811,11 @@ class Engine:
         self.max_batch = self.sched.fit_max_batch()
         log.info("batching: max_batch %d, KV budget %.2f GiB (cap %.1f GiB, prefill reserve %.1f GiB), "
                  "KV %d B/token, recurrent state %.1f MiB/row, reserve <= %d new tokens/row, "
-                 "prefill share %.2f",
+                 "prefill share %.2f, prompt cache %s",
                  self.max_batch, budget / GIB, cap / GIB, reserve / GIB, self.sched.kv_q,
-                 self.sched.gdn_row / 2**20, RESERVE_TOKENS, PREFILL_SHARE)
+                 self.sched.gdn_row / 2**20, RESERVE_TOKENS, PREFILL_SHARE,
+                 f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
+                 f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
         self.sched.start()
         self.ready = True
         log.info("model loaded in %d ms", self.load_ms)
@@ -3188,6 +3335,7 @@ def _done(r, finish, state, ttft_ms, tool_calls=None, tps=0.0):
         peak_gb=r.peak / 1e9,                    # taken by the scheduler when the request ended
         queue_ms=r.queue_ms,
         batch_mean=r.batch_mean,
+        cached_tokens=r.reused,
     )
     return pb.Event(id=r.id, done=pb.Done(
         finish=finish, usage=usage, tool_calls=tool_calls or []))
@@ -3221,11 +3369,17 @@ class WorkerServicer(pb_grpc.WorkerServicer):
         return pb.Ack()
 
     def Health(self, request, context):
+        pc = self.engine._pcache        # counters only (plain ints the scheduler keeps current)
         return pb.HealthReply(ready=self.engine.ready and self.engine.sched.alive(),
                               model=self.engine.model_id,
                               load_ms=self.engine.load_ms,
                               model_path=self.engine.model_path,
-                              max_batch=self.engine.max_batch)
+                              max_batch=self.engine.max_batch,
+                              prompt_cache_entries=len(pc.entries),
+                              prompt_cache_bytes=pc.bytes,
+                              prompt_cache_hits=pc.hits,
+                              prompt_cache_misses=pc.misses,
+                              prompt_cache_evictions=pc.evictions)
 
     def Check(self, request, context):
         # Runs beside the generations (own pool thread): template, tokenizer and

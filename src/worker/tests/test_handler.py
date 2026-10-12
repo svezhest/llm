@@ -61,6 +61,7 @@ class Sched:
     def submit(self, r):
         self.req = r
         r.t0 = time.time()
+        r.reused = getattr(self, "reused", 0)       # prompt-cache tokens, as the scheduler sets them
         for ev in self.script:
             r.out.put(ev)
 
@@ -91,11 +92,12 @@ def events(eng, **params):
 
 def test_reasoning_split_and_usage():
     eng = engine(toks("ab") + [("tok", CLOSE, True)] + toks("xy") + [("done", "stop")])
+    eng.sched.reused = 2
     think, answer, end = events(eng)
     assert (think, answer) == ("ab", "xy")
     assert end.done.finish == "stop"
     u = end.done.usage
-    assert (u.prompt_tokens, u.gen_tokens, u.reasoning_tokens) == (3, 5, 2)
+    assert (u.prompt_tokens, u.gen_tokens, u.reasoning_tokens, u.cached_tokens) == (3, 5, 2, 2)
 
 
 def test_stop_string_across_tokens_evicts():

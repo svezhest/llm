@@ -29,6 +29,8 @@ pub fn install() -> PrometheusHandle {
     metrics::describe_counter!("qwen_cancellations_total", "Client-disconnect cancellations");
     metrics::describe_counter!("qwen_journal_dropped_total", "Journal lines dropped (writer queue full)");
     metrics::describe_counter!("qwen_tokens_generated_total", "Tokens streamed to clients");
+    metrics::describe_counter!("qwen_gateway_cached_tokens_total",
+                               "Prompt tokens the worker resumed from its prompt cache (not prefilled)");
     metrics::describe_histogram!("qwen_request_duration_seconds",
                                  "Request duration from arrival at the gateway (queue waits included)");
     metrics::describe_histogram!("qwen_ttft_seconds",

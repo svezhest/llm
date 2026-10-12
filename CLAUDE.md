@@ -333,8 +333,26 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   24 layers on the 9B) at slab ends forced onto `cuts`: every 2048 tokens,
   `<|im_start|>` boundaries (end of system block, last two messages) and the
   divergence point from the closest entry. Hit = deepest checkpoint ≤ longest
-  common prefix with any entry (`_copy_cache(upto=, states=)`). LRU by
-  `QWEN_PROMPT_CACHE_GB` (3). Never trim with the library; never share mx.array
+  common prefix with any entry (`_copy_cache(upto=, states=)`). A checkpoint at p
+  is valid for an entry only where p is a slab end of *that entry's* prompt (its
+  KV over [0, p) was cut there). An older entry whose ids are a prefix of the new
+  one (the previous turn) is absorbed at store: its checkpoints move over (shared
+  objects), its end state only if that position is a slab end of the new prompt
+  (usually not: an exact repeat of the older prompt then resumes at its deepest
+  checkpoint), and it is dropped — except an unquantized entry under a quantized
+  new one (27B/35B: the only resume point below `quantized_kv_start`). Thinning
+  to `QWEN_PROMPT_CACHE_CKPTS` (`_thin`) never drops the end of the system block
+  (`starts[1]`) or the last three `<|im_start|>` (mapped to slab ends, inherited
+  ones too); strides and older turns' boundaries go first, closest pair's left.
+  `QWEN_PROMPT_CACHE_GB` (3) is a soft cap (LRU at store, the newest stays, alone
+  if over with a warning); the cache's live bytes (`_PrefixCache.bytes`: every
+  array once, shared checkpoints once) count against the batch budget in `_fits`
+  / `_regrow`, which evict LRU entries on demand (`_fits` keeps the entry the
+  waiting request shares ≥ `PREFILL_MIN_STEP` tokens with: it waits instead).
+  Eviction is safe mid-use (a restore holds its own views). A failed store is
+  logged, the request goes on. Store log: `… MB (n entries, X MB total) reused=r
+  gap=split−reused absorbed=k`; `Usage.cached_tokens` = reused; Health has
+  entries / bytes / hits / misses / evictions. Never trim with the library; never share mx.array
   *objects* between cache copies (`a[i] = v` rebinds the Python object in place
   — slice to get a new one, buffers are copy-on-write). On a hit set
   `language_model._rope_deltas` to zeros (text mRoPE continues from the cache
@@ -368,8 +386,13 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     GDN state; rows are re-accounted at their real length every step (growth past
     the reservation is allowed and holds back new admissions; past budget +
     prefill reserve the growing row ends with `length` while other rows run — a
-    lone row is never cut); live check `active + reserve + prefill reserve ≤
-    cap`. Cap in `_batch_cap`, budget in `_batch_budget`.
+    lone row is never cut); the prompt cache's live bytes count beside the
+    reservations and give way first (LRU evicted on demand); live check `active +
+    reserve + prefill reserve ≤ cap`. Cap in `_batch_cap`, budget in `_batch_budget`.
+  - Time share: every prefill slab, the last one too (a cache hit's only slab),
+    sets `resume` (`_slab_done`), so decode steps run between short prefills
+    instead of waiting for the queue to drain (the 16 × 8K shared burst held every
+    first token until the last hit was prefilled).
   - Step-ahead (`async_eval`) as before; a grammar or multi-token bad-words row
     puts the whole batch in sync mode while it is there. Thinking budget forces the
     row's next input. Vision: prefill serialized, decode batched with its delta.
@@ -389,7 +412,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     within 10 s.
   - `Usage.peak_gb` / log `peak=`: MLX peak since the batch was last empty, read by
     the scheduler when the request ends (= the process peak during the request
-    when rows overlap). `Usage.queue_ms` / `batch_mean` are worker-side.
+    when rows overlap). `Usage.queue_ms` / `batch_mean` / `cached_tokens` are
+    worker-side; the gateway returns `usage.prompt_tokens_details.cached_tokens`
+    (always, 0 without a hit) and counts `qwen_gateway_cached_tokens_total`.
   - Tests: `cd src/worker && uv run --group dev pytest -q --ignore
     tests/test_mrqmm.py` (CPU, tiny random models, ~15 s; the scheduler's key
     tests also run on `dense_fused`: 8-bit fp16-scale weights + `QWEN_GDN_FUSE`).
@@ -520,11 +545,11 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PRESENCE_PENALTY` / `QWEN_FREQUENCY_PENALTY` / `QWEN_REPETITION_PENALTY` | worker | `1.5` / `0` / `1.0` — **benchmarks/reasoning: presence `0`** + card sampler (see README) |
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — whitespace-run cap in response_format answers |
 | `GATEWAY_OPENAI_DEFAULTS` / `GATEWAY_THINKING` / `GATEWAY_SERVED_MODEL_NAMES` / `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | unset / unset (`on`/`off` forces) / unset / `0` (= rest of context) — see README |
-| `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` / `2048` / `12` |
+| `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: LRU at store; counted live in the batch budget, evicted on demand) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
 | `QWEN_MAX_BATCH` | worker | `16` — rows decoded together (`1` = serialized); Health reports it (1 when the budget holds < 2 typical rows) |
-| `QWEN_BATCH_MEM_GB` / `QWEN_BATCH_RESERVE_TOKENS` | worker | `0` = derived (cap − weights − prefill reserve − 1 GiB − prompt cache − pool if kept) / `4096` (generation tokens reserved per row at admission) |
+| `QWEN_BATCH_MEM_GB` / `QWEN_BATCH_RESERVE_TOKENS` | worker | `0` = derived (cap − weights − prefill reserve − 1 GiB − pool if kept; the prompt cache's live bytes count inside it) / `4096` (generation tokens reserved per row at admission) |
 | `QWEN_BATCH_PREFILL_SHARE` | worker | `0.5` — prefill's time share when the batch is full; with B of max_batch rows it is `1-(1-s)·B/max` |
 | `QWEN_PFQMM` | worker | `1` — prefill matmul (`pfqmm.py`): MLX's own qmm_t code with 64-row tiles, ≥128 rows where MLX runs qmm_t; ×1.03–1.28 per matmul (8-bit ×1.10–1.14), bit-identical, self-tested per key at load; `0` = MLX `quantized_matmul`. Needs fp16 scales: `QWEN_FP16=0` leaves it off |
 | `QWEN_MRQMM` | worker | `1` — multi-row 8-bit matmul kernel (`mrqmm.py`) for batched decode with 3..16 rows (8-bit affine g64 fp16 modules with N ≥ 512 only); `0` = MLX `quantized_matmul` |

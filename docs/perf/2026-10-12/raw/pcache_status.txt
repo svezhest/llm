@@ -1,0 +1,35 @@
+2026-10-12 14:01:53 === start
+2026-10-12 14:01:53 therm:  load: { 2.86 2.66 2.08 }
+2026-10-12 14:01:53 kill worker 13546
+2026-10-12 14:01:57 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache/worker_pcache.log
+2026-10-12 14:02:04 worker up: 2026-10-12 14:02:02,999 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 14:02:03,512 INFO  qwen.worker batching: max_batch 16, KV budget 12.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50 
+2026-10-12 14:02:11 gateway: 2026-10-12T09:06:53.868761Z  WARN qwen_gateway::worker_client: worker max_batch changed; in-flight capacity follows old=16 new=1 capacity=1 2026-10-12T09:23:23.867971Z  WARN qwen_gateway::worker_client: worker max_batch changed; in-flight capacity follows old=1 new=16 capacity=16 2026-10-12T11:02:08.870666Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 14:02:11 phase A1a start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:03:53 phase A1a end rc=0
+2026-10-12 14:03:53 therm:  load: { 2.58 2.63 2.14 }
+2026-10-12 14:03:53 phase A2a start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:10:15 phase A2a end rc=0
+2026-10-12 14:10:15 therm:  load: { 2.50 2.75 2.37 }
+2026-10-12 14:10:15 phase A1b start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:12:16 phase A1b end rc=0
+2026-10-12 14:12:16 therm:  load: { 2.12 2.56 2.35 }
+2026-10-12 14:12:16 phase A2b start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:20:00 phase A2b end rc=0
+2026-10-12 14:20:00 therm:  load: { 2.30 2.37 2.34 }
+2026-10-12 14:20:00 phase A3 start: --prefix shared --concurrency 1 --requests-per-level 8 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:23:00 phase A3 end rc=0
+2026-10-12 14:23:00 therm:  load: { 2.14 2.33 2.32 }
+2026-10-12 14:23:00 phase A4 start: --prefix distinct --concurrency 1 --requests-per-level 3 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:25:44 phase A4 end rc=0
+2026-10-12 14:25:44 therm:  load: { 2.53 2.40 2.36 }
+2026-10-12 14:25:44 phase A5 start: --prefix shared --concurrency 8 --requests-per-level 8 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 14:30:52 phase A5 end rc=0
+2026-10-12 14:30:52 therm:  load: { 2.46 2.52 2.43 }
+2026-10-12 14:30:52 kill worker 18415
+2026-10-12 14:30:56 start worker env:  log: /tmp/scratch/pcache/worker_nocache.log
+2026-10-12 14:31:02 worker up: 2026-10-12 14:31:02,263 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False 2026-10-12 14:31:02,685 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50 
+2026-10-12 14:31:10 gateway: 2026-10-12T09:23:23.867971Z  WARN qwen_gateway::worker_client: worker max_batch changed; in-flight capacity follows old=1 new=16 capacity=16 2026-10-12T11:02:08.870666Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 2026-10-12T11:31:08.876652Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit 
+2026-10-12 14:31:10 phase B1 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 14:37:34 phase B1 end rc=0
+2026-10-12 14:37:34 therm:  load: { 1.67 2.04 2.25 }
+2026-10-12 14:37:34 === done (worker left running, cache off, log /tmp/scratch/pcache/worker_nocache.log)

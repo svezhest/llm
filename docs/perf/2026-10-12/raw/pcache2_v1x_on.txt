@@ -1,0 +1,6 @@
+P2.cold        prompt=12272 cached=0 tok=128 finish=length wall=27.18s err=None
+P3.hit         prompt=12276 cached=7359 tok=128 finish=length wall=12.97s err=None
+P4.hit         prompt=7697 cached=4096 tok=128 finish=length wall=9.96s err=None
+sysA.hit       prompt=7405 cached=7359 tok=128 finish=length wall=3.76s err=None
+P2.hit         prompt=12272 cached=12271 tok=128 finish=length wall=3.70s err=None
+P3.hit2        prompt=12276 cached=12275 tok=128 finish=length wall=3.70s err=None

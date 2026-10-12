@@ -57,11 +57,14 @@ fn tool_calls_json(calls: &[pb::ToolCall]) -> Vec<Value> {
         .collect()
 }
 
+/// OpenAI / vLLM usage; `prompt_tokens_details.cached_tokens` = prompt tokens the worker
+/// resumed from its prompt cache (0 with the cache off or from an older worker).
 fn usage_json(u: &pb::Usage) -> Value {
     json!({
         "prompt_tokens": u.prompt_tokens,
         "total_tokens": u.prompt_tokens + u.gen_tokens,
         "completion_tokens": u.gen_tokens,
+        "prompt_tokens_details": {"cached_tokens": u.cached_tokens},
         "completion_tokens_details": {"reasoning_tokens": u.reasoning_tokens},
     })
 }
@@ -419,7 +422,9 @@ fn on_done(id: &str, worker_id: &str, d: &pb::Done, waited: Duration) {
         metrics::histogram!("qwen_worker_queue_seconds").record(f64::from(u.queue_ms) / 1000.0);
         metrics::histogram!("qwen_batch_mean").record(f64::from(u.batch_mean));
     }
+    metrics::counter!("qwen_gateway_cached_tokens_total").increment(u64::from(u.cached_tokens));
     info!(id, worker_id, finish = %d.finish, prompt_tokens = u.prompt_tokens,
+          cached_tokens = u.cached_tokens,
           gen_tokens = u.gen_tokens, queue_wait_ms = waited.as_millis() as u64, ttft_ms = u.ttft_ms,
           tps = u.tps, queue_ms = u.queue_ms, batch_mean = u.batch_mean,
           tool_calls = d.tool_calls.len(), "done");
@@ -598,4 +603,23 @@ pub async fn list_models(State(st): State<AppState>) -> Response {
 
 pub async fn health() -> &'static str {
     "ok"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_reports_cached_tokens() {
+        let u = pb::Usage { prompt_tokens: 100, gen_tokens: 7, reasoning_tokens: 3,
+                            cached_tokens: 64, ..Default::default() };
+        assert_eq!(usage_json(&u), json!({
+            "prompt_tokens": 100, "total_tokens": 107, "completion_tokens": 7,
+            "prompt_tokens_details": {"cached_tokens": 64},
+            "completion_tokens_details": {"reasoning_tokens": 3},
+        }));
+        // an older worker (no field): 0, the object is always there (as vLLM)
+        let old = usage_json(&pb::Usage::default());
+        assert_eq!(old["prompt_tokens_details"], json!({"cached_tokens": 0}));
+    }
 }

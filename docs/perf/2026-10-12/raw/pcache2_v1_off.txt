@@ -1,0 +1,14 @@
+code0          prompt=46 cached=0 tok=128 finish=length wall=3.82s err=None
+code1          prompt=38 cached=0 tok=128 finish=length wall=3.65s err=None
+code2          prompt=34 cached=0 tok=128 finish=length wall=3.65s err=None
+code3          prompt=39 cached=0 tok=128 finish=length wall=3.65s err=None
+code4          prompt=30 cached=0 tok=128 finish=length wall=3.59s err=None
+sysA           prompt=7405 cached=0 tok=128 finish=length wall=16.07s err=None
+sysB.sib       prompt=7396 cached=0 tok=128 finish=length wall=16.50s err=None
+sysC.sib       prompt=7395 cached=0 tok=128 finish=length wall=17.22s err=None
+chatT.1        prompt=2647 cached=0 tok=92 finish=stop wall=7.52s err=None
+chatT.2        prompt=2684 cached=0 tok=48 finish=stop wall=6.43s err=None
+chatT.3        prompt=2719 cached=0 tok=42 finish=stop wall=6.59s err=None
+chatN.1        prompt=2643 cached=0 tok=128 finish=length wall=8.90s err=None
+chatN.2        prompt=2791 cached=0 tok=84 finish=stop wall=7.93s err=None
+chatN.3        prompt=2899 cached=0 tok=128 finish=length wall=9.64s err=None

@@ -239,11 +239,21 @@ flip greedy answers. A new prompt resumes from the deepest checkpoint that is
 also its own slab end inside its longest common prefix with any entry, so the
 output is bitwise the same as a cold run whatever the cache holds. A different
 conversation over the same system prompt, an edited / regenerated turn and
-interleaved sessions all hit, not only a strict continuation. Entries are
-LRU-evicted past `QWEN_PROMPT_CACHE_GB` (3; the newest always stays), at most
-`QWEN_PROMPT_CACHE_CKPTS` (12) checkpoints each; an entry that is a prefix of a
-newer one is dropped. mlx-vlm's own trim is never used (broken for quantized KV
-tuples). Vision requests never touch the cache.
+interleaved sessions all hit, not only a strict continuation. An entry that is
+a prefix of a newer one (the previous turn of a conversation) is absorbed by it:
+its checkpoints move over and it is dropped, so a conversation holds one entry,
+not one per turn (on quantized KV an unquantized entry is kept under a quantized
+newer one: the only resume point below `quantized_kv_start`). Its end state moves
+over only where it is a slab end of the new prompt, so an exact repeat of the
+older prompt resumes at its deepest checkpoint instead. At most
+`QWEN_PROMPT_CACHE_CKPTS` (12) checkpoints per entry: the end of the system block
+and the last three message starts are never thinned. `QWEN_PROMPT_CACHE_GB` (3) is
+a soft cap: past it the least recently used entries go at store (the newest stays,
+alone if need be). The cache's live bytes count against the batch memory budget,
+and an admission or a growing row evicts LRU entries when only the cache is in the
+way (an admission keeps the entry it would resume from and waits instead). A
+failed store only logs; the request goes on. mlx-vlm's own trim is never used
+(broken for quantized KV tuples). Vision requests never touch the cache.
 
 Measured on Ornith-1.5 9B (fp16 KV, 7.5K-token system prompt, temperature 0),
 TTFT cold → cached, output byte-identical to the cold run in all five:
@@ -260,7 +270,11 @@ a cold prefill (±noise over 3 A/B runs). Through the gateway, 4.3K prompt: 9.4 
 → 0.32 s. First-token logprobs checked bitwise equal (9K-token prompt, q4 KV
 past 5K): cold, `QWEN_PROMPT_CACHE=0`, exact repeat, next turn, same system
 prompt only. Logs: `prompt cache HIT n/m tokens reused (common
-prefix k)` / `MISS` / `store: n tokens, c checkpoints, MB`.
+prefix k)` / `MISS` / `store: n tokens, c checkpoints, MB (e entries, X MB total)
+reused=r gap=g absorbed=a` (gap: common-prefix tokens it could not resume from).
+Responses carry `usage.prompt_tokens_details.cached_tokens` (vLLM's field);
+the gateway counts `qwen_gateway_cached_tokens_total`; the worker's Health reports
+entries, live bytes, hits, misses and evictions (gateway debug log on change).
 
 ## Context & memory
 
@@ -334,8 +348,8 @@ row's recurrent state (the queued step's copy beside the current one) — 9B: 32
 KiB/token fp16 + 2 × 49 MiB; 27B q8: 34 KiB + 2 × 147 MiB; 35B q4: 5.6 KiB + 2 × 61
 MiB. The budget (`QWEN_BATCH_MEM_GB`, else derived at
 load) is cap − weights − prefill reserve (`QWEN_PREFILL_BUDGET` × q heads × 2 B +
-0.4 GiB; with the fixed fp16 slab at least `QWEN_PREFILL_STEP` × 32K × q heads × 2 B) − 1 GiB − `QWEN_PROMPT_CACHE_GB` (if on) − `QWEN_CACHE_LIMIT_GB` (if
-`QWEN_CLEAR_CACHE=0`); cap = `QWEN_WIRED_LIMIT_GB` or the device working set (the
+0.4 GiB; with the fixed fp16 slab at least `QWEN_PREFILL_STEP` × 32K × q heads × 2 B) − 1 GiB − `QWEN_CACHE_LIMIT_GB` (if
+`QWEN_CLEAR_CACHE=0`); the prompt cache's live bytes count inside it and give way on demand; cap = `QWEN_WIRED_LIMIT_GB` or the device working set (the
 `iogpu.wired_limit_mb` sysctl once raised). Logged at load (`batching: …`); 9B at
 the 28 GiB sysctl: 13.8 GiB. A request that does not fit waits inside the worker
 (never a 503 for memory); an empty batch always takes the next request. Rows are
@@ -412,7 +426,7 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_FREQUENCY_PENALTY` / `QWEN_REPETITION_PENALTY` | worker | `0` / `1.0` |
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — cap on a whitespace run in a `response_format` answer |
 | `QWEN_PROMPT_CACHE` | worker | `0` (set `1`: multi-slot prefix cache with recurrent-state checkpoints) |
-| `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — LRU budget, checkpoint stride, checkpoints per entry |
+| `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (LRU at store, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `QWEN_MAX_BATCH` | worker | `16` — requests decoded together (continuous batching); `1` = one at a time, as before. Reported to the gateway (Health) as its in-flight limit |

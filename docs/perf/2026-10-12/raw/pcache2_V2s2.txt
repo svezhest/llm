@@ -1,0 +1,10 @@
+model=ornith15-9b-mlx-8bit calibration: 9564 prompt tokens for 24000 filler chars -> 2.55 chars/token, filler 20016 chars
+cooldown 30s before c=16
+probe before c=16: decode 36.5 tok/s, ttft 19.67s
+rep 0 c=16: 16 req, wall 43.7s, agg 93.7 tok/s, ttft mean 21.55s, errors 0, pcache hits 15/16
+
+wrote /tmp/scratch/pcache2/pcache2_V2s2.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 16 | 16 | 8309 | 43.7 | 93.7 | 21.55 | 25.39 | 42.67 | 43.60 | 12.2 | 36.5 | 18.24 | 0.94 / 7680 |

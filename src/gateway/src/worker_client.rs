@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tonic::transport::Channel;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::pb::worker_client::WorkerClient;
 use crate::pb::Empty;
@@ -51,6 +51,7 @@ pub fn spawn_health_poll(mut client: Client, pool: Pool, fixed: Option<usize>, m
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tick.tick().await; // the first tick is immediate; connect() just asked
         let mut up = true;
+        let mut pcache = None;
         loop {
             tick.tick().await;
             let mut req = tonic::Request::new(Empty {});
@@ -76,6 +77,13 @@ pub fn spawn_health_poll(mut client: Client, pool: Pool, fixed: Option<usize>, m
             }
             up = reply.ready;
             metrics::gauge!("qwen_worker_up").set(if up { 1.0 } else { 0.0 });
+            let pc = (reply.prompt_cache_entries, reply.prompt_cache_bytes, reply.prompt_cache_hits,
+                      reply.prompt_cache_misses, reply.prompt_cache_evictions);
+            if pcache != Some(pc) {
+                debug!(entries = pc.0, bytes = pc.1, hits = pc.2, misses = pc.3, evictions = pc.4,
+                       "worker prompt cache");
+                pcache = Some(pc);
+            }
             if !reply.ready || reply.max_batch == max_batch {
                 continue;
             }

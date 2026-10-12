@@ -177,6 +177,7 @@ class BlockingEngine:
         self.max_batch, self.ready, self.model_id = max_batch, True, "m"
         self.load_ms, self.model_path = 0, "/m"
         self.sched = types.SimpleNamespace(alive=lambda: True)
+        self._pcache = worker._PrefixCache()
         self.release = threading.Event()
         self.started = 0
 
@@ -213,7 +214,9 @@ def test_grpc_generation_slots(monkeypatch):
         assert e.value.code() == grpc.StatusCode.RESOURCE_EXHAUSTED
         t = time.time()
         assert stub.Check(pb.Request(id="c")).error == ""
-        assert stub.Health(pb.Empty()).ready
+        h = stub.Health(pb.Empty())
+        assert h.ready and h.max_batch == 2
+        assert (h.prompt_cache_entries, h.prompt_cache_bytes, h.prompt_cache_hits) == (0, 0, 0)
         assert time.time() - t < 1.0
         eng.release.set()
         assert all(list(s)[-1].HasField("done") for s in streams)
@@ -237,10 +240,10 @@ def test_budget_derivation(monkeypatch, dense):
     monkeypatch.setattr(worker, "PROMPT_CACHE", False)
     monkeypatch.setattr(worker, "CLEAR_CACHE", True)
     assert worker._batch_budget(30 * gib, 12 * gib, 3 * gib) == 14 * gib
-    monkeypatch.setattr(worker, "PROMPT_CACHE", True)              # prompt cache: 3 GiB
-    assert worker._batch_budget(30 * gib, 12 * gib, 3 * gib) == 11 * gib
+    monkeypatch.setattr(worker, "PROMPT_CACHE", True)              # counted live, not taken off
+    assert worker._batch_budget(30 * gib, 12 * gib, 3 * gib) == 14 * gib
     monkeypatch.setattr(worker, "CLEAR_CACHE", False)              # the pool stays: 3 GiB
-    assert worker._batch_budget(30 * gib, 12 * gib, 3 * gib) == 8 * gib
+    assert worker._batch_budget(30 * gib, 12 * gib, 3 * gib) == 11 * gib
     assert worker._batch_budget(20 * gib, 18 * gib, 3 * gib) == 0  # never negative
     monkeypatch.setattr(worker, "BATCH_MEM_GB", 1.5)
     assert worker._batch_budget(20 * gib, 18 * gib, 3 * gib) == int(1.5 * gib)
