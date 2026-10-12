@@ -1,0 +1,171 @@
+2026-10-12 17:46:47 === start (G1)
+2026-10-12 17:46:47 therm:  load: { 3.04 2.99 2.71 }
+2026-10-12 17:46:47 GPU busy, waiting: 49977 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 49978 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py 
+2026-10-12 17:47:21 phase G1 start (worker stopped)
+2026-10-12 17:47:21 therm:  load: { 2.68 2.89 2.69 }
+2026-10-12 17:52:51 phase G1 end rc=0
+2026-10-12 17:52:51 therm:  load: { 2.94 2.79 2.69 }
+2026-10-12 17:52:51 === done (worker log )
+2026-10-12 17:53:10 phase G1 seed1 start
+2026-10-12 17:58:58 phase G1 seed1 end rc=0
+2026-10-12 18:24:21 stop stopgap worker 51549 (TERM)
+2026-10-12 18:24:27 release probe start
+2026-10-12 18:26:02 release probe end rc=0
+2026-10-12 18:26:08 === start (G2 G3 G4 G5 END)
+2026-10-12 18:26:08 therm:  load: { 2.48 2.87 3.01 }
+2026-10-12 18:26:11 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=1 QWEN_CASCADE_MIN_ROWS=8 QWEN_CASCADE_MIN_PREFIX=4096 QWEN_CASCADE_CHECK=1 log: /tmp/scratch/cascade/worker_g2on1.log
+2026-10-12 18:26:17 worker up pid 53807 nice  0: 2026-10-12 18:26:17,009 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:26:17,009 INFO  qwen.worker cascade attention (QWEN_CASCADE): on (experimental): >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-12 18:26:26 gateway: 2026-10-12T15:26:24.637453Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:26:26 phase G2on1 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 18:26:26 therm:  load: { 2.79 2.92 3.03 }
+2026-10-12 18:28:06 phase G2on1 end rc=0
+2026-10-12 18:28:06 therm:  load: { 2.46 2.85 2.99 }
+2026-10-12 18:28:06 health: {"entries": 18, "bytes": 2577858560, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 18:28:06 kill worker 53807
+2026-10-12 18:28:11 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=0 log: /tmp/scratch/cascade/worker_g2off.log
+2026-10-12 18:28:17 worker up pid 54341 nice  0: 2026-10-12 18:28:16,293 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:28:16,293 INFO  qwen.worker cascade attention (QWEN_CASCADE): off (QWEN_CASCADE=0) 
+2026-10-12 18:28:27 gateway: 2026-10-12T15:28:24.621369Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:28:27 phase G2off start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 18:28:27 therm:  load: { 2.10 2.74 2.95 }
+2026-10-12 18:30:28 phase G2off end rc=0
+2026-10-12 18:30:28 therm:  load: { 2.55 2.67 2.88 }
+2026-10-12 18:30:28 health: {"entries": 18, "bytes": 2548072448, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 18:30:28 kill worker 54341
+2026-10-12 18:30:32 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=1 QWEN_CASCADE_MIN_ROWS=8 QWEN_CASCADE_MIN_PREFIX=4096 QWEN_CASCADE_CHECK=1 log: /tmp/scratch/cascade/worker_g2on2.log
+2026-10-12 18:30:38 worker up pid 55656 nice  0: 2026-10-12 18:30:38,560 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:30:38,560 INFO  qwen.worker cascade attention (QWEN_CASCADE): on (experimental): >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-12 18:31:41 gateway: 2026-10-12T15:28:24.621369Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:31:41 GPU busy, waiting: 55750 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 55751 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py 
+2026-10-12 18:32:11 GPU busy, waiting: 55750 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 55751 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py 
+2026-10-12 18:32:41 GPU busy, waiting: 55750 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 55751 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py 
+2026-10-12 18:33:11 phase G2on2 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 18:33:11 therm:  load: { 3.19 2.82 2.89 }
+2026-10-12 18:34:51 phase G2on2 end rc=0
+2026-10-12 18:34:51 therm:  load: { 3.48 3.07 2.99 }
+2026-10-12 18:34:51 health: {"entries": 18, "bytes": 2578644992, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 18:34:51 phase G3on start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 18:34:51 therm:  load: { 3.48 3.07 2.99 }
+2026-10-12 18:39:39 phase G3on end rc=0
+2026-10-12 18:39:39 therm:  load: { 2.29 2.62 2.79 }
+2026-10-12 18:39:39 health: {"entries": 16, "bytes": 2550693888, "hits": 30, "misses": 6, "evictions": 20, "max_batch": 16}
+2026-10-12 18:39:39 phase G4on8 start: --prefix shared --concurrency 8 --requests-per-level 8 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 18:39:39 therm:  load: { 2.29 2.62 2.79 }
+2026-10-12 18:44:54 phase G4on8 end rc=0
+2026-10-12 18:44:54 therm:  load: { 1.98 2.27 2.57 }
+2026-10-12 18:44:55 health: {"entries": 8, "bytes": 2114650112, "hits": 37, "misses": 9, "evictions": 38, "max_batch": 16}
+2026-10-12 18:44:55 phase G4on1k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 1000
+2026-10-12 18:44:55 therm:  load: { 1.98 2.27 2.57 }
+2026-10-12 18:45:58 phase G4on1k end rc=0
+2026-10-12 18:45:58 therm:  load: { 1.75 2.16 2.50 }
+2026-10-12 18:45:58 health: {"entries": 23, "bytes": 3170369536, "hits": 52, "misses": 12, "evictions": 41, "max_batch": 16}
+2026-10-12 18:45:58 kill worker 55656
+2026-10-12 18:46:03 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=0 log: /tmp/scratch/cascade/worker_g4off.log
+2026-10-12 18:46:09 worker up pid 58537 nice  0: 2026-10-12 18:46:08,796 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:46:08,796 INFO  qwen.worker cascade attention (QWEN_CASCADE): off (QWEN_CASCADE=0) 
+2026-10-12 18:47:13 gateway: 2026-10-12T15:28:24.621369Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:47:13 phase G4off8 start: --prefix shared --concurrency 8 --requests-per-level 8 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 18:47:13 therm:  load: { 2.06 2.14 2.46 }
+2026-10-12 18:51:58 phase G4off8 end rc=0
+2026-10-12 18:51:58 therm:  load: { 1.78 1.99 2.30 }
+2026-10-12 18:51:58 health: {"entries": 8, "bytes": 2111373312, "hits": 7, "misses": 3, "evictions": 2, "max_batch": 16}
+2026-10-12 18:51:58 kill worker 58537
+2026-10-12 18:52:02 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=1 QWEN_CASCADE_MIN_ROWS=8 QWEN_CASCADE_MIN_PREFIX=4096 QWEN_CASCADE_CHECK=1 log: /tmp/scratch/cascade/worker_g5on.log
+2026-10-12 18:52:09 worker up pid 59650 nice  0: 2026-10-12 18:52:08,445 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:52:08,445 INFO  qwen.worker cascade attention (QWEN_CASCADE): on (experimental): >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-12 18:53:13 gateway: 2026-10-12T15:28:24.621369Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:53:13 phase G5 start
+2026-10-12 18:53:13 therm:  load: { 1.95 1.97 2.27 }
+2026-10-12 18:54:49 phase G5 end rc=0
+2026-10-12 18:54:49 therm:  load: { 3.38 2.43 2.41 }
+2026-10-12 18:54:49 health: {"entries": 10, "bytes": 1414889472, "hits": 12, "misses": 8, "evictions": 0, "max_batch": 16}
+2026-10-12 18:54:49 G5 cmp rc=0 20/20 identical (text+reasoning+finish+tokens) to the cache-off run
+2026-10-12 18:54:49 kill worker 59650
+2026-10-12 18:54:54 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=0 log: /tmp/scratch/cascade/worker_end.log
+2026-10-12 18:54:59 worker up pid 60086 nice  0: 2026-10-12 18:54:58,612 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:54:58,612 INFO  qwen.worker cascade attention (QWEN_CASCADE): off (QWEN_CASCADE=0) 
+2026-10-12 18:55:12 gateway: 2026-10-12T15:55:09.624782Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:55:12 === done (worker log /tmp/scratch/cascade/worker_end.log)
+2026-10-12 18:55:49 === start (G6 END)
+2026-10-12 18:55:49 therm:  load: { 2.25 2.27 2.35 }
+2026-10-12 18:55:49 kill worker 60086
+2026-10-12 18:55:53 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=1 QWEN_CASCADE_MIN_ROWS=8 QWEN_CASCADE_MIN_PREFIX=4096 QWEN_CASCADE_CHECK=1 log: /tmp/scratch/cascade/worker_g6on.log
+2026-10-12 18:55:57 worker up pid 60302 nice  0: 2026-10-12 18:55:57,685 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 18:55:57,685 INFO  qwen.worker cascade attention (QWEN_CASCADE): on (experimental): >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-12 18:56:12 gateway: 2026-10-12T15:56:09.624809Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 18:56:12 phase G6on8k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 1024 --prompt-tokens 8000
+2026-10-12 18:56:12 therm:  load: { 2.42 2.31 2.36 }
+2026-10-12 18:58:37 phase G6on8k end rc=0
+2026-10-12 18:58:37 therm:  load: { 3.02 2.47 2.40 }
+2026-10-12 18:58:37 health: {"entries": 18, "bytes": 2548563968, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 18:58:37 phase G6on32k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 512 --prompt-tokens 32000
+2026-10-12 18:58:37 therm:  load: { 3.02 2.47 2.40 }
+2026-10-12 19:04:44 phase G6on32k end rc=0
+2026-10-12 19:04:44 therm:  load: { 2.28 2.48 2.42 }
+2026-10-12 19:04:45 health: {"entries": 16, "bytes": 2550956032, "hits": 30, "misses": 6, "evictions": 20, "max_batch": 16}
+2026-10-12 19:04:45 kill worker 60302
+2026-10-12 19:04:49 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=0 log: /tmp/scratch/cascade/worker_g6off.log
+2026-10-12 19:04:55 worker up pid 61850 nice  0: 2026-10-12 19:04:54,950 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 19:04:54,951 INFO  qwen.worker cascade attention (QWEN_CASCADE): off (QWEN_CASCADE=0) 
+2026-10-12 19:05:12 gateway: 2026-10-12T16:05:09.625180Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 19:05:12 phase G6off8k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 1024 --prompt-tokens 8000
+2026-10-12 19:05:12 therm:  load: { 2.31 2.46 2.41 }
+2026-10-12 19:08:25 phase G6off8k end rc=0
+2026-10-12 19:08:25 therm:  load: { 2.18 2.26 2.33 }
+2026-10-12 19:08:25 health: {"entries": 18, "bytes": 2595946496, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 19:08:25 kill worker 61850
+2026-10-12 19:08:30 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=0 log: /tmp/scratch/cascade/worker_end.log
+2026-10-12 19:08:36 worker up pid 62606 nice  0: 2026-10-12 19:08:35,694 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 19:08:35,694 INFO  qwen.worker cascade attention (QWEN_CASCADE): off (QWEN_CASCADE=0) 
+2026-10-12 19:09:40 gateway: 2026-10-12T16:05:09.625180Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 19:09:40 === done (worker log /tmp/scratch/cascade/worker_end.log)
+2026-10-12 19:10:00 stop worker 62606 for the step probe
+2026-10-12 19:10:04 step probe start
+2026-10-12 19:10:26 step probe end rc=0
+2026-10-12 19:10:50 step probe start (2)
+2026-10-12 19:14:28 step probe end rc=0
+2026-10-12 19:14:58 step probe 32K B=8 start
+2026-10-12 19:17:36 step probe 32K B=8 end rc=0
+2026-10-12 19:17:36 step probe 32K B=16 start
+2026-10-12 19:19:48 step probe 32K B=16 end rc=0
+2026-10-12 19:20:13 G1 rerun on fixed code start
+2026-10-12 19:26:45 G1 rerun end rc=0
+2026-10-12 19:26:55 === start (END)
+2026-10-12 19:26:55 therm:  load: { 3.06 3.04 2.74 }
+2026-10-12 19:26:58 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE=0 log: /tmp/scratch/cascade/worker_end.log
+2026-10-12 19:27:04 worker up pid 63588 nice  0: 2026-10-12 19:27:04,414 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 19:27:04,414 INFO  qwen.worker cascade attention (QWEN_CASCADE): off (QWEN_CASCADE=0) 
+2026-10-12 19:27:12 gateway: 2026-10-12T16:27:09.634841Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 19:27:12 === done (worker log /tmp/scratch/cascade/worker_end.log)
+2026-10-12 19:46:29 === start (C1 C5 DEFEND)
+2026-10-12 19:46:29 therm:  load: { 2.49 2.81 2.80 }
+2026-10-12 19:46:29 kill worker 63588
+2026-10-12 19:46:33 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE_CHECK=1 log: /tmp/scratch/cascade/worker_confirm.log
+2026-10-12 19:46:38 worker up pid 66245 nice  0: 2026-10-12 19:46:37,848 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 19:46:37,848 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-12 19:47:42 gateway: 2026-10-12T16:27:09.634841Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 19:47:42 phase confirm_8k256 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 19:47:42 therm:  load: { 2.08 2.67 2.75 }
+2026-10-12 19:49:24 phase confirm_8k256 end rc=0
+2026-10-12 19:49:25 therm:  load: { 2.93 2.83 2.80 }
+2026-10-12 19:49:25 health: {"entries": 18, "bytes": 2565570560, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 19:49:25 phase confirm_8k1024 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 1024 --prompt-tokens 8000
+2026-10-12 19:49:25 therm:  load: { 2.93 2.83 2.80 }
+2026-10-12 19:51:47 phase confirm_8k1024 end rc=0
+2026-10-12 19:51:47 therm:  load: { 1.79 2.29 2.58 }
+2026-10-12 19:51:47 health: {"entries": 21, "bytes": 3196157952, "hits": 30, "misses": 6, "evictions": 15, "max_batch": 16}
+2026-10-12 19:51:47 phase confirm_32k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 19:51:47 therm:  load: { 1.79 2.29 2.58 }
+2026-10-12 19:56:31 phase confirm_32k end rc=0
+2026-10-12 19:56:31 therm:  load: { 1.92 1.83 2.26 }
+2026-10-12 19:56:31 health: {"entries": 16, "bytes": 2555445248, "hits": 45, "misses": 9, "evictions": 38, "max_batch": 16}
+2026-10-12 19:56:31 phase confirm_8kdistinct start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 19:56:31 therm:  load: { 1.92 1.83 2.26 }
+2026-10-12 20:04:09 phase confirm_8kdistinct end rc=0
+2026-10-12 20:04:10 therm:  load: { 0.88 1.27 1.80 }
+2026-10-12 20:04:10 health: {"entries": 6, "bytes": 3162439680, "hits": 45, "misses": 27, "evictions": 66, "max_batch": 16}
+2026-10-12 20:04:10 kill worker 66245
+2026-10-12 20:04:14 start worker env: QWEN_PROMPT_CACHE=1 QWEN_CASCADE_CHECK=1 log: /tmp/scratch/cascade/worker_confirm_g5.log
+2026-10-12 20:04:20 worker up pid 69335 nice  0: 2026-10-12 20:04:20,144 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 20:04:20,144 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-12 20:05:23 gateway: 2026-10-12T16:27:09.634841Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 20:05:23 phase confirm G5 start
+2026-10-12 20:05:23 therm:  load: { 1.27 1.30 1.76 }
+2026-10-12 20:07:01 phase confirm G5 end rc=0
+2026-10-12 20:07:01 therm:  load: { 1.65 1.48 1.79 }
+2026-10-12 20:07:01 health: {"entries": 10, "bytes": 1414889472, "hits": 12, "misses": 8, "evictions": 0, "max_batch": 16}
+2026-10-12 20:07:01 confirm G5 cmp rc=0 20/20 identical (text+reasoning+finish+tokens) to the cache-off run
+2026-10-12 20:07:01 kill worker 69335
+2026-10-12 20:07:05 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/cascade/worker_default_end.log
+2026-10-12 20:07:10 worker up pid 69748 nice  0: 2026-10-12 20:07:10,177 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-12 20:07:10,177 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens 
+2026-10-12 20:07:26 gateway: 2026-10-12T17:07:24.625933Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 20:07:26 === done (worker log /tmp/scratch/cascade/worker_default_end.log)

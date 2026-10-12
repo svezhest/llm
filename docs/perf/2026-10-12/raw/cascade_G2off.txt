@@ -1,0 +1,10 @@
+model=ornith15-9b-mlx-8bit calibration: 9817 prompt tokens for 24000 filler chars -> 2.48 chars/token, filler 19493 chars
+cooldown 30s before c=16
+probe before c=16: decode 35.9 tok/s, ttft 20.41s
+rep 0 c=16: 16 req, wall 42.8s, agg 95.8 tok/s, ttft mean 20.93s, errors 0, pcache hits 15/16
+
+wrote /tmp/scratch/cascade/cascade_G2off.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 16 | 16 | 8218 | 42.8 | 95.8 | 20.93 | 23.07 | 42.05 | 42.70 | 12.1 | 35.9 | 17.63 | 0.94 / 7662 |

@@ -246,6 +246,10 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   8K 22.1 → 17.2 s, 32K 72.5 s (old: ~82–89 s, in-process). Peak 10.4 → 11.7 GB (c=16,
   256) / 12.05 GB (1024), old 13.8 GB. TTFT p95 at c=16 is 24 s: arrivals in waves,
   prefill one prompt at a time. Raw: `docs/perf/2026-10-12/final_bench.md` (+ `raw/`).
+  Shared-prefix waves with cascade groups (`QWEN_CASCADE=1`, `docs/perf/2026-10-12/
+  cascade_gpu.md`): step 8K × 16 rows 66.4 → 53.7 ms (×1.24), 32K × 8 83.6 → 68.2 ms;
+  16 × 32K all admitted (peak 25.3 → 23.2 GB); 16 × 8K active −3 GiB; formation
+  transient +2.2 GB at 8 × 32K; 32K × 16 at 92 ms vs ~62 projected (open, profile it).
 - **Fused GDN decode in-projection (`QWEN_GDN_FUSE=1`, 2026-10-12)**: mlx-vlm 0.7
   dropped 0.6.2's `_decode_quantized_linears_fused`, so a decode step ran qkv/z/b/a
   as 4 launches per GDN layer. `_install_gdn_fuse` concatenates the four weights once
@@ -406,7 +410,10 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     with stock MLX: 9B teacher-forced 100% top-1 at B=8 (KL 9e-6), 99.8% at 16;
     with mrqmm 100% at B=3/4/8 (KL 8e-6), 99.7% at 16 (KL 1e-5) — so
     under load a greedy answer can differ run to run; `QWEN_MAX_BATCH=1` restores
-    determinism.
+    determinism. Cascade groups (default on with fp16 KV + the prompt cache: ≥ 8
+    rows sharing ≥ 4096 prompt tokens, below) change only the grouped rows'
+    attention, in the same numerics class as mrqmm (top-1 ≥ 99.71 %); B ≤ 2 stays
+    bit-exact and `QWEN_CASCADE=0` restores this per-row path bit for bit.
   - Admission FIFO, no overtaking; an empty batch always admits. Reservation =
     prompt + min(max_tokens, `QWEN_BATCH_RESERVE_TOKENS` 4096) tokens of KV + 2×
     GDN state; rows are re-accounted at their real length every step (growth past
@@ -443,6 +450,55 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     decode's share after admission; the worker's `ttft_ms` counts from there,
     `_advance`); the gateway returns `usage.prompt_tokens_details.cached_tokens`
     (always, 0 without a hit) and counts `qwen_gateway_cached_tokens_total`.
+  - **Cascade groups (`QWEN_CASCADE`, default 1 since the B4 GPU gate, 2026-10-12)**:
+    rows sharing prompt ids `[0, P)` with P a slab end of each (→ same KV bits:
+    `_bounds` + hit == cold) decode attention as one `_PrefixGroup` (`cascade.PrefixGroup`:
+    fp32 prefix once + stacked fp32 suffixes; `_rows_attention` → `_cascade_rows` with
+    the step's `_StepPlan`; `begin_step`/`end_step` around the forward in
+    `_grouped_forward`). Formed in `_join` (`_cascade_join`) when ≥ `QWEN_CASCADE_MIN_ROWS`
+    (8) rows share ≥ `_MIN_PREFIX` (4096) tokens (earlier rows converted, their FA caches
+    → `_GroupRef`, freed); later rows `add` (the row's own S-token copies evaluated, the
+    stack concat lazy). A row a group refuses forms no second group on that group's prefix.
+    Memory rule `_group_wins`: at the members' REAL lengths the group's charge
+    (`_group_bytes`) ≤ their own fp16 caches (9B, ~150-token suffixes: 3 rows never win,
+    4 only from 32K, 5–16 at 4K–32K). Budget guard `_charge_fits`: a formation / join
+    that raises `reserved` is taken only while `reserved` + the prompt cache's live bytes
+    ≤ budget (refused, nothing evicted; the charge is reservation-based and grows with
+    `_regrow` like any row's, so growth can still pass the budget). `_compact` →
+    `_cascade_tidy`: done rows `take`n out (lazy); forced dissolve at < 3 live members
+    (covers B ≤ 2: today's bit-exact path), unchecked — its peak (2 contiguous rows beside
+    the live group) is inside the charge by `_group_bytes`' floor (prefix + stacks + 2 ×
+    (P + s) fp16); optional releases (a member whose own suffix > P//2, the longest first;
+    a memory dissolve and `set_cascade(False)`, the cheapest first) one member per group
+    and decode step (`released_at`; the last < 3 together), each checked with the group
+    alive: `reserved` + the released rows' fp16 caches + prompt cache ≤ budget + prefill
+    reserve, nothing credited for the group's shrink (release evaluates beside it, take is
+    lazy) — else they stay grouped. A tidy that raises fails that group's rows only. No
+    reference cycles: `_GroupRef` holds a weakref to its row and no group; `_unlink` on
+    every drop (a leaked group would hold GBs until Python's gen-2 GC). Eligible: fp16 KV
+    only, `QWEN_PROMPT_CACHE=1`, max_batch ≥ 3 (else off whatever the switch; the load log
+    says why), text rows that resumed from the cache or stored an entry (`row.cached`),
+    never vision or DFlash (`row.spec`, also after demotion). Numerics: the same class as
+    mrqmm's batched decode (B4: top-1 ≥ 99.71 %, KL +0–13 % over today's per-row batch,
+    per-layer error below the per-row kernel's); B ≤ 2 bit-exact; ungrouped rows of a
+    mixed batch take the per-row calls verbatim (bit-identical; the output take is an
+    exact copy); `QWEN_CASCADE=0` restores today's per-row path bit for bit. A released
+    row's `[0, P)` are the cold bits; its suffix holds what it decoded while grouped — so
+    B ≥ 3 greedy answers also depend on cache contents / arrival order (determinism:
+    `QWEN_CASCADE=0` or `QWEN_MAX_BATCH=1`). Accounting: a group is charged once
+    (`_group_bytes`: fp32 prefix padded to chunks + stack at the longest reservation ×1.05
+    + max(score transients + one layer's old+new stack, the 2-row dissolve floor)),
+    members keep `_member_bytes` (GDN). A failed step drops every group (`_fail_rows`).
+    `_plan` raises on any member/batch/length disagreement (`check_lens` every step).
+    Health `cascade_groups`/`cascade_rows`; `batch:` log `groups= grouped=`.
+    `set_cascade(on)` for tools (scheduler thread only). Members are kept in batch order
+    (a group = one slice of the batch: no gather / output take). Measured (9B,
+    `docs/perf/2026-10-12/cascade_gpu.md`): step 8K × 16 rows 66.4 → 53.7 ms (×1.24),
+    32K × 8 83.6 → 68.2 ms; 16 × 32K now all admitted (was 12 + 4 waiting), peak 25.3 →
+    23.2 GB; 16 × 8K active −3 GiB. Caveats: formation builds the fp32 prefix while the
+    members still hold their fp16 caches (+2.2 GB peak at 8 × 32K); 32K × 16 steps at
+    92 ms vs ~62 projected (open, needs a profile). The floor and the staged releases
+    came after B4 (CPU tests only). Tests `tests/test_cascade_sched.py` (+ `test_cascade.py`).
   - Tests: `cd src/worker && uv run --group dev pytest -q --ignore
     tests/test_mrqmm.py` (CPU, tiny random models, ~15 s; the scheduler's key
     tests also run on `dense_fused`: 8-bit fp16-scale weights + `QWEN_GDN_FUSE`).
@@ -576,6 +632,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: LRU at store; counted live in the batch budget, evicted on demand) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
+| `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (fp16 KV + prompt cache + max_batch ≥ 3 only, else off; unset/empty = `1`, anything but `1` off); `0` = today's per-row path bit for bit |
+| `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` (bitwise prefix check per join; a sync) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
 | `QWEN_MAX_BATCH` | worker | `16` — rows decoded together (`1` = serialized); Health reports it (1 when the budget holds < 2 typical rows) |
 | `QWEN_BATCH_MEM_GB` / `QWEN_BATCH_RESERVE_TOKENS` | worker | `0` = derived (cap − weights − prefill reserve − 1 GiB − pool if kept; the prompt cache's live bytes count inside it) / `4096` (generation tokens reserved per row at admission) |

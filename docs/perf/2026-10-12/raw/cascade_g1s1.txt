@@ -1,0 +1,33 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+17:53:15 loaded; FA layers [3, 7, 11, 15, 19, 23, 27, 31], base active 9.51 GB
+17:53:15 prefix target 8000: prompts 7978..7994 tokens, LCP 7943, group P 7938 (common slab ends [2048, 4096, 6144, 7938]), suffixes 39..55
+17:53:32 shared prefix prefilled in 16.7 s (7938 tokens)
+17:53:48 resumed copy == cold prefill (FA keys, all layers): True
+17:54:59 solo streams: 16 rows x 128 steps in 70.6 s; row 0 starts '# Memory-Mapped Files: Deep Dive\n\n## What a Memory-Mapped File Is\n\nA memory-mapped file is'
+17:55:00 P=7938 B=8: group built: n=8 lens 39..49 cap 256 c=8 Ppad=8192 pmask=yes, 0.67 GB; active 10.92 GB
+17:55:14 P=7938 B= 8 grouped_vs_solo   : top-1 99.90% (1023/1024), KL mean 1.31e-05 p99 1.03e-04 max 1.61e-04
+17:55:14 P=7938 B= 8 control_vs_solo   : top-1 100.00% (1024/1024), KL mean 1.24e-05 p99 9.54e-05 max 1.50e-04
+17:55:14 P=7938 B= 8 grouped_vs_control: top-1 99.90% (1023/1024), KL mean 1.07e-05 p99 8.21e-05 max 1.23e-04
+17:55:14 P=7938 B= 8 per-layer attention rms rel vs fp32 at step 64: cascade mean 2.08e-04 max 2.60e-04; per-row fp16 mean 2.29e-04 max 2.64e-04; cascade <= per-row in 64/64 (row, layer) pairs
+17:55:14 P=7938 B= 8: 44 ms/step grouped (sync, incl. KL), control 47; peak 13.90 GB
+17:55:17 P=7938 B=16: group built: n=16 lens 39..55 cap 256 c=8 Ppad=8192 pmask=yes, 0.81 GB; active 12.14 GB
+17:55:38 P=7938 B=16 grouped_vs_solo   : top-1 99.85% (2045/2048), KL mean 1.25e-05 p99 9.71e-05 max 3.46e-04
+17:55:38 P=7938 B=16 control_vs_solo   : top-1 99.85% (2045/2048), KL mean 1.25e-05 p99 1.04e-04 max 2.94e-04
+17:55:38 P=7938 B=16 grouped_vs_control: top-1 99.90% (2046/2048), KL mean 1.03e-05 p99 7.84e-05 max 2.09e-04
+17:55:38 P=7938 B=16 per-layer attention rms rel vs fp32 at step 64: cascade mean 2.10e-04 max 2.99e-04; per-row fp16 mean 2.32e-04 max 3.41e-04; cascade <= per-row in 128/128 (row, layer) pairs
+17:55:38 P=7938 B=16: 66 ms/step grouped (sync, incl. KL), control 75; peak 18.02 GB
+17:55:39 prefix target 32000: prompts 31993..32009 tokens, LCP 31958, group P 31953 (common slab ends [26624, 28672, 30720, 31953]), suffixes 39..55
+17:56:54 shared prefix prefilled in 75.2 s (31953 tokens)
+17:58:13 solo streams: 16 rows x 128 steps in 79.0 s; row 0 starts '# Memory-Mapped Files: Deep Dive\n\n## What a Memory-Mapped File Is\n\nA memory-mapped file is'
+17:58:15 P=31953 B=8: group built: n=8 lens 39..49 cap 256 c=32 Ppad=32768 pmask=yes, 2.28 GB; active 14.79 GB
+17:58:41 P=31953 B= 8 grouped_vs_solo   : top-1 99.90% (1023/1024), KL mean 1.35e-05 p99 9.71e-05 max 1.71e-04
+17:58:41 P=31953 B= 8 control_vs_solo   : top-1 99.90% (1023/1024), KL mean 1.25e-05 p99 8.77e-05 max 1.86e-04
+17:58:41 P=31953 B= 8 grouped_vs_control: top-1 99.80% (1022/1024), KL mean 1.13e-05 p99 7.95e-05 max 1.32e-04
+17:58:41 P=31953 B= 8 per-layer attention rms rel vs fp32 at step 64: cascade mean 2.12e-04 max 2.94e-04; per-row fp16 mean 2.34e-04 max 3.05e-04; cascade <= per-row in 64/64 (row, layer) pairs
+17:58:41 P=31953 B= 8: 73 ms/step grouped (sync, incl. KL), control 85; peak 24.17 GB
+17:58:45 P=31953 B=16: group built: n=16 lens 39..55 cap 256 c=32 Ppad=32768 pmask=yes, 2.42 GB; active 17.62 GB
+17:58:45 control batch skipped: 16.8 GB of per-row KV > AGC_CONTROL_MAX_GB (16 x 32K does not fit per-row in the worker either)
+17:58:58 P=31953 B=16 grouped_vs_solo   : top-1 99.85% (2045/2048), KL mean 1.35e-05 p99 9.95e-05 max 5.86e-04
+17:58:58 P=31953 B=16 per-layer attention rms rel vs fp32 at step 64: cascade mean 2.12e-04 max 3.19e-04; per-row fp16 mean 2.35e-04 max 3.50e-04; cascade <= per-row in 128/128 (row, layer) pairs
+17:58:58 P=31953 B=16: 78 ms/step grouped (sync, incl. KL), control 0; peak 20.64 GB

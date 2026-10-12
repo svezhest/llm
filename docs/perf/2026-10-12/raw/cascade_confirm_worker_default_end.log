@@ -1,0 +1,16 @@
+2026-10-12 20:07:06,864 INFO  qwen.worker loading model: ../../weights/ornith15-9b-mlx-8bit
+2026-10-12 20:07:06,864 WARNING qwen.worker no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+2026-10-12 20:07:06,928 WARNING root Checkpoint has no weights for module(s): vision_tower. Disabling them.
+2026-10-12 20:07:08,411 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 20:07:08,411 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 20:07:09,745 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True
+2026-10-12 20:07:09,763 INFO  qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-12 20:07:09,763 INFO  qwen.worker prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-10-12 20:07:10,067 INFO  worker.pfqmm pfqmm 8-bit g64: tested, 249 modules on (lm_head K=4096 N=248320 M=256/264)
+2026-10-12 20:07:10,068 INFO  worker.pfqmm pfqmm: 249 modules on the 64-row prefill qmm (8-bit g64 tested)
+2026-10-12 20:07:10,069 INFO  worker.mrqmm mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8); left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-12 20:07:10,176 INFO  qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 24 layers
+2026-10-12 20:07:10,177 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand)
+2026-10-12 20:07:10,177 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens
+2026-10-12 20:07:10,177 INFO  qwen.worker model loaded in 2881 ms
+2026-10-12 20:07:10,189 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)

@@ -34,14 +34,17 @@ import tempfile
 import threading
 import time
 import typing
+import weakref
 from concurrent import futures
 
 import grpc
 import mlx.core as mx
 import numpy as np
+from mlx_vlm.models.cache import KVCache
 from mlx_vlm.tokenizer_utils import (BPEStreamingDetokenizer, _remove_space,
                                      make_streaming_detokenizer)
 
+import cascade
 import worker_pb2 as pb
 import worker_pb2_grpc as pb_grpc
 
@@ -1543,14 +1546,112 @@ SCHED_STALL_S = 300.0     # a tick running this long marks the scheduler wedged 
 SCHED_MAX_FAILURES = 3    # consecutive failed decode steps before the scheduler gives up
 EVENT_POLL_S = 5.0        # a handler checks the scheduler is alive this often while it waits
 
+# QWEN_CASCADE (1; GPU gate B4 passed: docs/perf/2026-10-12/cascade_gpu.md):
+#   cascade decode attention (cascade.py; design: docs/perf/2026-10-12/
+#   design/cascade_plan.md, Part B) for batch rows sharing a prompt prefix.
+#   When >= QWEN_CASCADE_MIN_ROWS (8; 1..2 count as 3, 0 = off) running rows
+#   share prompt ids [0, P) with P >= QWEN_CASCADE_MIN_PREFIX (4096; 0 = off)
+#   and P a slab end of every one of them (then their KV [0, P) are the same
+#   bits: _bounds, the prompt cache's hit == cold), the scheduler forms a
+#   group: the prefix's KV once (fp32), the members' own tokens in one fp32
+#   stack per layer, one attention for the group per layer; the members'
+#   contiguous KV caches are freed. Memory rule (_Scheduler._group_wins):
+#   the group's arrays at the members' REAL lengths (+ its transients, and
+#   never less than what turning back into 2 contiguous rows takes) take no
+#   more than their own fp16 caches would; the charge stays reservation-
+#   based (_group_bytes) and a formation / join that would raise the
+#   reservations is taken only while they + the prompt cache's live bytes
+#   stay within the budget. Only with fp16 KV (QWEN_KV_BITS=0),
+#   QWEN_PROMPT_CACHE=1 and max_batch >= 3 (else off whatever the switch),
+#   for text-only rows that resumed from the prompt cache or stored an
+#   entry; never vision or DFlash rows. QWEN_CASCADE=0 is the per-row path
+#   bit for bit.
+#   B <= 2 is never grouped (today's bit-exact path); ungrouped rows of a
+#   mixed batch take today's per-row calls (bit-identical). Grouped rows are
+#   NOT bit-equal to their per-row attention (fp32 statistics, another
+#   summation order: rms ~2.1e-4 vs ~2.8e-4 for the per-row kernel against
+#   an fp32 reference on the 9B layout), so with it on a B >= 3 greedy
+#   answer also depends on the prompt cache's contents and arrival order.
+# QWEN_CASCADE_CHECK (0): check each new member's KV [0, P) bitwise against
+#   the group's prefix (a host sync per join; tests / validation runs). A
+#   mismatch is logged and the row stays ungrouped.
+def _cascade_knobs(env):
+    """(on, min rows, min prefix, check) from QWEN_CASCADE*. Switches are on
+    only for "1", as QWEN_PROMPT_CACHE / QWEN_DRAFT_SAMPLING; QWEN_CASCADE
+    unset or empty = "1" (the default), anything else ("0", "false") off."""
+    on = (env.get("QWEN_CASCADE") or "1") == "1"
+    rows = int(env.get("QWEN_CASCADE_MIN_ROWS") or "8")
+    prefix = int(env.get("QWEN_CASCADE_MIN_PREFIX") or "4096")
+    return on, (max(3, rows) if rows > 0 else 0), max(0, prefix), \
+        env.get("QWEN_CASCADE_CHECK", "0") == "1"
+
+
+CASCADE, CASCADE_MIN_ROWS, CASCADE_MIN_PREFIX, CASCADE_CHECK = _cascade_knobs(os.environ)
+CASCADE_CHUNK = cascade.CHUNK         # prefix chunk (tests: 16)
+CASCADE_STEP = cascade.STEP           # suffix stack growth (tests: 16)
+CASCADE_SLACK = 64 << 20              # fixed part of a group's step transient (tests: 0)
+
+
+class _GroupRef:
+    """Stands in for a grouped row's full-attention KVCache in row.cache: the
+    KV lives in the group. Only RowsKV.offset reads it; the B = 1 library call
+    never sees one (groups dissolve at B <= 2). Holds the row by a weak
+    reference and not the group: row -> row.cache -> _GroupRef -> row (or ->
+    the group's arrays) would be a reference cycle, so a dropped group's fp32
+    prefix and stacks (GBs) would wait for Python's cyclic GC (review
+    cascade_b2b3 finding 1)."""
+    __slots__ = ("_row",)
+
+    def __init__(self, row):
+        self._row = weakref.ref(row)
+
+    @property
+    def offset(self):
+        row = self._row()
+        if row is None:
+            raise RuntimeError("cascade: a grouped KV entry outlived its row")
+        return row.pos
+
+
+class _PrefixGroup:
+    """Scheduler side of a cascade.PrefixGroup: running rows sharing prompt ids
+    [0, P). `pg` holds the KV (the prefix once, fp32; the suffixes stacked),
+    `rows` the members in stack order (pg's member j is rows[j]; batch order
+    at formation, joins append in both), `ids` the shared tokens, `reserved`
+    the bytes charged for it in _Scheduler.reserved (_group_bytes; each
+    member keeps only _member_bytes). rows <-> row.group is a cycle while the
+    group lives: whoever drops a group clears both (_Scheduler._unlink)."""
+
+    def __init__(self, pg, ids, rows):
+        self.pg, self.ids, self.rows = pg, ids, rows
+        self.P = pg.P
+        self.reserved = 0
+        self.released_at = -1           # _Scheduler.steps of the last optional release
+
+
+class _StepPlan(typing.NamedTuple):
+    """One decode step's split of the batch (_Scheduler._plan), shared by every
+    FA layer: `single` the ungrouped rows' batch indices, `groups` (pg, member
+    batch indices) per group -- a slice when they are consecutive (members
+    are kept in batch order, so a wave's group is one), else an int32 array
+    (a gather) --, `inv` the take back to batch order (None when the parts
+    are already in order), `owners` the groups."""
+    single: list
+    groups: list
+    inv: object
+    owners: list
+
 
 class RowsKV:
     """The per-row KV caches of one full-attention layer in a batched decode
     step. No left_padding / make_mask / _idx: the library then builds no mask
-    and takes none of its batch-cache branches."""
+    and takes none of its batch-cache branches. `layer` / `plan`: the FA layer
+    index and the step's _StepPlan when rows are grouped (QWEN_CASCADE), else
+    None: today's per-row loop."""
 
-    def __init__(self, caches):
+    def __init__(self, caches, layer=None, plan=None):
         self.caches = caches
+        self.layer, self.plan = layer, plan
 
     @property
     def offset(self):                 # read by LanguageModel; positions are explicit
@@ -1578,13 +1679,39 @@ def _rows_attention(self, x, mask=None, cache=None, position_ids=None,
     queries, keys, values, gate, _ = self._prepare_projected_qkv(
         self.q_proj(x), self.k_proj(x), self.v_proj(x), None, position_ids,
         position_embeddings, None)
-    outs = []
-    for i, c in enumerate(cache.caches):
-        k, v = c.update_and_fetch(keys[i:i + 1], values[i:i + 1])
-        outs.append(_Q35.scaled_dot_product_attention(queries[i:i + 1], k, v, cache=c,
-                                                      scale=self.scale, mask=None))
-    out = mx.concatenate(outs, axis=0).transpose(0, 2, 1, 3).reshape(B, L, -1)
+    if cache.plan is None:
+        outs = []
+        for i, c in enumerate(cache.caches):
+            k, v = c.update_and_fetch(keys[i:i + 1], values[i:i + 1])
+            outs.append(_Q35.scaled_dot_product_attention(queries[i:i + 1], k, v, cache=c,
+                                                          scale=self.scale, mask=None))
+        out = mx.concatenate(outs, axis=0)
+    else:
+        out = _cascade_rows(self, cache, queries, keys, values)
+    out = out.transpose(0, 2, 1, 3).reshape(B, L, -1)
     return self.o_proj(out * mx.sigmoid(gate))
+
+
+def _cascade_rows(attn, cache, queries, keys, values):
+    """The attention of a RowsKV step with groups (cache.plan): ungrouped rows
+    take today's per-row calls verbatim; each group writes its members' K/V
+    into its stack (cascade append) and attends them over the shared prefix
+    + their suffixes at once (cascade.attention). Back to batch order with
+    one take (exact copies: the ungrouped rows' outputs keep their bits)."""
+    plan, layer = cache.plan, cache.layer
+    parts = []
+    for b in plan.single:
+        c = cache.caches[b]
+        k, v = c.update_and_fetch(keys[b:b + 1], values[b:b + 1])
+        parts.append(_Q35.scaled_dot_product_attention(queries[b:b + 1], k, v, cache=c,
+                                                       scale=attn.scale, mask=None))
+    for pg, idx in plan.groups:        # idx: a slice (a view) or an int32 array (a gather)
+        pg.append(layer, keys[idx], values[idx])
+        parts.append(cascade.attention(queries[idx], pg, layer, attn.scale))
+    if len(parts) == 1 and plan.inv is None:   # one group of the whole batch, in order
+        return parts[0]
+    out = mx.concatenate(parts, axis=0)
+    return out if plan.inv is None else out[plan.inv]
 
 
 def _vision_arrays(vision):
@@ -2007,6 +2134,9 @@ class _Row:
         self.sampler = self.pen = None
         self.parent = None                          # the entry the running prefill resumed from
         self.started = False                        # its prefill / DFlash run began
+        self.cached = False                         # resumed from the prompt cache or stored an entry
+        self.spec = False                           # ran DFlash (_spec): never grouped
+        self.group = None                           # its _PrefixGroup (QWEN_CASCADE)
 
     @property
     def sync(self):
@@ -2036,7 +2166,30 @@ class _Scheduler:
 
     Usage.peak_gb: the MLX peak since the batch was last empty, read when the
     request ends; with concurrent rows it is the process peak during the
-    request, not the request's own share.
+    request, not the request's own share (with QWEN_CASCADE it includes the
+    groups' fp32 prefixes and the formation / step transients).
+
+    Cascade groups (QWEN_CASCADE, on by default with fp16 KV + the prompt
+    cache; _cascade_join / _cascade_tidy / _plan): rows sharing a long
+    prompt prefix decode their attention as one group over one fp32 copy of
+    the prefix. Formed when a row joins, joined by later rows, left by
+    finished rows and by rows whose own suffix passes P // 2, dissolved (the
+    members get contiguous caches back: release) when fewer than 3 members
+    are left (so always at B <= 2) or, at the members' real lengths, the
+    group's arrays would take more than their own fp16 caches (_group_wins).
+    A group is charged once (_group_bytes, at the members' reservations,
+    never below its prefix + stacks + 2 contiguous rows: what the forced
+    release of its last 2 members materializes beside it) and its members
+    only their recurrent state. A formation / join that raises `reserved` is
+    taken only while `reserved` + the prompt cache's live bytes stay within
+    the budget (one that lowers it always; growth can still pass the budget,
+    as for ungrouped rows: _regrow). An optional release (a P // 2 leaver, a
+    memory dissolve, set_cascade(False): one member per group and decode
+    step, the last < 3 together) is checked with the group alive -- `reserved` +
+    the released rows' contiguous caches + the prompt cache within the
+    headroom (budget + prefill reserve), crediting nothing for the group's
+    shrink -- else it waits; a forced release (< 3 live members) is not
+    checked: its peak is inside the group's charge (the floor).
 
     Failures: a failed decode step fails the rows in it (not the prefilling
     request). SCHED_MAX_FAILURES consecutive failed steps with several rows
@@ -2083,6 +2236,10 @@ class _Scheduler:
         self.failures = 0
         self.tick_t0 = 0.0              # start of the running tick, 0 between ticks
         self.on_fault = on_fault
+        self.fa_layers = [i for i, x in enumerate(self.lm.model.layers) if not x.is_linear]
+        self.groups: list[_PrefixGroup] = []
+        self.cascade = self._cascade_on(CASCADE)
+        self.n_groups = self.n_grouped = 0  # Health: plain ints kept current here
 
     # --- threads -------------------------------------------------------------
     def start(self):
@@ -2171,6 +2328,7 @@ class _Scheduler:
         for req in left:
             req.out.put(("error", kind, msg))
         self.rows, self.gdn, self.task, self.task_row, self.reserved = [], None, None, None, 0
+        self._drop_groups()
         try:
             from mlx_vlm.generate.common import generation_stream
             mx.synchronize(generation_stream)
@@ -2244,8 +2402,13 @@ class _Scheduler:
         if row.pos < row.tokens:
             return
         tokens = min(row.pos + 1024, len(row.req.ids) + row.req.max_tokens + 1)
-        need = self._bytes(tokens)
-        rows = self.reserved + need - row.reserved
+        g = row.group
+        if g is None:
+            need = self._bytes(tokens)
+            rows = self.reserved + need - row.reserved
+        else:                                   # a member grows its group's charge
+            need = self._group_bytes(g.P, g.rows, {row: tokens})
+            rows = self.reserved + need - g.reserved
         headroom = self.budget + self.prefill_reserve
         pc = self.eng._pcache
         if rows <= headroom < rows + pc.bytes:
@@ -2265,8 +2428,12 @@ class _Scheduler:
             self._finish(row, "length")
             return
         row.tokens = tokens
-        self.reserved += need - row.reserved
-        row.reserved = need
+        if g is None:
+            self.reserved += need - row.reserved
+            row.reserved = need
+        else:
+            self.reserved += need - g.reserved
+            g.reserved = need
 
     def _fits(self, req, rows):
         """Would `req` (the head of the queue) be admitted next to `rows`
@@ -2419,6 +2586,7 @@ class _Scheduler:
                 log.info("id=%s prompt cache MISS (common prefix %d, %d entries)",
                          req.id, split, len(eng._pcache.entries))
         req.reused = reused
+        row.cached = reused > 0
         keep, protect, ckpts = set(), set(), {}
         if use_cache:
             end = len(ids) - 1
@@ -2475,6 +2643,7 @@ class _Scheduler:
                 return
             if e is None:
                 return
+            row.cached = True
             # MB: the entry's buffers (shared ones included); "MB total": live
             # bytes, every buffer once; gap: tokens the cache held but could
             # not resume from (no checkpoint there); pieces: its KV chain
@@ -2599,6 +2768,7 @@ class _Scheduler:
                                                 _speculative_walk)
         from mlx_vlm.speculative.dflash import _dflash_next_block_size
         req, lm, draft = row.req, self.lm, self.eng.draft
+        row.spec = True                         # also after a demotion: never grouped
         input_ids, cache, pos, cuts, on_ckpt, on_prefilled = self._prompt_cache(row)
         row.cache = cache
         layers = list(draft.config.target_layer_ids)
@@ -2745,6 +2915,7 @@ class _Scheduler:
                         "(raise QWEN_WIRED_LIMIT_GB / iogpu.wired_limit_mb or set QWEN_BATCH_MEM_GB)",
                         self.budget / GIB, typical / GIB)
             self.max_batch = 1
+        self.cascade = self.cascade and self.max_batch >= 3
         return self.max_batch
 
     # --- the batch ----------------------------------------------------------------
@@ -2755,7 +2926,9 @@ class _Scheduler:
 
     def _join(self, row):
         """Add a prefilled row. The new stacked state is built first and
-        swapped in only on success, so a failed join leaves the batch as it was."""
+        swapped in only on success, so a failed join leaves the batch as it
+        was. (The leading _compact never raises for a group: a failed tidy
+        fails that group's rows, not the joining request.)"""
         self._compact()
         gdn = self.gdn
         if len(self.rows) == 1:
@@ -2765,18 +2938,468 @@ class _Scheduler:
         self.gdn = gdn
         self.rows.append(row)
         self._regrow(row)
+        if self.cascade and not row.done:
+            try:
+                self._cascade_join(row)
+            except Exception:  # noqa: BLE001 — the helpers change nothing until they succeed
+                log.exception("cascade: id=%s stays ungrouped", row.req.id)
+
+    def _drop_done(self):
+        keep = [i for i, r in enumerate(self.rows) if not r.done]
+        if len(keep) != len(self.rows):
+            if self.gdn is not None:
+                if len(keep) == 1:              # back to the plain library call
+                    _gdn_split(self.gdn, keep[0], self.rows[keep[0]].cache)
+                    self.gdn = None
+                else:
+                    self.gdn = _gdn_take(self.gdn, keep) if keep else None
+            self.rows = [self.rows[i] for i in keep]
 
     def _compact(self):
-        keep = [i for i, r in enumerate(self.rows) if not r.done]
-        if len(keep) == len(self.rows):
+        self._drop_done()
+        # a group whose tidy failed ended its rows: drop them, and tidy the
+        # other groups again for the smaller batch (each pass removes a group)
+        while self.groups and self._cascade_tidy():
+            self._drop_done()
+
+    # --- cascade groups (QWEN_CASCADE; plan Part B) ---------------------------
+    def _cascade_on(self, want):
+        return bool(want and CASCADE_MIN_ROWS and CASCADE_MIN_PREFIX and PROMPT_CACHE
+                    and self.max_batch >= 3 and self.kv["kv_bits"] is None)
+
+    def cascade_state(self):
+        """For the load log: on, or why not."""
+        if self.cascade:
+            return (f"on: >= {CASCADE_MIN_ROWS} rows sharing >= "
+                    f"{CASCADE_MIN_PREFIX} prompt tokens{', check' if CASCADE_CHECK else ''}")
+        why = [w for w, bad in (("QWEN_CASCADE=0", not CASCADE),
+                                ("min rows / prefix 0", not (CASCADE_MIN_ROWS and CASCADE_MIN_PREFIX)),
+                                ("no prompt cache", not PROMPT_CACHE),
+                                ("max_batch < 3", self.max_batch < 3),
+                                ("quantized KV", self.kv["kv_bits"] is not None)) if bad]
+        return "off (" + ", ".join(why) + ")"
+
+    def set_cascade(self, on):
+        """Tools (step_prof's A/B). Call it on the scheduler thread only: it
+        builds and evaluates MLX arrays. Off: no new groups; the running ones
+        are released in stages by _cascade_tidy (one member per group and
+        decode step, each only when its contiguous cache fits the headroom
+        beside the live group: 16 x 32K members released at once would
+        materialize every fp16 cache beside the live fp32 group), so groups
+        can outlive the switch while memory is short. On: the formation rule
+        for every running row (as if each just joined)."""
+        self.cascade = self._cascade_on(on)
+        if not self.cascade:
+            if self.groups:
+                self._compact()
             return
-        if self.gdn is not None:
-            if len(keep) == 1:                  # back to the plain library call
-                _gdn_split(self.gdn, keep[0], self.rows[keep[0]].cache)
-                self.gdn = None
-            else:
-                self.gdn = _gdn_take(self.gdn, keep) if keep else None
-        self.rows = [self.rows[i] for i in keep]
+        for r in list(self.rows):
+            if r.group is None and not r.done:
+                self._cascade_join(r)
+
+    def _cascade_count(self):
+        self.n_groups = len(self.groups)
+        self.n_grouped = sum(len(g.rows) for g in self.groups)
+
+    def _unlink(self, g):
+        """Break group g's references for good: every member's `group`, its
+        FA cache entries (_GroupRefs: a finished or failed row's only), and
+        g.rows. Without it rows <-> group is a cycle, and the group's fp32
+        arrays would live until Python's cyclic GC (generation 2: minutes in
+        this process) while `reserved` already let them go."""
+        for r in g.rows:
+            self._unlink_row(r, g)
+        g.rows = []
+
+    def _unlink_row(self, r, g):
+        if r.group is g:
+            r.group = None
+        if r.cache is not None:
+            for i in self.fa_layers:
+                if isinstance(r.cache[i], _GroupRef):
+                    r.cache[i] = None
+
+    def _drop_groups(self):
+        """Every group goes (a failed step, _close): the rows are ended."""
+        for g in self.groups:
+            self._unlink(g)
+        self.groups = []
+        self._cascade_count()
+
+    def _member_bytes(self):
+        """A grouped row's own reservation: its recurrent state (twice, as
+        _bytes) + the same slack; its KV is charged to the group."""
+        return 2 * self.gdn_row + (8 << 20)
+
+    def _group_suffix(self, P, rows, tokens=None):
+        """Suffix tokens a group is charged for per member: the longest member
+        reservation past P (every stack slot is cap wide), in stack steps.
+        `tokens`: {row: tokens} overrides (_regrow's what-if, _group_wins'
+        real lengths)."""
+        s = max((tokens or {}).get(r, r.tokens) for r in rows) - P
+        return -(-max(s, 1) // CASCADE_STEP) * CASCADE_STEP
+
+    def _group_bytes(self, P, rows, tokens=None):
+        """A group's charge (plan B.5): the fp32 prefix once (padded to whole
+        chunks) + the fp32 stack at the longest member reservation (+5%, as
+        _bytes) + the step's score transients (prefix + suffix scores and
+        probabilities, 8 B per q head, row and key per FA layer, +
+        CASCADE_SLACK) + one layer's old + new stack (take / add / grow copy
+        layer by layer: review cascade_b1 finding 1). Conservative: about one
+        layer's scores are alive at a time, and the copy is transient.
+
+        Floor (review cascade_b2b3_fixes C): never less than the prefix +
+        stacks + 2 contiguous fp16 rows of P + the charged suffix (+5%, as
+        _bytes) -- the forced release of a group's last 2 members is
+        unchecked and builds their caches while the group is alive, so the
+        charge must already hold it. It also makes a group of a few rows
+        over a long prefix lose to their own caches (_group_wins: 3 x 32K /
+        64K / 96K do; 8 or 16 rows still win by far)."""
+        n, s = len(rows), self._group_suffix(P, rows, tokens)
+        kv32 = 2 * self.kv_fp16                     # bytes per token, all FA layers, fp32
+        n_fa = len(self.fa_layers)
+        ppad = -(-P // CASCADE_CHUNK) * CASCADE_CHUNK
+        scores = n_fa * 8 * self.lm.args.num_attention_heads * n * (ppad + s) + CASCADE_SLACK
+        moves = 2 * n * s * kv32 // n_fa
+        arrays = ppad * kv32 + int(n * s * kv32 * 1.05)
+        return arrays + max(scores + moves, 2 * int((P + s) * self.kv_fp16 * 1.05))
+
+    def _group_wins(self, P, rows):
+        """The memory rule (review cascade_b2b3 finding 2), at the members'
+        REAL lengths (each row's KV after the next step, pos + 1): the group's
+        arrays and transients (_group_bytes at those lengths) take no more
+        than the members' own fp16 caches would (_bytes at those lengths, the
+        recurrent state aside). At the reservations instead (the default
+        4096 generation tokens per row, the fp32 stack charged at 2x), an 8K
+        prefix would group only from ~6 rows and a 4K one never; the charge
+        stays reservation-based, and _charge_fits bounds what grouping adds
+        to it. 9B, ~150-token suffixes, with _group_bytes' floor (2
+        contiguous rows): 3 rows never win (3 x 32K / 64K / 96K: 4.2 / 8.3 /
+        12.4 GiB vs 3.2 / 6.3 / 9.5), 4 rows only from a 32K prefix; 5..16
+        rows win at 4K / 8K / 32K. A group stops winning at a real suffix of
+        257 / 1281 / 2049 tokens for 4K x 5 / 8 / 16 rows, 1025 / 3073 /
+        4353 for 8K, 4865 / 13057 / 18177 for 32K (the P // 2 leave comes
+        first from 8 rows at 8K). Under 3 rows never."""
+        if len(rows) < 3:
+            return False
+        real = {r: r.pos + 1 for r in rows}
+        own = sum(self._bytes(n) for n in real.values()) - len(rows) * self._member_bytes()
+        return self._group_bytes(P, rows, real) <= own
+
+    def _charge_fits(self, delta):
+        """The budget guard of a formation / join: grouping may raise the
+        reservations (the fp32 stack at the reserved length can outweigh the
+        fp16 caches it replaces) only while they + the prompt cache's live
+        bytes (inside the budget, as for admissions: _fits) stay within the
+        budget. Refused rather than evicting: grouping is optional, and the
+        shared system prompt's entry is worth more as a future hit."""
+        return delta <= 0 or self.reserved + delta + self.eng._pcache.bytes <= self.budget
+
+    def _cascadable(self, row):
+        """A running row that may be grouped: a text-only plain prefill (never
+        vision, never DFlash) that resumed from the prompt cache or stored an
+        entry, ungrouped, with plain fp16 KVCaches at its position."""
+        if (row.done or row.group is not None or not row.cached or row.spec
+                or row.req.images or row.delta):
+            return False
+        return all(type(row.cache[i]) is KVCache and row.cache[i].offset == row.pos
+                   for i in self.fa_layers)
+
+    def _fits_prefix(self, row, P):
+        """P can be `row`'s group prefix (its ids [0, P) checked by the caller):
+        inside the prefilled prompt and a slab end of it -- so its KV [0, P)
+        are the bits every row whose prompt shares [0, P) with P a slab end
+        holds (_bounds depends only on the tokens before an end; hit == cold)
+        -- and its own suffix not comparable to the prefix (the suffix part
+        is the slower one)."""
+        return (P <= len(row.req.ids) - 1 and row.pos - P <= P // 2
+                and P in self._ends(row.req))
+
+    def _same_prefix(self, a, b, P):
+        """QWEN_CASCADE_CHECK at formation: rows a and b hold the same KV
+        [0, P) bit for bit in every FA layer (evaluates)."""
+        for i in self.fa_layers:
+            x, y = a.cache[i], b.cache[i]
+            for u, v in ((x.keys, y.keys), (x.values, y.values)):
+                if u.dtype != v.dtype or not mx.array_equal(u[..., :P, :], v[..., :P, :]).item():
+                    return False
+        return True
+
+    def _cascade_join(self, row):
+        """`row` just joined the batch: add it to the deepest group whose
+        prefix it shares, else form a new group around it when, at the
+        deepest slab end P >= QWEN_CASCADE_MIN_PREFIX of its prompt, at least
+        QWEN_CASCADE_MIN_ROWS running rows (it included; earlier rows are
+        converted) share ids [0, P) with P a slab end of theirs. Either only
+        when the memory rule holds for the members (_group_wins, real
+        lengths) and the charge moved to the group keeps `reserved` + the
+        prompt cache within the budget (_charge_fits). A row refused by a
+        group forms no second group on that group's prefix (it would hold the
+        same prefix twice); it stays ungrouped."""
+        if not self.cascade or len(self.rows) < 3 or not self._cascadable(row):
+            return
+        ids, member = row.req.ids, self._member_bytes()
+        for g in sorted(self.groups, key=lambda g: -g.P):
+            if ids[:g.P] != g.ids or not self._fits_prefix(row, g.P):
+                continue
+            rows = g.rows + [row]
+            if not self._group_wins(g.P, rows):
+                continue
+            delta = self._group_bytes(g.P, rows) - g.reserved - (row.reserved - member)
+            if not self._charge_fits(delta):
+                log.debug("cascade: id=%s not added to group P=%d: +%.2f GiB reserved would "
+                          "pass the budget", row.req.id, g.P, delta / GIB)
+                continue
+            if CASCADE_CHECK and not g.pg.prefix_equal(row.cache):
+                log.warning("cascade: id=%s shares the tokens of group P=%d but not its KV "
+                            "bits: not grouped", row.req.id, g.P)
+                return
+            self._group_add(g, row)
+            return
+        need = max(3, CASCADE_MIN_ROWS)
+        others = [r for r in self.rows if r is not row and self._cascadable(r)]
+        if len(others) + 1 < need:
+            return
+        lcp = [(_lcp(ids, r.req.ids), r) for r in others]
+        if sum(n >= CASCADE_MIN_PREFIX for n, _ in lcp) + 1 < need:
+            return
+        ends = sorted((p for p in self._ends(row.req)
+                       if p >= CASCADE_MIN_PREFIX and self._fits_prefix(row, p)), reverse=True)
+        for P in ends:
+            if any(g.P == P and g.ids == ids[:P] for g in self.groups):
+                continue                # that group refused it (or would have)
+            cands = [row] + [r for n, r in lcp if n >= P and self._fits_prefix(r, P)]
+            if len(cands) < need:
+                continue
+            if CASCADE_CHECK:
+                bad = [r for r in cands[1:] if not self._same_prefix(row, r, P)]
+                for r in bad:
+                    log.warning("cascade: id=%s shares %d tokens with id=%s but not their KV "
+                                "bits: not grouped", r.req.id, P, row.req.id)
+                cands = [r for r in cands if r not in bad]
+                if len(cands) < need:
+                    continue
+            if not self._group_wins(P, cands):
+                continue
+            delta = self._group_bytes(P, cands) - sum(r.reserved - member for r in cands)
+            if not self._charge_fits(delta):
+                log.debug("cascade: no group P=%d of %d rows: +%.2f GiB reserved would pass "
+                          "the budget", P, len(cands), delta / GIB)
+                continue
+            self._group_build(P, cands)
+            return
+
+    def _group_build(self, P, rows):
+        """A new group over `rows`: [0, P) from rows[0]'s own cache (the
+        joining row's; the same bits as every member's), evaluated; the
+        members in batch order (so the step plan of a wave's group is one
+        slice: no gather, no output take); their FA caches replaced by
+        _GroupRefs (their buffers are freed); the charges moved from the rows
+        to the group."""
+        source = rows[0]
+        at = {id(r): b for b, r in enumerate(self.rows)}
+        rows = sorted(rows, key=lambda r: at[id(r)])
+        pg = cascade.PrefixGroup.build(source.cache, [r.cache for r in rows], P, self.fa_layers,
+                                       chunk=CASCADE_CHUNK, step=CASCADE_STEP)
+        g = _PrefixGroup(pg, source.req.ids[:P], rows)
+        before = self.reserved
+        g.reserved = self._group_bytes(P, g.rows)
+        member = self._member_bytes()
+        for r in g.rows:
+            for i in self.fa_layers:
+                r.cache[i] = _GroupRef(r)
+            r.group = g
+            self.reserved += member - r.reserved
+            r.reserved = member
+        self.reserved += g.reserved
+        self.groups.append(g)
+        self._cascade_count()
+        log.info("cascade: group formed: P=%d, %d rows (%s), %.1f MB (prefix + stacks, fp32), "
+                 "charged %.2f GiB; reserved %.2f -> %.2f GiB",
+                 P, len(g.rows), ",".join(r.req.id for r in g.rows), pg.nbytes / 1e6,
+                 g.reserved / GIB, before / GIB, self.reserved / GIB)
+
+    def _group_add(self, g, row):
+        """`row` joins group g: its suffix is copied onto the stacks (the
+        S-token copies evaluated, so the row's own buffers go at once; the
+        stack concat lazy: the next step's appends consume it), its FA caches
+        go. The charge is computed first and pg.add is atomic: an exception
+        leaves the group and the row as they were."""
+        charge = self._group_bytes(g.P, g.rows + [row])
+        g.pg.add(row.cache)
+        g.rows.append(row)
+        old, g.reserved = g.reserved, charge
+        for i in self.fa_layers:
+            row.cache[i] = _GroupRef(row)
+        row.group = g
+        member = self._member_bytes()
+        self.reserved += charge - old + member - row.reserved
+        row.reserved = member
+        self._cascade_count()
+        log.info("cascade: id=%s joined group P=%d (%d rows, charged %.2f GiB)",
+                 row.req.id, g.P, len(g.rows), g.reserved / GIB)
+
+    def _cascade_tidy(self):
+        """Group membership after rows ended or grew (every _compact).
+        Finished members leave (take; their FA entries cleared). Then, per
+        group (_tidy_choice):
+          * forced, whatever it costs: no live member left, or < 3 live
+            members (which covers a batch down to <= 2 rows: B <= 2 stays
+            today's bit-exact path) -- at most 2 rows are released, and their
+            fp16 caches replace the group's fp32 prefix; unchecked: its peak
+            (2 contiguous rows beside the live group) is inside the group's
+            charge (_group_bytes' floor);
+          * optional, one member per group and decode step (fewer than 3
+            left go with it), checked with the group alive: reserved + the released
+            rows' contiguous caches - their member charges + the prompt
+            cache's live bytes <= budget + prefill reserve, crediting nothing
+            for the group's shrink (release evaluates the new caches while
+            the group's arrays are alive, and take is lazy) -- else they stay
+            grouped (always correct) and the next tidy retries. A member
+            whose own suffix passed P // 2 leaves, the longest first (a speed
+            rule; a leaver costs ~(P - S) fp16 tokens more than its stack
+            slot); when the memory rule fails at the members' real lengths
+            (_group_wins), and with cascade switched off (set_cascade), the
+            cheapest member is released (a memory dissolve is staged too: the
+            rows left may win again and stay grouped).
+
+        A released row gets contiguous KVCaches (cascade release): [0, P) are
+        bit for bit the prefix it had (fp16 -> fp32 -> fp16 is exact); the
+        suffix holds what it decoded while grouped -- tokens produced under
+        the group's numerics, so the row's continuation equals a never-
+        grouped row's given that cache, not a never-grouped run's tokens.
+        Every release of a group is built (and evaluated) before any row is
+        touched. `release` evaluates: from _iterate's _compact it waits for
+        the step in flight, so that step loses its overlap (the GPU idles
+        while the host builds the next one) -- once per leave / dissolve
+        event, accepted; from _join's it is free (the slab's eval drained
+        the stream). A group whose tidy raises (an OOM in a release) is
+        dropped and its live members fail -- their KV is only in the group
+        -- while the rest of the batch, and a request joining it, go on.
+        -> True when that happened (the caller drops the ended rows)."""
+        failed = False
+        for g in list(self.groups):
+            try:
+                self._tidy_group(g)
+            except Exception as e:  # noqa: BLE001 — this group's rows, not the batch's
+                log.exception("cascade: group P=%d: tidy failed, its %d rows fail", g.P,
+                              sum(not r.done for r in g.rows))
+                for r in g.rows:
+                    self._fail(r, e)
+                if g in self.groups:        # not yet dropped by its own dissolve
+                    self.reserved -= g.reserved
+                    self.groups.remove(g)
+                self._unlink(g)
+                failed = True
+        self._cascade_count()
+        return failed
+
+    def _tidy_choice(self, g, live):
+        """-> (released rows, staying rows, why or None). `why` names the
+        reason of a release (None when nobody is released); the group is
+        dissolved when nobody stays."""
+        # < 3 live members also covers a batch of <= 2 rows (B <= 2 stays
+        # today's bit-exact path): 3 members are 3 rows of the batch
+        forced = ("finished" if not live else
+                  "%d members" % len(live) if len(live) < 3 else None)
+        if forced:
+            return live, [], forced
+        if getattr(g, "released_at", -1) == self.steps:
+            # one optional release per decode step: the last one's take (the
+            # group's old stacks) is freed only by the step that consumes it
+            return [], live, None
+        if not self.cascade:                # switched off: in stages, the cheapest first
+            r, why = min(live, key=lambda r: r.tokens), "switched off"
+        elif not self._group_wins(g.P, live):   # memory: likewise
+            r, why = min(live, key=lambda r: r.tokens), "memory"
+        else:                               # the speed rule: the longest suffix first
+            long = [r for r in live if r.pos - g.P > g.P // 2]
+            if not long:
+                return [], live, None
+            r, why = max(long, key=lambda r: r.pos), "suffix past P/2"
+        out, stay = [r], [x for x in live if x is not r]
+        if len(stay) < 3:                   # < 3 staying members go with it
+            out, stay = live, []
+        # checked with the group alive (release builds the contiguous caches
+        # beside it; take is lazy: nothing of the group goes before the next
+        # step), so the group's shrink is not credited (review cascade_b2b3_fixes A)
+        need = sum(self._bytes(x.tokens) - x.reserved for x in out)
+        if self.reserved + need + self.eng._pcache.bytes > self.budget + self.prefill_reserve:
+            return [], live, None
+        return out, stay, why
+
+    def _tidy_group(self, g):
+        live = [r for r in g.rows if not r.done]
+        out, stay, why = self._tidy_choice(g, live)
+        if len(stay) == len(g.rows):
+            return                      # nobody finished, nobody released
+        index = {id(r): j for j, r in enumerate(g.rows)}
+        caches = {id(r): g.pg.release(index[id(r)]) for r in out}
+        if stay:
+            g.pg.take([index[id(r)] for r in stay])
+        for r in g.rows:
+            if r.done:
+                self._unlink_row(r, g)
+        for r in out:
+            for i, c in caches[id(r)].items():
+                r.cache[i] = c
+            r.group = None
+            need = self._bytes(r.tokens)
+            self.reserved += need - r.reserved
+            r.reserved = need
+        old, g.rows = g.reserved, stay
+        if out and stay:
+            g.released_at = self.steps
+        if stay:
+            g.reserved = self._group_bytes(g.P, stay)
+            self.reserved += g.reserved - old
+            if out:
+                log.info("cascade: group P=%d: %s left (%s), %d rows stay", g.P,
+                         ",".join(r.req.id for r in out), why, len(stay))
+        else:
+            self.reserved -= old
+            self.groups.remove(g)
+            log.info("cascade: group P=%d dissolved (%s): %d rows released, %.2f GiB "
+                     "charge dropped (reserved %.2f GiB)", g.P, why, len(out),
+                     old / GIB, self.reserved / GIB)
+
+    def _plan(self, rows):
+        """This step's split of `rows` into ungrouped rows and groups. Any
+        disagreement between the groups and the batch (a member missing, a
+        grouped row in no group, the group's lengths vs the rows' positions)
+        is a bookkeeping bug: RuntimeError fails the step's rows."""
+        where = {id(r): b for b, r in enumerate(rows)}
+        groups, order = [], []
+        for g in self.groups:
+            idx = [where.get(id(r)) for r in g.rows]
+            if None in idx or any(r.group is not g for r in g.rows):
+                raise RuntimeError(f"cascade: group P={g.P} out of step with the batch")
+            g.pg.check_lens([r.pos - g.P for r in g.rows])
+            a = idx[0]
+            sel = (slice(a, a + len(idx)) if idx == list(range(a, a + len(idx)))
+                   else mx.array(idx, dtype=mx.int32))
+            groups.append((g.pg, sel))
+            order += idx
+        single = [b for b, r in enumerate(rows) if r.group is None]
+        order = single + order
+        if sorted(order) != list(range(len(rows))):
+            raise RuntimeError("cascade: a grouped row is in no group")
+        inv = None if order == sorted(order) else mx.array(np.argsort(order), dtype=mx.int32)
+        return _StepPlan(single, groups, inv, list(self.groups))
+
+    def _grouped_forward(self, plan, y, cache, pos):
+        """The batched forward of a step with groups: each group's step is
+        opened before the graph is built and closed after (its lengths then
+        include this step's token, as the rows' positions will). A failure
+        while building propagates to _run's handler, whose _fail_rows drops
+        every group: no abort_step (it would evaluate the stacks, re-running
+        the aborted graph, for groups about to be dropped)."""
+        for g in plan.owners:
+            g.pg.begin_step()
+        out = self.lm(y, cache=cache, position_ids=pos)
+        for g in plan.owners:
+            g.pg.end_step()
+        return out
 
     def _end(self, row, event):
         """The row's last event, with its stats snapshot taken here (the next
@@ -2801,7 +3424,9 @@ class _Scheduler:
     def _fail(self, row, e):
         if row is None or row.done:
             return
-        log.error("generation failed: %s: %s: %s", row.req.id, type(e).__name__, e)
+        # str(e), not e: a log record must not keep the exception (and through
+        # its traceback the failed step's frames: plan, groups) alive
+        log.error("generation failed: %s: %s: %s", row.req.id, type(e).__name__, str(e))
         self._end(row, ("error", type(e).__name__, str(e)))
 
     def _fail_rows(self, e):
@@ -2810,6 +3435,7 @@ class _Scheduler:
         for r in self.rows:
             self._fail(r, e)
         self.rows, self.gdn = [], None
+        self._drop_groups()                         # the arrays go with the rows
         self.reserved = self.task_row.reserved if self.task_row is not None else 0
         try:
             mx.clear_cache()
@@ -2823,6 +3449,8 @@ class _Scheduler:
         B = len(rows)
         if B == 1:
             r = rows[0]
+            if r.group is not None:
+                raise RuntimeError("cascade: a grouped row decoding alone")
             out = lm(r.y[None], cache=r.cache,
                      position_ids=mx.array([[r.pos + r.delta]], dtype=mx.int32))
             logits = [out.logits[:, -1, :]]
@@ -2831,10 +3459,15 @@ class _Scheduler:
             # mismatch: never let a stacking slip through
             if any(c.cache[1].shape[0] != B for c in self.gdn.values()):
                 raise RuntimeError("stacked recurrent state out of step with the batch")
-            cache = [self.gdn[i] if i in self.gdn else RowsKV([r.cache[i] for r in rows])
+            plan = self._plan(rows) if self.groups else None
+            cache = [self.gdn[i] if i in self.gdn else RowsKV([r.cache[i] for r in rows], i, plan)
                      for i in range(len(lm.model.layers))]
             pos = mx.array([[r.pos + r.delta] for r in rows], dtype=mx.int32)
-            out = lm(mx.concatenate([r.y for r in rows])[:, None], cache=cache, position_ids=pos)
+            if plan is None:
+                out = lm(mx.concatenate([r.y for r in rows])[:, None], cache=cache, position_ids=pos)
+            else:
+                out = self._grouped_forward(plan, mx.concatenate([r.y for r in rows])[:, None],
+                                            cache, pos)
             lg = out.logits[:, -1, :]
             logits = [lg[i:i + 1] for i in range(B)]
         nxt = []
@@ -2953,12 +3586,12 @@ class _Scheduler:
         steps = self.steps - self.log_steps
         if steps or self.rows or self.waiting or self.task:
             log.info("batch: rows=%d waiting=%d prefilling=%s steps/s=%.1f mean_rows=%.2f "
-                     "reserved=%.2f/%.2fGiB pcache=%.2fGiB active=%.2fGiB",
+                     "reserved=%.2f/%.2fGiB pcache=%.2fGiB active=%.2fGiB groups=%d grouped=%d",
                      len(self.rows), len(self.waiting),
                      self.task_row.req.id if self.task_row is not None else "-",
                      steps / (now - self.log_at), self.log_rows / steps if steps else 0.0,
                      self.reserved / GIB, self.budget / GIB, self.eng._pcache.bytes / GIB,
-                     mx.get_active_memory() / GIB)
+                     mx.get_active_memory() / GIB, self.n_groups, self.n_grouped)
         self.log_at, self.log_steps, self.log_rows = now, self.steps, 0
 
 
@@ -3109,6 +3742,7 @@ class Engine:
                  self.sched.gdn_row / 2**20, RESERVE_TOKENS, PREFILL_SHARE,
                  f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
                  f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
+        log.info("cascade attention (QWEN_CASCADE): %s", self.sched.cascade_state())
         self.sched.start()
         self.ready = True
         log.info("model loaded in %d ms", self.load_ms)
@@ -3663,7 +4297,8 @@ class WorkerServicer(pb_grpc.WorkerServicer):
 
     def Health(self, request, context):
         pc = self.engine._pcache        # counters only (plain ints the scheduler keeps current)
-        return pb.HealthReply(ready=self.engine.ready and self.engine.sched.alive(),
+        sched = self.engine.sched
+        return pb.HealthReply(ready=self.engine.ready and sched.alive(),
                               model=self.engine.model_id,
                               load_ms=self.engine.load_ms,
                               model_path=self.engine.model_path,
@@ -3672,7 +4307,9 @@ class WorkerServicer(pb_grpc.WorkerServicer):
                               prompt_cache_bytes=pc.bytes,
                               prompt_cache_hits=pc.hits,
                               prompt_cache_misses=pc.misses,
-                              prompt_cache_evictions=pc.evictions)
+                              prompt_cache_evictions=pc.evictions,
+                              cascade_groups=getattr(sched, "n_groups", 0),
+                              cascade_rows=getattr(sched, "n_grouped", 0))
 
     def Check(self, request, context):
         # Runs beside the generations (own pool thread): template, tokenizer and

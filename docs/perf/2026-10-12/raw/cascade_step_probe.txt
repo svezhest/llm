@@ -1,0 +1,6 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+19:11:42 P=7941 B=16 grouped : ahead 53.7 ms/step [53.0, 53.1, 54.3, 54.4] peak+ [314, 314, 285, 285] MiB | sync 63.3 [62.5, 63.3, 63.3, 65.8] peak+ [314, 630, 285, 714] MiB
+19:12:21 P=7941 B=16 control : ahead 66.4 ms/step [65.6, 66.5, 66.3, 66.8] peak+ [127, 127, 127, 127] MiB | sync 75.4 [74.8, 75.1, 75.7, 76.1] peak+ [126, 309, 127, 312] MiB
+19:13:35 P=31958 B=16: control skipped (17.1 GB of per-row KV)
+19:14:28 P=31958 B=16 grouped : ahead 93.4 ms/step [88.5, 91.1, 95.8, 98.4] peak+ [384, 383, 384, 384] MiB | sync 99.4 [92.6, 98.2, 100.7, 104.8] peak+ [383, 691, 384, 756] MiB

@@ -344,7 +344,7 @@ Existing tests that change:
 New knobs, next to `MAX_BATCH` (1326):
 
 ```python
-CASCADE = os.environ.get("QWEN_CASCADE", "0") != "0"            # rollback switch; "1" after the B4 gate
+CASCADE = os.environ.get("QWEN_CASCADE", "0") == "1"            # rollback switch (as built: "1" only)
 CASCADE_MIN_ROWS = int(os.environ.get("QWEN_CASCADE_MIN_ROWS", "8"))       # 0 = off; 1..2 -> 3
 CASCADE_MIN_PREFIX = int(os.environ.get("QWEN_CASCADE_MIN_PREFIX", "4096")) # 0 = off
 CASCADE_CHECK = os.environ.get("QWEN_CASCADE_CHECK", "0") == "1"  # verify members' prefix bits (tests: on)
@@ -411,10 +411,18 @@ row ended):
 * **A group with 1 member left.**
 * **A member whose suffix grew past `g.P // 2`** leaves its group, converted back.
 
-The memory effect is neutral or better, since a fp32 prefix is P × 64 KiB:
+~~The memory effect is neutral or better.~~ **Corrected (review `cascade_b2b3` finding 4):**
 
-* converting back ≤ 2 members costs ≤ 2 × P × 32 KiB;
-* a member leaving at S = P/2 frees S × 64 KiB of suffix = P × 32 KiB.
+* converting back ≤ 2 members costs ≤ 2 × P × 32 KiB, no more than the fp32 prefix (P × 64 KiB)
+  they replace: fine;
+* a member leaving at S ≈ P/2 gets a contiguous (P + S) fp16 cache (≈ 1.5·P × 32 KiB) and gives
+  up only its stack slot (cap × 64 KiB ≈ P × 32 KiB): **+0.5·P × 32 KiB per leaver**, and its
+  reservation grows by ≈ (P − S_res) × 32 KiB (+96 MiB at 8K, +0.5 GiB at 32K). As built, a leave
+  (and any other optional release) happens one member per decode step and only while the
+  released caches fit `budget + prefill reserve` beside the live group (+ the prompt cache);
+  else the row stays grouped (the P/2 rule is a speed heuristic; grouping stays correct past it).
+  The forced release of the last ≤ 2 members is inside the group's charge (the 2-row floor of
+  `_group_bytes`, see As built).
 
 There is no other hysteresis. A group needs ≥ 8 rows to form and dissolves only at 1 member or
 B ≤ 2. It never re-forms except on a join with ≥ 8 candidates.
@@ -589,10 +597,17 @@ def _rows_attention(self, x, mask=None, cache=None, position_ids=None, position_
   Test B-T4 asserts that the ungrouped rows' logits are bitwise equal with and without a group in
   the same batch.
 * **Donation.** Each `g.sk[i]` and `g.sv[i]` is updated exactly once per step and referenced only
-  by the group dict. The previous step's attention read of it is finished before this step's
-  `put_along_axis` runs, because this step depends on the previous step's token. So the update is
-  in place, like `KVCache`'s slice update today. If a profile ever shows a full stack copy per step
-  (+8 ms in microbench run 1), look for an extra live reference.
+  by the group dict, so the update *can* be in place, like `KVCache`'s slice update today.
+  ~~Because this step depends on the previous step's token~~ (corrected, review `cascade_b1`
+  finding 5): donation is decided on the host at encode time (`array::is_donatable`: one
+  reference to the array and to its data), and Metal keeps every input's data referenced from
+  the command buffer until that buffer completes. Under step-ahead, while step k's buffer that
+  reads sk_k is still in flight, step k+1's scatter finds sk_k not donatable and **copies** it
+  (slower, never corrupt). It is donated only when step k's reader of that layer has completed by
+  the time step k+1's scatter is encoded, i.e. when a step spans more ops than MLX's ≤ 10
+  in-flight command buffers; the 9B step does (measured in `cascade.py`'s docstring: donation
+  from ~80 filler ops per layer). If a profile ever shows a full stack copy per step (+8 ms in
+  microbench run 1), look for an extra live reference or a too-short step.
 
 ### B.4 Group lifecycle in the scheduler
 
@@ -846,3 +861,116 @@ run time (no caller builds a plan until B3). B3 ships with the switch off. Only 
    * So padding wins on memory always, and on time at 8K.
    * If the 32K mask cost shows in B4, the cheaper unmeasured variant is a separate unpadded tail
      chunk (its own partial + LSE in the merge, ~4 extra kernels).
+
+---
+
+## As built: B2 + B3 (2026-10-12)
+
+`QWEN_CASCADE=1` by default since the B4 gate (`../cascade_gpu.md`; on only for `"1"`, unset /
+empty = `"1"`; it stays off by itself without fp16 KV, the prompt cache or max_batch ≥ 3;
+`QWEN_CASCADE=0` = today's per-row path bit for bit). Worker: `_cascade_knobs`,
+`_GroupRef`, `_PrefixGroup` (wraps `cascade.PrefixGroup`), `_StepPlan`, `RowsKV(caches,
+layer, plan)`, `_cascade_rows`; `_Scheduler._cascade_join / _group_build / _group_add /
+_cascade_tidy / _tidy_choice / _tidy_group / _plan / _grouped_forward / _group_bytes /
+_group_suffix / _group_wins / _charge_fits / _member_bytes / _unlink / _drop_groups /
+set_cascade / cascade_state`. Tests: `src/worker/tests/test_cascade_sched.py`. Review
+`reviews/cascade_b2b3.md` findings 1–10 applied (below), then the re-review
+`reviews/cascade_b2b3_fixes.md` A–D + nits (after B4, CPU-tested only).
+Deviations from the sketch above:
+
+* **B1's API instead of the free helpers.** `PrefixGroup.build/add/take/release`
+  (`grow` happens in `begin_step`); the step protocol `begin_step → append + attention per
+  FA layer → end_step` wraps the model call (`_grouped_forward`; a host-side build error goes
+  to `_fail_rows`, which drops every group). `add` / `take` lazy (review finding 1; `add`
+  evaluates the row's own S-token copies), `release` evaluated. `check_lens` runs every step (cheap), not only under the check knob.
+* **P is chosen by token prefix, not `row.req.reused`.** On a join, P = the deepest end of
+  the joining row's prompt (`_ends`: slab ends + `len − 1`) with P ≥ `MIN_PREFIX` such that
+  ≥ `MIN_ROWS` eligible rows (it included) have LCP ≥ P with it and P among *their* ends.
+  The cold producer is converted like any other row.
+* **Eligibility.** `row.cached` (resumed from the cache or stored an entry), never a DFlash
+  row (`row.spec`, also after demotion: stricter than B.6), never vision, plain fp16
+  `KVCache`s at `row.pos`, own suffix ≤ P // 2.
+* **Memory rule (review `cascade_b1` finding 6, reworked by `cascade_b2b3` finding 2).**
+  `_group_wins(P, rows)`: at the members' **real** lengths (pos + 1), the group's arrays and
+  transients (`_group_bytes` at those lengths) take no more than the members' own fp16 caches
+  would (`_bytes` at those lengths, the recurrent state aside); always false below 3 rows. The
+  first version decided on the reservations (n·S_res ≥ P·(n−2)); with the default 4096 reserved
+  generation tokens that never let a 4K prefix group and an 8K one only from ~6 rows, while
+  ignoring the charge's own extra terms. With the dissolve floor (re-review C, see Charge), 9B,
+  ~150-token suffixes: 3 rows never win (3 × 32K / 64K / 96K: 4.2 / 8.3 / 12.4 GiB vs 3.2 / 6.3
+  / 9.5), 4 rows only from 32K, 5..16 rows at 4K / 8K / 32K; a group stops winning at a real
+  suffix of 257 / 1281 / 2049 tokens for 4K × 5 / 8 / 16 rows, 1025 / 3073 / 4353 for 8K, 4865 /
+  13057 / 18177 for 32K. So `QWEN_CASCADE_MIN_PREFIX=4096` is a working threshold (default kept).
+* **Budget guard.** The charge stays reservation-based, so forming / joining can *raise*
+  `reserved` (9B, default reserve, with the floor: +1.00 / +1.69 GiB for 4K × 8 / 16, +0.71 /
+  +0.35 for 8K × 5 / 8; −0.10 for 8K × 16; −10.1 for 32K × 16). It is taken only while
+  `reserved + Δ + prompt cache bytes ≤ budget` (`_charge_fits`; re-review B: the cache counts
+  inside the budget as for admissions, and is not evicted for an optional grouping); else no
+  group at that P / no join, and the row decodes ungrouped. A refused row forms no second group
+  on that group's prefix. What is guaranteed: a formation / join never takes `reserved` + the
+  cache past the budget; the charge then grows with the members (`_regrow`) like any row's, so
+  growth can pass the budget up to the headroom (a growing row ends with `length` beyond).
+* **Releases.** Forced (unchecked): no live member, or < 3 live members (which covers B ≤ 2: 3
+  members are 3 batch rows; the separate "batch ≤ 2" condition was redundant); its peak — 2
+  contiguous rows built beside the live group — is inside the group's charge (the floor below).
+  Optional, one member per group and decode step (`_PrefixGroup.released_at`: the previous
+  release's lazy `take` frees the old stacks only in the step that consumes it; < 3 left go with
+  it), checked **with the group alive** (re-review A): `reserved + Σ(_bytes(tokens) − member) +
+  prompt cache bytes ≤ budget + prefill reserve`, nothing credited for the group's shrink
+  (`release` evaluates the new caches while the group's arrays are alive, and `take` is lazy);
+  else the rows stay grouped and the next tidy retries. Which member: past P // 2 the longest
+  first; a memory dissolve (`_group_wins` fails) and `set_cascade(False)` the cheapest first. A
+  memory dissolve is therefore staged too: the members left are re-judged each step and may win
+  again (groups can also outlive `set_cascade(False)` while memory is short).
+* **Charge.** `_group_bytes` = padded fp32 prefix + stack at the longest reservation ×1.05 +
+  max(score transients (8 B × Hq × rows × (Ppad + S) per FA layer + 64 MiB) + one layer's old +
+  new stack (take / add / grow copy layer by layer, review finding 1), 2 × (P + S) fp16 tokens
+  ×1.05). The second term is the dissolve floor (re-review C): a group must always afford turning
+  back into 2 contiguous rows, since that forced release is unchecked. It decides at long P and
+  few rows (3 × 96K, short answers: the release would pass the reservation by +5.6 GiB without
+  it; with it the group loses to its rows, 12.4 vs 9.5 GiB, and never forms).
+* **`QWEN_CASCADE_CHECK` at formation** compares each candidate's `[0, P)` with the forming
+  row's before the build (`_same_prefix`); on a join, `prefix_equal`. A mismatch is logged
+  and the row stays out.
+* **Tidy is atomic per group.** Every `release` of a group is built and evaluated before
+  any row or charge changes. A tidy that raises (an OOM in a release) fails that group's live
+  rows (their KV is only in the group) and drops the group; the rest of the batch and a request
+  whose `_join` ran the tidy go on (`_compact` drops the ended rows and re-tidies). A release
+  from `_iterate`'s `_compact` waits for the step in flight (one step loses its overlap per
+  leave / dissolve event: accepted); from `_join`'s it is free.
+* **No reference cycles (review `cascade_b2b3` finding 1).** `_GroupRef` holds a weak reference
+  to its row and none to the group; `_unlink` clears `row.group`, a done / failed row's FA
+  entries and `g.rows` on every drop (tidy, `_fail_rows`, `_close`), so a group's fp32 prefix
+  and stacks are freed by refcounting the moment it goes, not at Python's next generation-2 GC.
+  Test: `test_dropped_group_freed_without_gc` (GC disabled; reverting either half fails it).
+* **Joins.** `PrefixGroup.add` evaluates the joining row's own S-token fp32 copies before the
+  lazy stack concat (finding 3: the lazy slices pinned the row's whole fp16 cache, ~1 GB at 32K,
+  uncharged, until the next step); `_group_add` computes the charge first and `pg.add` is atomic.
+* **Step plan.** Members are kept in batch order (formation sorts them; joins append to both
+  lists), so a group's rows are a slice of the batch: no per-layer gather, and no output take
+  when the group is the whole batch (finding 6). `abort_step` is not called on a build error:
+  `_fail_rows` drops every group anyway (finding 5).
+* **Observability.** Health `cascade_groups` / `cascade_rows` (proto fields 11, 12; gateway
+  debug log on change); `batch:` log `groups= grouped=`; INFO lines on form / join / leave /
+  dissolve; Engine.load logs `cascade attention (QWEN_CASCADE): on … | off (why)`.
+* **`_GroupRef.offset`** raises a clear `RuntimeError` if its row is gone (unreachable: `_unlink`
+  clears the entries first).
+
+**B4 must check (GPU):** the B.7 gate; donation under step-ahead in the real worker (no
+per-step stack copy: peak and step time vs a sync run, review finding 5); the dissolve
+transient (a dissolving group materializes its members' fp16 caches while the fp32
+group is alive, and `release` syncs on the in-flight step; optional releases are now checked
+with the group alive, one member per step, forced ones are inside the charge's floor); host
+cost of `_plan` /
+`_cascade_tidy` per step at B = 16; retrace cost as B_g / cap change; whether the
+conservative charge terms (all FA layers' scores, the permanent "moves" term) should stay:
+they eat most of the 16-row win at 8K (−0.10 GiB); compare with the measured peak.
+
+**B4 done (`../cascade_gpu.md`), default flipped to `QWEN_CASCADE=1`.** Gate passed: top-1 ≥ 99.71 %
+at B = 8/16, 8K and 32K; KL +0–13 % over today's per-row batch (mrqmm's class); per-layer error
+below the per-row kernel's; released caches keep per-row bits on Metal; donation holds under
+step-ahead. Step 8K × 16 rows 66.4 → 53.7 ms (×1.24), 32K × 8 83.6 → 68.2 ms; 16 × 32K all
+admitted (peak 25.3 → 23.2 GB); 16 × 8K active −3 GiB. Caveats: the formation transient (+2.2 GB
+peak at 8 × 32K); 32K × 16 at 92 ms vs ~62 projected. Open: profile the 32K × 16 step;
+`QWEN_CASCADE_CHECK` on an entry made by a DFlash prefill (untested); retrace cost; the
+re-review's floor and staged releases (after B4) re-measured on the GPU.

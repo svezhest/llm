@@ -1,0 +1,10 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+18:24:47 row 0: P=8550 offset 8592, capacity own 8806 vs released 8848 (mod 256 = 144); KV bitwise equal: True
+18:24:47 row 1: P=8550 offset 8604, capacity own 8806 vs released 8860 (mod 256 = 156); KV bitwise equal: True
+18:24:47 row 2: P=8550 offset 8598, capacity own 8806 vs released 8854 (mod 256 = 150); KV bitwise equal: True
+18:25:04 B=1 row 0: 300 steps, logits bitwise equal in 300/300; capacity at the end own 9104 vs released 9104
+18:25:22 B=1 row 1: 300 steps, logits bitwise equal in 300/300; capacity at the end own 9116 vs released 9116
+18:25:40 B=1 row 2: 300 steps, logits bitwise equal in 300/300; capacity at the end own 9110 vs released 9110
+18:26:02 B=3 per-row batch: 300 steps, logits bitwise equal in 300/300
+18:26:02 RESULT: PASS

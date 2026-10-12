@@ -92,6 +92,8 @@ message HealthReply {
   uint32 max_batch = 5;
   uint32 prompt_cache_entries = 6; uint64 prompt_cache_bytes = 7;
   uint64 prompt_cache_hits = 8; uint64 prompt_cache_misses = 9; uint64 prompt_cache_evictions = 10;
+  // cascade attention (QWEN_CASCADE): prefix groups and the rows in them, now
+  uint32 cascade_groups = 11; uint32 cascade_rows = 12;
 }
 // error empty = ok; internal: the worker failed (500), else the request is bad (400)
 message CheckReply { string error = 1; string model = 2; bool internal = 3; }

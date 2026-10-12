@@ -293,6 +293,56 @@ the gateway counts `qwen_gateway_cached_tokens_total`; the worker's Health repor
 entries, live bytes, hits, misses and evictions (a new entry not kept at store counts
 as one; gateway debug log on change).
 
+### Cascade attention (`QWEN_CASCADE`, default on with fp16 KV)
+
+Rows that share a long prompt prefix (one system prompt, the prompt cache on) can
+decode their attention as one *group*: the prefix's KV once, in fp32, and each row's
+own tokens in a stacked fp32 suffix (`src/worker/cascade.py`; design
+`docs/perf/2026-10-12/design/cascade_plan.md` Part B). A group forms when a row joins
+and at least `QWEN_CASCADE_MIN_ROWS` (8) running rows share ≥ `QWEN_CASCADE_MIN_PREFIX`
+(4096) prompt tokens ending on a prefill slab end of each (their KV there are the same
+bits); the earlier rows are converted and their own KV freed, later rows join it.
+
+Memory rule: at the rows' real lengths, the group's fp32 prefix + stack (+ its step
+transients) must take no more than their own fp16 caches would, and a group is never
+charged less than its prefix + stacks + 2 contiguous fp16 rows (what dissolving its
+last 2 members builds beside it). 9B, ~150-token suffixes: 3 rows never win (3 × 32K /
+64K / 96K: 4.2 / 8.3 / 12.4 GiB vs 3.2 / 6.3 / 9.5), 4 only from 32K, 5–16 at 4K–32K.
+The reservation is charged per group (fp32 stack at the longest member reservation),
+so grouping can raise `reserved` (at 4K with the default 4096 reserved tokens:
++1.0–1.7 GiB at 8–16 rows); a formation or join that raises it is taken only while `reserved` + the
+prompt cache's live bytes stay within the budget (else skipped; nothing is evicted for
+it). Rows leave when they finish or when their own suffix passes P/2; the group
+dissolves (rows get contiguous caches back) when fewer than 3 members are left (so
+always at B ≤ 2; unchecked, inside the group's charge) or the memory rule fails. A P/2
+leave, a memory dissolve and `set_cascade(False)` go one member per decode step (the
+last < 3 together), each checked with the group still alive: `reserved` + the released
+rows' fp16 caches + the prompt cache within the batch headroom, nothing credited for
+the group's shrink; until it fits the rows stay grouped.
+
+Only fp16 KV (`QWEN_KV_BITS=0`, the 9B), `QWEN_PROMPT_CACHE=1` and `QWEN_MAX_BATCH` ≥ 3
+— otherwise it is off whatever the switch says (the load log says why); text-only
+rows that resumed from the prompt cache or stored an entry; never vision or DFlash
+rows. Grouped rows are not bit-equal to the per-row kernel (fp32 statistics, another
+summation order; closer to an fp32 reference on the 9B layout): numerically the same
+class as mrqmm's batched decode (B4: top-1 ≥ 99.71 %, KL +0–13 % over today's per-row
+batch), so a greedy answer at B ≥ 3 can also depend on the cache contents and arrival
+order. B ≤ 2 and ungrouped rows are unchanged (bit-exact); `QWEN_CASCADE=0` restores
+the per-row path bit for bit, `QWEN_MAX_BATCH=1` full determinism.
+
+Measured (9B, 2026-10-12, `docs/perf/2026-10-12/cascade_gpu.md`): decode step 8K × 16
+rows 66.4 → 53.7 ms (×1.24), 32K × 8 83.6 → 68.2 ms (×1.23); 16 × 8K active memory
+−3 GiB (peak 17.6–18.1 → 15.0–15.3 GB); 16 × 32K all admitted (was 12 + 4 waiting),
+peak 25.3 → 23.2 GB. Caveats: forming a group builds the fp32 prefix while the members
+still hold their fp16 caches (+2.2 GB peak at 8 × 32K); 32K × 16 steps at ~92 ms vs
+~62 ms projected (open, needs a profile). The dissolve floor and the staged releases
+came after that run (CPU-tested only).
+
+Logs: `cascade: group formed: P=…, n rows (…)`, `joined`, `left (why)`,
+`dissolved (why)`; the `batch:` line's `groups= grouped=`; Health `cascade_groups` /
+`cascade_rows` (gateway debug log on change). `QWEN_CASCADE_CHECK=1` verifies every
+new member's prefix KV bitwise (a sync per join).
+
 ## Context & memory
 
 Context is capped at **128K tokens** (`MAX_CONTEXT=131072`, prompt + generation;
@@ -445,6 +495,8 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_PROMPT_CACHE` | worker | `0` (set `1`: multi-slot prefix cache with recurrent-state checkpoints) |
 | `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (LRU at store, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — a request kept out only by the cache entry it would resume from waits for a running row to end only for a hit this deep, and only this long; else the entry is evicted and the request starts cold (8K tokens ≈ 14 s of 9B prefill, more than the wait) |
+| `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (see *Cascade attention*); only with `QWEN_KV_BITS=0` + `QWEN_PROMPT_CACHE=1` + max_batch ≥ 3, else off; `0` = the per-row path bit for bit |
+| `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` — rows sharing a prefix before a group forms, its minimum length in tokens, bitwise prefix check per join |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `QWEN_MAX_BATCH` | worker | `16` — requests decoded together (continuous batching); `1` = one at a time, as before. Reported to the gateway (Health) as its in-flight limit |

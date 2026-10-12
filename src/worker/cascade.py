@@ -165,7 +165,9 @@ Pitfalls (handled here, keep them when changing this file):
   * Transient of membership changes (9B: fp32 K+V = 64 KiB/token; a 16-row
     stack at cap 4352 = 4.25 GiB over 8 layers, 272 MiB per K or V per layer):
     `take` / `add` / `grow` build each layer's new stack from the old one.
-    They are LAZY by default (`evaluate=False`): the old stack is then
+    They are LAZY by default (`evaluate=False`; `add` still evaluates the
+    joining row's own S-token fp32 copies, so they do not pin the row's
+    contiguous cache until the next step): the old stack is then
     referenced by the graph only, the copy is donatable, and the next step's
     `append` of each layer consumes it layer by layer -- the transient is about
     one layer's old + new K and V, and nothing waits for the step in flight.
@@ -477,20 +479,35 @@ class PrefixGroup:
 
     def add(self, member, evaluate: bool = False) -> int:
         """Append a row (its cache list) to the stack; returns its index. Its
-        [0, P) is not read (see `prefix_equal`). Lazy by default: the next
-        step's appends consume the new stacks layer by layer (module docstring,
-        transient of membership changes); `evaluate=True` evaluates now."""
+        [0, P) is not read (see `prefix_equal`). The row's own suffix [P,
+        offset) is copied to fp32 and EVALUATED here (S tokens per layer,
+        small): left lazy, those slices would keep the row's whole contiguous
+        cache alive until the next step evaluated the stack (~1 GB per row
+        at 32K on the 9B, uncharged once the scheduler moved the row's charge
+        to the group, and chained over back-to-back joins; review
+        cascade_b2b3 finding 3). The stack concat is lazy by default: the
+        next step's appends consume the new stacks layer by layer (module
+        docstring, transient of membership changes); `evaluate=True`
+        evaluates it now too."""
         self._no_step("add")
         offs = {_fa(member[i], self.P)[2] for i in self.layers}
         if len(offs) != 1:
             raise ValueError(f"cascade: a member's FA caches disagree on the offset: {sorted(offs)}")
         S = offs.pop() - self.P
         cap = max(self.cap, _round_up(S + 1, self.step))
-        sk, sv = {}, {}
+        # S + 1 slots (the last one zero): an update covering the whole
+        # zeros buffer may come back as the source slice itself (a view of
+        # the row's buffer, measured with an fp32 cache); a partial one is
+        # always a fresh buffer
+        own = {}
         for i in self.layers:
             fa = _fa(member[i], self.P)
-            new_k = self._stack([fa], [S], cap, keys=True)
-            new_v = self._stack([fa], [S], cap, keys=False)
+            own[i] = (self._stack([fa], [S], S + 1, keys=True),
+                      self._stack([fa], [S], S + 1, keys=False))
+        mx.eval(own)                    # nothing of the row's is referenced after this
+        sk, sv = {}, {}
+        for i in self.layers:
+            new_k, new_v = (self._pad(x, cap) for x in own[i])
             sk[i] = mx.concatenate([self._pad(self.sk[i], cap), new_k], axis=0)
             sv[i] = mx.concatenate([self._pad(self.sv[i], cap), new_v], axis=0)
         if evaluate:

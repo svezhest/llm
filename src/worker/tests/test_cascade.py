@@ -21,6 +21,7 @@ import statistics
 import time
 
 import mlx.core as mx
+import numpy as np
 import pytest
 from mlx_vlm.models.base import scaled_dot_product_attention as lib_sdpa
 from mlx_vlm.models.cache import KVCache
@@ -382,6 +383,34 @@ def test_take_add_equal_fresh_build():
     assert_unused_zero(g)
     assert g.nbytes == sum(a.nbytes for a in (*g.kc.values(), *g.vc.values(),
                                               *g.sk.values(), *g.sv.values(), g.pmask))
+
+
+@pytest.mark.parametrize("dtype", [F16, F32])
+def test_lazy_add_frees_the_row_at_once(dtype):
+    """A lazy add evaluates the joining row's own S-token fp32 copies: once
+    the caller drops the row's caches (the worker replaces them with
+    _GroupRefs) their buffers are freed at once, before anything evaluates
+    the stack concat (review cascade_b2b3 finding 3: the lazy slices pinned
+    the row's whole cache until the next step). F32: the copies must not be
+    views of the row's buffers either. The stacks are still right."""
+    P, S = 2048, 100
+    d = Rows(P, [3, 5, 4, S], 2, 64, n_layers=2, dtype=dtype, seed=4)
+    g = d.group(chunk=16, members=[0, 1, 2])
+    mx.eval(g.sk, g.sv)
+    row = d.rows.pop(3)
+    want = {i: (np.array(row[i].keys[..., P:P + S, :].astype(F32)),
+                np.array(row[i].values[..., P:P + S, :].astype(F32))) for i in d.layers}
+    nbytes = sum(c.keys.nbytes + c.values.nbytes for c in row.values())
+    own = 2 * len(d.layers) * S * 2 * 64 * 4
+    before = mx.get_active_memory()
+    assert g.add(row) == 3
+    del row
+    after = mx.get_active_memory()
+    assert before - after >= nbytes - 2 * own, (before, after, nbytes, own)
+    for i in d.layers:
+        assert np.array_equal(np.array(g.sk[i][3:4, :, :S, :]), want[i][0])
+        assert np.array_equal(np.array(g.sv[i][3:4, :, :S, :]), want[i][1])
+    assert_unused_zero(g)
 
 
 def test_abort_step_zeroes_the_slot():

@@ -1,0 +1,413 @@
+2026-10-12 18:30:34,207 INFO  qwen.worker loading model: ../../weights/ornith15-9b-mlx-8bit
+2026-10-12 18:30:34,208 WARNING qwen.worker no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+2026-10-12 18:30:34,279 WARNING root Checkpoint has no weights for module(s): vision_tower. Disabling them.
+2026-10-12 18:30:36,734 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 18:30:36,734 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 18:30:38,121 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True
+2026-10-12 18:30:38,136 INFO  qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-12 18:30:38,136 INFO  qwen.worker prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-10-12 18:30:38,460 INFO  worker.pfqmm pfqmm 8-bit g64: tested, 249 modules on (lm_head K=4096 N=248320 M=256/264)
+2026-10-12 18:30:38,460 INFO  worker.pfqmm pfqmm: 249 modules on the 64-row prefill qmm (8-bit g64 tested)
+2026-10-12 18:30:38,463 INFO  worker.mrqmm mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8); left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-12 18:30:38,560 INFO  qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 24 layers
+2026-10-12 18:30:38,560 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand)
+2026-10-12 18:30:38,560 INFO  qwen.worker cascade attention (QWEN_CASCADE): on (experimental): >= 8 rows sharing >= 4096 prompt tokens, check
+2026-10-12 18:30:38,561 INFO  qwen.worker model loaded in 3913 ms
+2026-10-12 18:30:38,574 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+2026-10-12 18:33:12,011 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-cal-bdd719f83e26 images=0 max_tokens=16 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:33:12,019 INFO  qwen.worker id=chatcmpl-bench-9bd456-cal-bdd719f83e26 prompt_tokens=9571 (images=0)
+2026-10-12 18:33:12,097 INFO  qwen.worker id=chatcmpl-bench-9bd456-cal-bdd719f83e26 prompt cache MISS (common prefix 0, 0 entries)
+2026-10-12 18:33:15,447 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9bd456-cal-bdd719f83e26 steps/s=0.0 mean_rows=0.00 reserved=0.41/15.75GiB pcache=0.00GiB active=9.04GiB groups=0 grouped=0
+2026-10-12 18:33:25,836 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9bd456-cal-bdd719f83e26 steps/s=0.0 mean_rows=0.00 reserved=0.41/15.75GiB pcache=0.00GiB active=9.38GiB groups=0 grouped=0
+2026-10-12 18:33:28,447 INFO  qwen.worker id=chatcmpl-bench-9bd456-cal-bdd719f83e26 prompt cache store: 9570 tokens, 5 checkpoints, 622.7 MB (1 entries, 622.7 MB total) reused=0 gap=0 absorbed=0 pieces=1
+2026-10-12 18:33:28,972 INFO  qwen.worker id=chatcmpl-bench-9bd456-cal-bdd719f83e26 finish=length gen_tokens=16 ttft_ms=16423 tps=35.2 cached=0 peak=12.00GB active=10.53GB pool=0.11GB queue_ms=83 batch=1.00
+2026-10-12 18:33:59,009 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:33:59,019 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd prompt_tokens=8753 (images=0)
+2026-10-12 18:33:59,023 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd prompt cache MISS (common prefix 40, 1 entries)
+2026-10-12 18:34:02,456 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd steps/s=0.5 mean_rows=1.00 reserved=0.39/15.75GiB pcache=0.58GiB active=10.42GiB groups=0 grouped=0
+2026-10-12 18:34:12,885 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd steps/s=0.0 mean_rows=0.00 reserved=0.39/15.75GiB pcache=0.58GiB active=10.67GiB groups=0 grouped=0
+2026-10-12 18:34:14,004 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd prompt cache store: 8752 tokens, 5 checkpoints, 595.9 MB (2 entries, 1218.5 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:34:15,832 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-probe-55e8f77184dd finish=length gen_tokens=64 ttft_ms=15042 tps=36.2 cached=0 peak=12.62GB active=11.10GB pool=0.15GB queue_ms=10 batch=1.00
+2026-10-12 18:34:15,867 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-2-021f12a08b97 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,868 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,868 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-6-76e028bd54b6 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,869 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-7-be89b07bbbc7 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,869 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-5-97720e579ef7 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,869 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-4-72f6aefb2248 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,870 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-10-c00aeb7c58f8 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,870 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-3-f62d2e0dc296 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,871 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-1-1ec6653f1965 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,871 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-8-99e2b5ac65f5 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,871 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-11-69058d337836 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,876 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-9-174af4839e30 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,877 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72 prompt_tokens=8314 (images=0)
+2026-10-12 18:34:15,877 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-2-021f12a08b97 prompt_tokens=8306 (images=0)
+2026-10-12 18:34:15,878 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-12-24cc056eb44a images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,879 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-7-be89b07bbbc7 prompt_tokens=8304 (images=0)
+2026-10-12 18:34:15,884 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72 prompt cache MISS (common prefix 40, 2 entries)
+2026-10-12 18:34:15,884 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-6-76e028bd54b6 prompt_tokens=8311 (images=0)
+2026-10-12 18:34:15,884 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-10-c00aeb7c58f8 prompt_tokens=8306 (images=0)
+2026-10-12 18:34:15,884 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-3-f62d2e0dc296 prompt_tokens=8308 (images=0)
+2026-10-12 18:34:15,884 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-13-76e2b908e9f0 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,885 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-5-97720e579ef7 prompt_tokens=8313 (images=0)
+2026-10-12 18:34:15,885 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-15-c9fe7e170ee9 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,885 INFO  qwen.worker Generate id=chatcmpl-bench-9bd456-r0-c16-14-3263ae111d93 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:15,885 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-4-72f6aefb2248 prompt_tokens=8310 (images=0)
+2026-10-12 18:34:15,885 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-1-1ec6653f1965 prompt_tokens=8312 (images=0)
+2026-10-12 18:34:15,889 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-9-174af4839e30 prompt_tokens=8312 (images=0)
+2026-10-12 18:34:15,889 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-8-99e2b5ac65f5 prompt_tokens=8310 (images=0)
+2026-10-12 18:34:15,890 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-11-69058d337836 prompt_tokens=8312 (images=0)
+2026-10-12 18:34:15,895 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-12-24cc056eb44a prompt_tokens=8312 (images=0)
+2026-10-12 18:34:15,903 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-13-76e2b908e9f0 prompt_tokens=8311 (images=0)
+2026-10-12 18:34:15,903 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-14-3263ae111d93 prompt_tokens=8314 (images=0)
+2026-10-12 18:34:15,904 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-15-c9fe7e170ee9 prompt_tokens=8309 (images=0)
+2026-10-12 18:34:26,350 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72 steps/s=4.8 mean_rows=1.00 reserved=0.38/15.75GiB pcache=1.13GiB active=11.20GiB groups=0 grouped=0
+2026-10-12 18:34:30,499 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72 prompt cache store: 8313 tokens, 4 checkpoints, 530.0 MB (3 entries, 1748.5 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:34:30,539 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-2-021f12a08b97 prompt cache HIT: 8192/8306 tokens reused (common prefix 8270), prefilling 114
+2026-10-12 18:34:30,829 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-2-021f12a08b97 prompt cache store: 8305 tokens, 4 checkpoints, 533.7 MB (4 entries, 1803.7 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:30,880 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-7-be89b07bbbc7 prompt cache HIT: 8192/8304 tokens reused (common prefix 8270), prefilling 112
+2026-10-12 18:34:31,181 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-7-be89b07bbbc7 prompt cache store: 8303 tokens, 4 checkpoints, 533.6 MB (5 entries, 1858.8 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:31,237 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-6-76e028bd54b6 prompt cache HIT: 8192/8311 tokens reused (common prefix 8270), prefilling 119
+2026-10-12 18:34:31,547 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-6-76e028bd54b6 prompt cache store: 8310 tokens, 4 checkpoints, 533.8 MB (6 entries, 1914.2 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:31,649 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-10-c00aeb7c58f8 prompt cache HIT: 8192/8306 tokens reused (common prefix 8270), prefilling 114
+2026-10-12 18:34:31,942 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-10-c00aeb7c58f8 prompt cache store: 8305 tokens, 4 checkpoints, 533.7 MB (7 entries, 1969.4 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:32,039 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-3-f62d2e0dc296 prompt cache HIT: 8192/8308 tokens reused (common prefix 8270), prefilling 116
+2026-10-12 18:34:32,344 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-3-f62d2e0dc296 prompt cache store: 8307 tokens, 4 checkpoints, 533.7 MB (8 entries, 2024.7 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:32,448 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-5-97720e579ef7 prompt cache HIT: 8192/8313 tokens reused (common prefix 8270), prefilling 121
+2026-10-12 18:34:32,762 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-5-97720e579ef7 prompt cache store: 8312 tokens, 4 checkpoints, 533.9 MB (9 entries, 2080.1 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:32,916 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-4-72f6aefb2248 prompt cache HIT: 8192/8310 tokens reused (common prefix 8270), prefilling 118
+2026-10-12 18:34:33,217 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-4-72f6aefb2248 prompt cache store: 8309 tokens, 4 checkpoints, 533.8 MB (10 entries, 2135.5 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:33,322 INFO  qwen.worker cascade: group formed: P=8192, 8 rows (chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72,chatcmpl-bench-9bd456-r0-c16-2-021f12a08b97,chatcmpl-bench-9bd456-r0-c16-7-be89b07bbbc7,chatcmpl-bench-9bd456-r0-c16-6-76e028bd54b6,chatcmpl-bench-9bd456-r0-c16-10-c00aeb7c58f8,chatcmpl-bench-9bd456-r0-c16-3-f62d2e0dc296,chatcmpl-bench-9bd456-r0-c16-5-97720e579ef7,chatcmpl-bench-9bd456-r0-c16-4-72f6aefb2248), 671.1 MB (prefix + stacks, fp32), charged 0.95 GiB; reserved 3.03 -> 1.78 GiB
+2026-10-12 18:34:33,483 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-1-1ec6653f1965 prompt cache HIT: 8192/8312 tokens reused (common prefix 8270), prefilling 120
+2026-10-12 18:34:33,791 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-1-1ec6653f1965 prompt cache store: 8311 tokens, 4 checkpoints, 533.9 MB (11 entries, 2190.9 MB total) reused=8192 gap=78 absorbed=0 pieces=2
+2026-10-12 18:34:33,806 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-1-1ec6653f1965 joined group P=8192 (9 rows, charged 1.00 GiB)
+2026-10-12 18:34:33,969 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-9-174af4839e30 prompt cache HIT: 8192/8312 tokens reused (common prefix 8271), prefilling 120
+2026-10-12 18:34:34,263 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-9-174af4839e30 prompt cache store: 8311 tokens, 4 checkpoints, 533.9 MB (12 entries, 2246.3 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:34,277 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-9-174af4839e30 joined group P=8192 (10 rows, charged 1.05 GiB)
+2026-10-12 18:34:34,444 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-8-99e2b5ac65f5 prompt cache HIT: 8192/8310 tokens reused (common prefix 8271), prefilling 118
+2026-10-12 18:34:34,743 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-8-99e2b5ac65f5 prompt cache store: 8309 tokens, 4 checkpoints, 533.8 MB (13 entries, 2301.7 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:34,758 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-8-99e2b5ac65f5 joined group P=8192 (11 rows, charged 1.10 GiB)
+2026-10-12 18:34:34,984 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-11-69058d337836 prompt cache HIT: 8192/8312 tokens reused (common prefix 8271), prefilling 120
+2026-10-12 18:34:35,293 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-11-69058d337836 prompt cache store: 8311 tokens, 4 checkpoints, 533.9 MB (14 entries, 2357.1 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:35,309 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-11-69058d337836 joined group P=8192 (12 rows, charged 1.15 GiB)
+2026-10-12 18:34:35,590 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-12-24cc056eb44a prompt cache HIT: 8192/8312 tokens reused (common prefix 8271), prefilling 120
+2026-10-12 18:34:35,907 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-12-24cc056eb44a prompt cache store: 8311 tokens, 4 checkpoints, 533.9 MB (15 entries, 2412.5 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:35,922 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-12-24cc056eb44a joined group P=8192 (13 rows, charged 1.20 GiB)
+2026-10-12 18:34:36,207 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-13-76e2b908e9f0 prompt cache HIT: 8192/8311 tokens reused (common prefix 8271), prefilling 119
+2026-10-12 18:34:36,537 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-13-76e2b908e9f0 prompt cache store: 8310 tokens, 4 checkpoints, 533.8 MB (16 entries, 2467.9 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:36,552 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-13-76e2b908e9f0 joined group P=8192 (14 rows, charged 1.25 GiB)
+2026-10-12 18:34:36,552 INFO  qwen.worker batch: rows=14 waiting=2 prefilling=- steps/s=3.5 mean_rows=8.75 reserved=2.70/15.75GiB pcache=2.30GiB active=12.50GiB groups=1 grouped=14
+2026-10-12 18:34:36,892 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-14-3263ae111d93 prompt cache HIT: 8192/8314 tokens reused (common prefix 8271), prefilling 122
+2026-10-12 18:34:37,208 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-14-3263ae111d93 prompt cache store: 8313 tokens, 4 checkpoints, 533.9 MB (17 entries, 2523.3 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:37,223 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-14-3263ae111d93 joined group P=8192 (15 rows, charged 1.30 GiB)
+2026-10-12 18:34:37,563 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-15-c9fe7e170ee9 prompt cache HIT: 8192/8309 tokens reused (common prefix 8271), prefilling 117
+2026-10-12 18:34:37,867 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-15-c9fe7e170ee9 prompt cache store: 8308 tokens, 4 checkpoints, 533.8 MB (18 entries, 2578.6 MB total) reused=8192 gap=79 absorbed=0 pieces=2
+2026-10-12 18:34:37,882 INFO  qwen.worker cascade: id=chatcmpl-bench-9bd456-r0-c16-15-c9fe7e170ee9 joined group P=8192 (16 rows, charged 1.35 GiB)
+2026-10-12 18:34:46,565 INFO  qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=17.5 mean_rows=15.90 reserved=3.01/15.75GiB pcache=2.40GiB active=13.26GiB groups=1 grouped=16
+2026-10-12 18:34:49,044 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-0-e21be2b8cd72 finish=length gen_tokens=256 ttft_ms=14986 tps=14.1 cached=0 peak=14.96GB active=14.24GB pool=0.09GB queue_ms=12 batch=14.91
+2026-10-12 18:34:49,109 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-2-021f12a08b97 finish=length gen_tokens=256 ttft_ms=701 tps=14.3 cached=8192 peak=14.96GB active=14.30GB pool=0.03GB queue_ms=14655 batch=14.97
+2026-10-12 18:34:49,170 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-7-be89b07bbbc7 finish=length gen_tokens=256 ttft_ms=730 tps=14.6 cached=8192 peak=14.96GB active=14.23GB pool=0.00GB queue_ms=14992 batch=15.02
+2026-10-12 18:34:49,231 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-6-76e028bd54b6 finish=length gen_tokens=256 ttft_ms=418 tps=14.5 cached=8192 peak=14.96GB active=14.17GB pool=0.00GB queue_ms=15349 batch=15.05
+2026-10-12 18:34:49,339 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-10-c00aeb7c58f8 finish=length gen_tokens=256 ttft_ms=393 tps=14.8 cached=8192 peak=14.96GB active=13.87GB pool=0.30GB queue_ms=15758 batch=15.12
+2026-10-12 18:34:49,450 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-3-f62d2e0dc296 finish=length gen_tokens=256 ttft_ms=412 tps=15.0 cached=8192 peak=14.96GB active=13.77GB pool=0.28GB queue_ms=16146 batch=15.16
+2026-10-12 18:34:49,558 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-5-97720e579ef7 finish=length gen_tokens=256 ttft_ms=435 tps=15.3 cached=8192 peak=14.96GB active=13.66GB pool=0.25GB queue_ms=16553 batch=15.19
+2026-10-12 18:34:49,714 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-4-72f6aefb2248 finish=length gen_tokens=256 ttft_ms=506 tps=15.7 cached=8192 peak=14.96GB active=13.56GB pool=0.23GB queue_ms=17023 batch=15.22
+2026-10-12 18:34:49,874 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-1-1ec6653f1965 finish=length gen_tokens=256 ttft_ms=436 tps=16.0 cached=8192 peak=14.96GB active=13.46GB pool=0.21GB queue_ms=17596 batch=15.22
+2026-10-12 18:34:49,988 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-9-174af4839e30 finish=length gen_tokens=256 ttft_ms=424 tps=16.4 cached=8192 peak=14.96GB active=13.36GB pool=0.20GB queue_ms=18077 batch=15.19
+2026-10-12 18:34:50,107 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-8-99e2b5ac65f5 finish=length gen_tokens=256 ttft_ms=439 tps=16.8 cached=8192 peak=14.96GB active=13.25GB pool=0.17GB queue_ms=18548 batch=15.15
+2026-10-12 18:34:50,263 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-11-69058d337836 finish=length gen_tokens=256 ttft_ms=452 tps=17.2 cached=8192 peak=14.96GB active=13.15GB pool=0.15GB queue_ms=19088 batch=15.05
+2026-10-12 18:34:50,442 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-12-24cc056eb44a finish=length gen_tokens=256 ttft_ms=465 tps=17.8 cached=8192 peak=14.96GB active=13.06GB pool=0.13GB queue_ms=19683 batch=14.90
+2026-10-12 18:34:50,617 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-13-76e2b908e9f0 finish=length gen_tokens=256 ttft_ms=473 tps=18.3 cached=8192 peak=14.96GB active=12.95GB pool=0.11GB queue_ms=20297 batch=14.70
+2026-10-12 18:34:50,642 INFO  qwen.worker cascade: group P=8192 dissolved (2 members): 2 rows released, 0.71 GiB charge dropped (reserved 0.76 GiB)
+2026-10-12 18:34:50,839 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-14-3263ae111d93 finish=length gen_tokens=256 ttft_ms=460 tps=19.0 cached=8192 peak=14.96GB active=12.81GB pool=0.05GB queue_ms=20977 batch=14.42
+2026-10-12 18:34:51,008 INFO  qwen.worker id=chatcmpl-bench-9bd456-r0-c16-15-c9fe7e170ee9 finish=length gen_tokens=256 ttft_ms=454 tps=19.7 cached=8192 peak=14.96GB active=12.46GB pool=0.03GB queue_ms=21650 batch=14.10
+2026-10-12 18:34:51,921 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-cal-12cad1166ce9 images=0 max_tokens=16 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:34:51,954 INFO  qwen.worker id=chatcmpl-bench-9cf878-cal-12cad1166ce9 prompt_tokens=37994 (images=0)
+2026-10-12 18:34:51,967 INFO  qwen.worker id=chatcmpl-bench-9cf878-cal-12cad1166ce9 prompt cache MISS (common prefix 36, 18 entries)
+2026-10-12 18:34:59,527 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-cal-12cad1166ce9 steps/s=7.3 mean_rows=10.80 reserved=1.32/15.75GiB pcache=2.40GiB active=12.42GiB groups=0 grouped=0
+2026-10-12 18:35:11,702 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-cal-12cad1166ce9 steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.40GiB active=12.86GiB groups=0 grouped=0
+2026-10-12 18:35:24,709 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-cal-12cad1166ce9 steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.40GiB active=13.25GiB groups=0 grouped=0
+2026-10-12 18:35:38,253 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-cal-12cad1166ce9 steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.40GiB active=13.03GiB groups=0 grouped=0
+2026-10-12 18:35:52,342 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-cal-12cad1166ce9 steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.40GiB active=13.76GiB groups=0 grouped=0
+2026-10-12 18:36:07,306 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-cal-12cad1166ce9 steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.40GiB active=13.44GiB groups=0 grouped=0
+2026-10-12 18:36:15,729 INFO  qwen.worker id=chatcmpl-bench-9cf878-cal-12cad1166ce9 prompt cache store: 37993 tokens, 12 checkpoints, 1914.6 MB (16 entries, 3219.5 MB total) reused=0 gap=36 absorbed=0 pieces=1
+2026-10-12 18:36:16,288 INFO  qwen.worker id=chatcmpl-bench-9cf878-cal-12cad1166ce9 finish=length gen_tokens=16 ttft_ms=83835 tps=32.2 cached=0 peak=17.60GB active=14.06GB pool=1.91GB queue_ms=34 batch=1.00
+2026-10-12 18:36:46,349 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:36:46,382 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 prompt_tokens=35196 (images=0)
+2026-10-12 18:36:46,394 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 prompt cache MISS (common prefix 40, 16 entries)
+2026-10-12 18:36:50,067 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 steps/s=0.4 mean_rows=1.00 reserved=1.23/15.75GiB pcache=3.00GiB active=12.26GiB groups=0 grouped=0
+2026-10-12 18:37:02,724 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 steps/s=0.0 mean_rows=0.00 reserved=1.23/15.75GiB pcache=3.00GiB active=12.58GiB groups=0 grouped=0
+2026-10-12 18:37:15,580 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 steps/s=0.0 mean_rows=0.00 reserved=1.23/15.75GiB pcache=3.00GiB active=12.91GiB groups=0 grouped=0
+2026-10-12 18:37:28,932 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 steps/s=0.0 mean_rows=0.00 reserved=1.23/15.75GiB pcache=3.00GiB active=13.55GiB groups=0 grouped=0
+2026-10-12 18:37:42,942 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 steps/s=0.0 mean_rows=0.00 reserved=1.23/15.75GiB pcache=3.00GiB active=14.33GiB groups=0 grouped=0
+2026-10-12 18:37:57,874 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 steps/s=0.0 mean_rows=0.00 reserved=1.23/15.75GiB pcache=3.00GiB active=14.53GiB groups=0 grouped=0
+2026-10-12 18:38:04,349 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 prompt cache store: 35195 tokens, 12 checkpoints, 1822.9 MB (1 entries, 1822.9 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:38:06,409 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-probe-7e16431bad22 finish=length gen_tokens=64 ttft_ms=78030 tps=32.1 cached=0 peak=18.22GB active=12.56GB pool=3.16GB queue_ms=33 batch=1.00
+2026-10-12 18:38:06,510 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-1-cddeaa075428 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,510 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,511 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-10-ada5f19c70c2 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,511 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-8-832e51624a82 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,512 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-7-4c5513d8dcad images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,512 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-3-62507294ea13 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,514 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-5-689b5aa84f38 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,518 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-6-375c2808b738 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,519 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-12-003731772874 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,519 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-9-e98bf5f7f86c images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,521 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-11-7778bd7556b9 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,526 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-2-b59d5f01c4f3 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,528 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-0-fe1b8ac10342 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,539 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-14-0f03412a04a6 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,545 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 prompt_tokens=33162 (images=0)
+2026-10-12 18:38:06,558 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-7-4c5513d8dcad prompt_tokens=33156 (images=0)
+2026-10-12 18:38:06,563 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-6-375c2808b738 prompt_tokens=33163 (images=0)
+2026-10-12 18:38:06,570 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-10-ada5f19c70c2 prompt_tokens=33158 (images=0)
+2026-10-12 18:38:06,570 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-8-832e51624a82 prompt_tokens=33162 (images=0)
+2026-10-12 18:38:06,571 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-12-003731772874 prompt_tokens=33164 (images=0)
+2026-10-12 18:38:06,577 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-9-e98bf5f7f86c prompt_tokens=33164 (images=0)
+2026-10-12 18:38:06,578 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-11-7778bd7556b9 prompt_tokens=33164 (images=0)
+2026-10-12 18:38:06,579 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-2-b59d5f01c4f3 prompt_tokens=33158 (images=0)
+2026-10-12 18:38:06,579 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-5-689b5aa84f38 prompt_tokens=33165 (images=0)
+2026-10-12 18:38:06,580 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-0-fe1b8ac10342 prompt_tokens=33166 (images=0)
+2026-10-12 18:38:06,580 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 prompt cache MISS (common prefix 40, 1 entries)
+2026-10-12 18:38:06,581 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-3-62507294ea13 prompt_tokens=33160 (images=0)
+2026-10-12 18:38:06,581 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-1-cddeaa075428 prompt_tokens=33164 (images=0)
+2026-10-12 18:38:06,582 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-13-644af6d3a229 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,582 INFO  qwen.worker Generate id=chatcmpl-bench-9cf878-r0-c16-15-bcb402bf3747 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:38:06,593 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-14-0f03412a04a6 prompt_tokens=33166 (images=0)
+2026-10-12 18:38:06,617 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-15-bcb402bf3747 prompt_tokens=33161 (images=0)
+2026-10-12 18:38:06,618 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-13-644af6d3a229 prompt_tokens=33163 (images=0)
+2026-10-12 18:38:10,691 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 steps/s=5.1 mean_rows=1.00 reserved=1.17/15.75GiB pcache=1.70GiB active=11.57GiB groups=0 grouped=0
+2026-10-12 18:38:22,892 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 steps/s=0.0 mean_rows=0.00 reserved=1.17/15.75GiB pcache=1.70GiB active=11.26GiB groups=0 grouped=0
+2026-10-12 18:38:35,882 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 steps/s=0.0 mean_rows=0.00 reserved=1.17/15.75GiB pcache=1.70GiB active=12.34GiB groups=0 grouped=0
+2026-10-12 18:38:49,703 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 steps/s=0.0 mean_rows=0.00 reserved=1.17/15.75GiB pcache=1.70GiB active=12.61GiB groups=0 grouped=0
+2026-10-12 18:39:04,483 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 steps/s=0.0 mean_rows=0.00 reserved=1.17/15.75GiB pcache=1.70GiB active=13.01GiB groups=0 grouped=0
+2026-10-12 18:39:14,901 INFO  qwen.worker batch: rows=0 waiting=15 prefilling=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 steps/s=0.0 mean_rows=0.00 reserved=1.17/15.75GiB pcache=1.70GiB active=13.23GiB groups=0 grouped=0
+2026-10-12 18:39:21,599 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 prompt cache store: 33161 tokens, 12 checkpoints, 1756.3 MB (1 entries, 1756.3 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:39:21,677 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-7-4c5513d8dcad prompt cache HIT: 33117/33156 tokens reused (common prefix 33122), prefilling 39
+2026-10-12 18:39:21,910 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-7-4c5513d8dcad prompt cache store: 33155 tokens, 12 checkpoints, 1757.5 MB (2 entries, 1809.0 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:22,005 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-6-375c2808b738 prompt cache HIT: 33117/33163 tokens reused (common prefix 33122), prefilling 46
+2026-10-12 18:39:22,211 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-6-375c2808b738 prompt cache store: 33162 tokens, 12 checkpoints, 1757.7 MB (3 entries, 1862.0 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:22,315 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-10-ada5f19c70c2 prompt cache HIT: 33117/33158 tokens reused (common prefix 33122), prefilling 41
+2026-10-12 18:39:22,518 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-10-ada5f19c70c2 prompt cache store: 33157 tokens, 12 checkpoints, 1757.6 MB (4 entries, 1914.8 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:22,634 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-8-832e51624a82 prompt cache HIT: 33117/33162 tokens reused (common prefix 33123), prefilling 45
+2026-10-12 18:39:22,835 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-8-832e51624a82 prompt cache store: 33161 tokens, 12 checkpoints, 1757.7 MB (5 entries, 1967.8 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:22,955 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-12-003731772874 prompt cache HIT: 33117/33164 tokens reused (common prefix 33123), prefilling 47
+2026-10-12 18:39:23,153 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-12-003731772874 prompt cache store: 33163 tokens, 12 checkpoints, 1757.8 MB (6 entries, 2020.8 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:23,492 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-9-e98bf5f7f86c prompt cache HIT: 33117/33164 tokens reused (common prefix 33123), prefilling 47
+2026-10-12 18:39:23,689 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-9-e98bf5f7f86c prompt cache store: 33163 tokens, 12 checkpoints, 1757.8 MB (7 entries, 2073.8 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:24,039 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-11-7778bd7556b9 prompt cache HIT: 33117/33164 tokens reused (common prefix 33123), prefilling 47
+2026-10-12 18:39:24,237 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-11-7778bd7556b9 prompt cache store: 33163 tokens, 12 checkpoints, 1757.8 MB (8 entries, 2126.8 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:25,088 INFO  qwen.worker cascade: group formed: P=33117, 8 rows (chatcmpl-bench-9cf878-r0-c16-4-30a594f62218,chatcmpl-bench-9cf878-r0-c16-7-4c5513d8dcad,chatcmpl-bench-9cf878-r0-c16-6-375c2808b738,chatcmpl-bench-9cf878-r0-c16-10-ada5f19c70c2,chatcmpl-bench-9cf878-r0-c16-8-832e51624a82,chatcmpl-bench-9cf878-r0-c16-12-003731772874,chatcmpl-bench-9cf878-r0-c16-9-e98bf5f7f86c,chatcmpl-bench-9cf878-r0-c16-11-7778bd7556b9), 2348.9 MB (prefix + stacks, fp32), charged 2.55 GiB; reserved 9.36 -> 3.38 GiB
+2026-10-12 18:39:25,089 INFO  qwen.worker batch: rows=8 waiting=8 prefilling=- steps/s=0.9 mean_rows=4.56 reserved=3.38/15.75GiB pcache=1.98GiB active=13.37GiB groups=1 grouped=8
+2026-10-12 18:39:25,586 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-2-b59d5f01c4f3 prompt cache HIT: 33117/33158 tokens reused (common prefix 33122), prefilling 41
+2026-10-12 18:39:25,780 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-2-b59d5f01c4f3 prompt cache store: 33157 tokens, 12 checkpoints, 1757.6 MB (9 entries, 2179.7 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:25,815 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-2-b59d5f01c4f3 joined group P=33117 (9 rows, charged 2.60 GiB)
+2026-10-12 18:39:25,977 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-5-689b5aa84f38 prompt cache HIT: 33117/33165 tokens reused (common prefix 33122), prefilling 48
+2026-10-12 18:39:26,168 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-5-689b5aa84f38 prompt cache store: 33164 tokens, 12 checkpoints, 1757.8 MB (10 entries, 2232.7 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:26,201 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-5-689b5aa84f38 joined group P=33117 (10 rows, charged 2.65 GiB)
+2026-10-12 18:39:26,431 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-0-fe1b8ac10342 prompt cache HIT: 33117/33166 tokens reused (common prefix 33122), prefilling 49
+2026-10-12 18:39:26,622 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-0-fe1b8ac10342 prompt cache store: 33165 tokens, 12 checkpoints, 1757.8 MB (11 entries, 2285.8 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:26,655 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-0-fe1b8ac10342 joined group P=33117 (11 rows, charged 2.71 GiB)
+2026-10-12 18:39:26,893 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-3-62507294ea13 prompt cache HIT: 33117/33160 tokens reused (common prefix 33122), prefilling 43
+2026-10-12 18:39:27,083 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-3-62507294ea13 prompt cache store: 33159 tokens, 12 checkpoints, 1757.6 MB (12 entries, 2338.7 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:27,118 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-3-62507294ea13 joined group P=33117 (12 rows, charged 2.76 GiB)
+2026-10-12 18:39:27,361 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-1-cddeaa075428 prompt cache HIT: 33117/33164 tokens reused (common prefix 33122), prefilling 47
+2026-10-12 18:39:27,548 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-1-cddeaa075428 prompt cache store: 33163 tokens, 12 checkpoints, 1757.8 MB (13 entries, 2391.7 MB total) reused=33117 gap=5 absorbed=0 pieces=2
+2026-10-12 18:39:27,579 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-1-cddeaa075428 joined group P=33117 (13 rows, charged 2.81 GiB)
+2026-10-12 18:39:27,891 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-14-0f03412a04a6 prompt cache HIT: 33117/33166 tokens reused (common prefix 33123), prefilling 49
+2026-10-12 18:39:28,082 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-14-0f03412a04a6 prompt cache store: 33165 tokens, 12 checkpoints, 1757.8 MB (14 entries, 2444.8 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:28,113 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-14-0f03412a04a6 joined group P=33117 (14 rows, charged 2.86 GiB)
+2026-10-12 18:39:28,429 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-15-bcb402bf3747 prompt cache HIT: 33117/33161 tokens reused (common prefix 33123), prefilling 44
+2026-10-12 18:39:28,616 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-15-bcb402bf3747 prompt cache store: 33160 tokens, 12 checkpoints, 1757.7 MB (15 entries, 2497.7 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:28,647 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-15-bcb402bf3747 joined group P=33117 (15 rows, charged 2.92 GiB)
+2026-10-12 18:39:28,969 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-13-644af6d3a229 prompt cache HIT: 33117/33163 tokens reused (common prefix 33123), prefilling 46
+2026-10-12 18:39:29,155 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-13-644af6d3a229 prompt cache store: 33162 tokens, 12 checkpoints, 1757.7 MB (16 entries, 2550.7 MB total) reused=33117 gap=6 absorbed=0 pieces=2
+2026-10-12 18:39:29,187 INFO  qwen.worker cascade: id=chatcmpl-bench-9cf878-r0-c16-13-644af6d3a229 joined group P=33117 (16 rows, charged 2.97 GiB)
+2026-10-12 18:39:35,105 INFO  qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=10.4 mean_rows=14.51 reserved=4.63/15.75GiB pcache=2.38GiB active=14.66GiB groups=1 grouped=16
+2026-10-12 18:39:36,304 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-4-30a594f62218 finish=length gen_tokens=128 ttft_ms=75390 tps=8.9 cached=0 peak=23.24GB active=15.74GB pool=0.08GB queue_ms=53 batch=14.00
+2026-10-12 18:39:36,393 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-7-4c5513d8dcad finish=length gen_tokens=128 ttft_ms=631 tps=9.1 cached=33117 peak=23.24GB active=15.78GB pool=0.00GB queue_ms=75112 batch=14.11
+2026-10-12 18:39:36,472 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-6-375c2808b738 finish=length gen_tokens=128 ttft_ms=624 tps=9.2 cached=33117 peak=23.24GB active=15.68GB pool=0.00GB queue_ms=75430 batch=14.20
+2026-10-12 18:39:36,550 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-10-ada5f19c70c2 finish=length gen_tokens=128 ttft_ms=648 tps=9.4 cached=33117 peak=23.24GB active=15.58GB pool=0.00GB queue_ms=75739 batch=14.28
+2026-10-12 18:39:36,630 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-8-832e51624a82 finish=length gen_tokens=128 ttft_ms=646 tps=9.5 cached=33117 peak=23.24GB active=15.47GB pool=0.01GB queue_ms=76054 batch=14.34
+2026-10-12 18:39:36,708 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-12-003731772874 finish=length gen_tokens=128 ttft_ms=385 tps=9.5 cached=33117 peak=23.24GB active=15.37GB pool=0.01GB queue_ms=76369 batch=14.39
+2026-10-12 18:39:36,849 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-9-e98bf5f7f86c finish=length gen_tokens=128 ttft_ms=560 tps=9.8 cached=33117 peak=23.24GB active=15.19GB pool=0.19GB queue_ms=76748 batch=14.45
+2026-10-12 18:39:36,994 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-11-7778bd7556b9 finish=length gen_tokens=128 ttft_ms=1399 tps=10.9 cached=33117 peak=23.24GB active=15.10GB pool=0.18GB queue_ms=77294 batch=14.48
+2026-10-12 18:39:37,493 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-2-b59d5f01c4f3 finish=length gen_tokens=128 ttft_ms=404 tps=11.1 cached=33117 peak=23.24GB active=15.01GB pool=0.16GB queue_ms=79009 batch=14.48
+2026-10-12 18:39:37,603 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-5-689b5aa84f38 finish=length gen_tokens=128 ttft_ms=392 tps=11.3 cached=33117 peak=23.24GB active=14.92GB pool=0.14GB queue_ms=79412 batch=14.45
+2026-10-12 18:39:37,764 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-0-fe1b8ac10342 finish=length gen_tokens=128 ttft_ms=398 tps=11.6 cached=33117 peak=23.24GB active=14.83GB pool=0.12GB queue_ms=79849 batch=14.36
+2026-10-12 18:39:37,921 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-3-62507294ea13 finish=length gen_tokens=128 ttft_ms=407 tps=12.0 cached=33117 peak=23.24GB active=14.75GB pool=0.12GB queue_ms=80318 batch=14.22
+2026-10-12 18:39:38,075 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-1-cddeaa075428 finish=length gen_tokens=128 ttft_ms=402 tps=12.3 cached=33117 peak=23.24GB active=14.67GB pool=0.10GB queue_ms=80790 batch=14.03
+2026-10-12 18:39:38,280 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-14-0f03412a04a6 finish=length gen_tokens=128 ttft_ms=414 tps=12.7 cached=33117 peak=23.24GB active=14.57GB pool=0.08GB queue_ms=81286 batch=13.72
+2026-10-12 18:39:38,398 INFO  qwen.worker cascade: group P=33117 dissolved (2 members): 2 rows released, 2.28 GiB charge dropped (reserved 2.34 GiB)
+2026-10-12 18:39:38,590 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-15-bcb402bf3747 finish=length gen_tokens=128 ttft_ms=413 tps=13.0 cached=33117 peak=23.24GB active=14.39GB pool=0.04GB queue_ms=81776 batch=13.35
+2026-10-12 18:39:38,719 INFO  qwen.worker id=chatcmpl-bench-9cf878-r0-c16-13-644af6d3a229 finish=length gen_tokens=128 ttft_ms=416 tps=13.6 cached=33117 peak=23.24GB active=13.24GB pool=0.02GB queue_ms=82315 batch=12.91
+2026-10-12 18:39:39,833 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-cal-0bebff167c6a images=0 max_tokens=16 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:39:39,865 INFO  qwen.worker id=chatcmpl-bench-3822dc-cal-0bebff167c6a prompt_tokens=37970 (images=0)
+2026-10-12 18:39:39,881 INFO  qwen.worker id=chatcmpl-bench-3822dc-cal-0bebff167c6a prompt cache MISS (common prefix 35, 16 entries)
+2026-10-12 18:39:48,396 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=4.3 mean_rows=9.02 reserved=1.32/15.75GiB pcache=2.38GiB active=11.77GiB groups=0 grouped=0
+2026-10-12 18:40:02,188 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=12.71GiB groups=0 grouped=0
+2026-10-12 18:40:16,999 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=13.24GiB groups=0 grouped=0
+2026-10-12 18:40:27,464 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=12.64GiB groups=0 grouped=0
+2026-10-12 18:40:38,451 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=13.08GiB groups=0 grouped=0
+2026-10-12 18:40:49,911 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=13.84GiB groups=0 grouped=0
+2026-10-12 18:41:01,831 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=14.06GiB groups=0 grouped=0
+2026-10-12 18:41:14,082 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-cal-0bebff167c6a steps/s=0.0 mean_rows=0.00 reserved=1.32/15.75GiB pcache=2.38GiB active=14.27GiB groups=0 grouped=0
+2026-10-12 18:41:18,034 INFO  qwen.worker id=chatcmpl-bench-3822dc-cal-0bebff167c6a prompt cache store: 37969 tokens, 12 checkpoints, 1913.8 MB (1 entries, 1913.8 MB total) reused=0 gap=35 absorbed=0 pieces=1
+2026-10-12 18:41:18,601 INFO  qwen.worker id=chatcmpl-bench-3822dc-cal-0bebff167c6a finish=length gen_tokens=16 ttft_ms=98228 tps=31.6 cached=0 peak=17.58GB active=12.75GB pool=3.16GB queue_ms=34 batch=1.00
+2026-10-12 18:41:48,676 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:41:48,705 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca prompt_tokens=34713 (images=0)
+2026-10-12 18:41:48,715 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca prompt cache MISS (common prefix 40, 1 entries)
+2026-10-12 18:41:54,449 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.4 mean_rows=1.00 reserved=1.22/15.75GiB pcache=1.78GiB active=11.02GiB groups=0 grouped=0
+2026-10-12 18:42:08,742 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=11.35GiB groups=0 grouped=0
+2026-10-12 18:42:23,657 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=11.69GiB groups=0 grouped=0
+2026-10-12 18:42:33,809 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=12.67GiB groups=0 grouped=0
+2026-10-12 18:42:44,210 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=12.78GiB groups=0 grouped=0
+2026-10-12 18:42:54,927 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=12.35GiB groups=0 grouped=0
+2026-10-12 18:43:06,030 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=13.39GiB groups=0 grouped=0
+2026-10-12 18:43:17,299 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca steps/s=0.0 mean_rows=0.00 reserved=1.22/15.75GiB pcache=1.78GiB active=13.49GiB groups=0 grouped=0
+2026-10-12 18:43:17,597 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca prompt cache store: 34712 tokens, 12 checkpoints, 1807.1 MB (1 entries, 1807.1 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:43:19,655 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-probe-a4116faf5dca finish=length gen_tokens=64 ttft_ms=88953 tps=32.1 cached=0 peak=16.91GB active=12.53GB pool=2.42GB queue_ms=29 batch=1.00
+2026-10-12 18:43:19,712 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,716 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-2-e666e03651c1 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,716 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-6-27b726edba75 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,718 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-0-531440933b62 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,719 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-7-b47a2703407b images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,722 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-5-e8955fd708ca images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,723 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-4-6fb8acd53ea2 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,724 INFO  qwen.worker Generate id=chatcmpl-bench-3822dc-r0-c8-3-183c1ad8ed56 images=0 max_tokens=128 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:43:19,743 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee prompt_tokens=32791 (images=0)
+2026-10-12 18:43:19,754 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee prompt cache MISS (common prefix 40, 1 entries)
+2026-10-12 18:43:19,755 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-0-531440933b62 prompt_tokens=32793 (images=0)
+2026-10-12 18:43:19,756 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-6-27b726edba75 prompt_tokens=32790 (images=0)
+2026-10-12 18:43:19,756 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-7-b47a2703407b prompt_tokens=32783 (images=0)
+2026-10-12 18:43:19,757 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-2-e666e03651c1 prompt_tokens=32785 (images=0)
+2026-10-12 18:43:19,762 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-5-e8955fd708ca prompt_tokens=32792 (images=0)
+2026-10-12 18:43:19,763 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-4-6fb8acd53ea2 prompt_tokens=32789 (images=0)
+2026-10-12 18:43:19,764 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-3-183c1ad8ed56 prompt_tokens=32787 (images=0)
+2026-10-12 18:43:29,260 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=5.4 mean_rows=1.00 reserved=1.16/15.75GiB pcache=1.68GiB active=11.80GiB groups=0 grouped=0
+2026-10-12 18:43:43,244 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=0.0 mean_rows=0.00 reserved=1.16/15.75GiB pcache=1.68GiB active=11.79GiB groups=0 grouped=0
+2026-10-12 18:43:58,042 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=0.0 mean_rows=0.00 reserved=1.16/15.75GiB pcache=1.68GiB active=11.78GiB groups=0 grouped=0
+2026-10-12 18:44:08,415 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=0.0 mean_rows=0.00 reserved=1.16/15.75GiB pcache=1.68GiB active=12.74GiB groups=0 grouped=0
+2026-10-12 18:44:19,263 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=0.0 mean_rows=0.00 reserved=1.16/15.75GiB pcache=1.68GiB active=12.75GiB groups=0 grouped=0
+2026-10-12 18:44:30,517 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=0.0 mean_rows=0.00 reserved=1.16/15.75GiB pcache=1.68GiB active=13.10GiB groups=0 grouped=0
+2026-10-12 18:44:42,458 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee steps/s=0.0 mean_rows=0.00 reserved=1.16/15.75GiB pcache=1.68GiB active=13.00GiB groups=0 grouped=0
+2026-10-12 18:44:42,766 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee prompt cache store: 32790 tokens, 12 checkpoints, 1744.1 MB (1 entries, 1744.1 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:44:42,843 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-0-531440933b62 prompt cache HIT: 32744/32793 tokens reused (common prefix 32749), prefilling 49
+2026-10-12 18:44:43,090 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-0-531440933b62 prompt cache store: 32792 tokens, 12 checkpoints, 1745.7 MB (2 entries, 1797.2 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:43,184 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-6-27b726edba75 prompt cache HIT: 32744/32790 tokens reused (common prefix 32749), prefilling 46
+2026-10-12 18:44:43,404 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-6-27b726edba75 prompt cache store: 32789 tokens, 12 checkpoints, 1745.6 MB (3 entries, 1850.2 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:43,514 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-7-b47a2703407b prompt cache HIT: 32744/32783 tokens reused (common prefix 32749), prefilling 39
+2026-10-12 18:44:43,727 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-7-b47a2703407b prompt cache store: 32782 tokens, 12 checkpoints, 1745.4 MB (4 entries, 1902.9 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:43,846 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-2-e666e03651c1 prompt cache HIT: 32744/32785 tokens reused (common prefix 32749), prefilling 41
+2026-10-12 18:44:44,052 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-2-e666e03651c1 prompt cache store: 32784 tokens, 12 checkpoints, 1745.4 MB (5 entries, 1955.8 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:44,174 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-5-e8955fd708ca prompt cache HIT: 32744/32792 tokens reused (common prefix 32749), prefilling 48
+2026-10-12 18:44:44,385 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-5-e8955fd708ca prompt cache store: 32791 tokens, 12 checkpoints, 1745.6 MB (6 entries, 2008.8 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:44,583 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-4-6fb8acd53ea2 prompt cache HIT: 32744/32789 tokens reused (common prefix 32749), prefilling 45
+2026-10-12 18:44:44,789 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-4-6fb8acd53ea2 prompt cache store: 32788 tokens, 12 checkpoints, 1745.6 MB (7 entries, 2061.8 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:44,995 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-3-183c1ad8ed56 prompt cache HIT: 32744/32787 tokens reused (common prefix 32749), prefilling 43
+2026-10-12 18:44:45,205 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-3-183c1ad8ed56 prompt cache store: 32786 tokens, 12 checkpoints, 1745.5 MB (8 entries, 2114.7 MB total) reused=32744 gap=5 absorbed=0 pieces=2
+2026-10-12 18:44:45,925 INFO  qwen.worker cascade: group formed: P=32744, 8 rows (chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee,chatcmpl-bench-3822dc-r0-c8-0-531440933b62,chatcmpl-bench-3822dc-r0-c8-6-27b726edba75,chatcmpl-bench-3822dc-r0-c8-7-b47a2703407b,chatcmpl-bench-3822dc-r0-c8-2-e666e03651c1,chatcmpl-bench-3822dc-r0-c8-5-e8955fd708ca,chatcmpl-bench-3822dc-r0-c8-4-6fb8acd53ea2,chatcmpl-bench-3822dc-r0-c8-3-183c1ad8ed56), 2281.8 MB (prefix + stacks, fp32), charged 2.48 GiB; reserved 9.27 -> 3.31 GiB
+2026-10-12 18:44:52,510 INFO  qwen.worker batch: rows=8 waiting=0 prefilling=- steps/s=10.5 mean_rows=7.71 reserved=3.31/15.75GiB pcache=1.97GiB active=13.51GiB groups=1 grouped=8
+2026-10-12 18:44:53,819 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-1-1575d2071fee finish=length gen_tokens=128 ttft_ms=83390 tps=12.0 cached=0 peak=23.07GB active=14.50GB pool=0.04GB queue_ms=31 batch=7.76
+2026-10-12 18:44:53,878 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-0-531440933b62 finish=length gen_tokens=128 ttft_ms=663 tps=12.3 cached=32744 peak=23.07GB active=14.52GB pool=0.00GB queue_ms=83073 batch=7.81
+2026-10-12 18:44:53,937 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-6-27b726edba75 finish=length gen_tokens=128 ttft_ms=653 tps=12.6 cached=32744 peak=23.07GB active=14.41GB pool=0.00GB queue_ms=83413 batch=7.84
+2026-10-12 18:44:53,994 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-7-b47a2703407b finish=length gen_tokens=128 ttft_ms=663 tps=13.0 cached=32744 peak=23.07GB active=14.31GB pool=0.00GB queue_ms=83728 batch=7.85
+2026-10-12 18:44:54,053 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-2-e666e03651c1 finish=length gen_tokens=128 ttft_ms=671 tps=13.3 cached=32744 peak=23.07GB active=14.21GB pool=0.00GB queue_ms=84061 batch=7.85
+2026-10-12 18:44:54,104 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-5-e8955fd708ca finish=length gen_tokens=128 ttft_ms=415 tps=13.4 cached=32744 peak=23.07GB active=14.13GB pool=0.01GB queue_ms=84382 batch=7.84
+2026-10-12 18:44:54,211 INFO  qwen.worker cascade: group P=32744 dissolved (2 members): 2 rows released, 2.22 GiB charge dropped (reserved 2.32 GiB)
+2026-10-12 18:44:54,310 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-4-6fb8acd53ea2 finish=length gen_tokens=128 ttft_ms=417 tps=13.6 cached=32744 peak=23.07GB active=13.93GB pool=0.04GB queue_ms=84783 batch=7.78
+2026-10-12 18:44:54,377 INFO  qwen.worker id=chatcmpl-bench-3822dc-r0-c8-3-183c1ad8ed56 finish=length gen_tokens=128 ttft_ms=1114 tps=15.3 cached=32744 peak=23.07GB active=12.79GB pool=0.02GB queue_ms=85193 batch=7.68
+2026-10-12 18:44:55,158 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-cal-1e1ddf20d371 images=0 max_tokens=16 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:44:55,160 INFO  qwen.worker id=chatcmpl-bench-ed1753-cal-1e1ddf20d371 prompt_tokens=1301 (images=0)
+2026-10-12 18:44:55,162 INFO  qwen.worker id=chatcmpl-bench-ed1753-cal-1e1ddf20d371 prompt cache MISS (common prefix 35, 8 entries)
+2026-10-12 18:44:58,284 INFO  qwen.worker id=chatcmpl-bench-ed1753-cal-1e1ddf20d371 prompt cache store: 1300 tokens, 1 checkpoints, 145.6 MB (9 entries, 2260.3 MB total) reused=0 gap=35 absorbed=0 pieces=1
+2026-10-12 18:44:58,757 INFO  qwen.worker id=chatcmpl-bench-ed1753-cal-1e1ddf20d371 finish=length gen_tokens=16 ttft_ms=3174 tps=37.9 cached=0 peak=13.01GB active=11.90GB pool=0.05GB queue_ms=2 batch=1.00
+2026-10-12 18:45:28,776 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-probe-a924f89f29aa images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:28,780 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-probe-a924f89f29aa prompt_tokens=1079 (images=0)
+2026-10-12 18:45:28,783 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-probe-a924f89f29aa prompt cache MISS (common prefix 40, 9 entries)
+2026-10-12 18:45:30,636 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=chatcmpl-bench-ed1753-r0-c16-probe-a924f89f29aa steps/s=1.3 mean_rows=4.73 reserved=0.14/15.75GiB pcache=2.11GiB active=11.49GiB groups=0 grouped=0
+2026-10-12 18:45:30,778 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-probe-a924f89f29aa prompt cache store: 1078 tokens, 1 checkpoints, 138.3 MB (10 entries, 2398.6 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:45:33,144 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-probe-a924f89f29aa finish=length gen_tokens=64 ttft_ms=2061 tps=27.8 cached=0 peak=12.92GB active=12.03GB pool=0.05GB queue_ms=5 batch=1.00
+2026-10-12 18:45:33,165 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-0-af7ab646a8fb images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,169 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-2-9e74e54df7b2 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,171 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-1-6ca8a64d6a89 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,173 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-0-af7ab646a8fb prompt_tokens=1016 (images=0)
+2026-10-12 18:45:33,173 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-3-115b73010cb2 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,179 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-0-af7ab646a8fb prompt cache MISS (common prefix 40, 10 entries)
+2026-10-12 18:45:33,179 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-5-72b8b839783f images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,179 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-2-9e74e54df7b2 prompt_tokens=1008 (images=0)
+2026-10-12 18:45:33,180 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-4-6c91fc0c1dd2 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,188 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-1-6ca8a64d6a89 prompt_tokens=1014 (images=0)
+2026-10-12 18:45:33,194 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-6-f04bce333648 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,202 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-12-2b4e4b38a895 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,202 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-7-cc7f69644e29 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,204 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-3-115b73010cb2 prompt_tokens=1010 (images=0)
+2026-10-12 18:45:33,205 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-11-e0f2e4b15452 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,206 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-8-7569460cd415 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,207 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-5-72b8b839783f prompt_tokens=1015 (images=0)
+2026-10-12 18:45:33,209 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-4-6c91fc0c1dd2 prompt_tokens=1012 (images=0)
+2026-10-12 18:45:33,209 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-6-f04bce333648 prompt_tokens=1013 (images=0)
+2026-10-12 18:45:33,210 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-9-4a561c6b170c images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,210 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-12-2b4e4b38a895 prompt_tokens=1014 (images=0)
+2026-10-12 18:45:33,211 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-7-cc7f69644e29 prompt_tokens=1006 (images=0)
+2026-10-12 18:45:33,211 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-10-68c9a5571634 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,211 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-13-2a737f3955d1 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,212 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-15-1191576fa3e3 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,213 INFO  qwen.worker Generate id=chatcmpl-bench-ed1753-r0-c16-14-0d7b096dffa8 images=0 max_tokens=256 template_kwargs={"enable_thinking":false} budget=-
+2026-10-12 18:45:33,213 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-11-e0f2e4b15452 prompt_tokens=1014 (images=0)
+2026-10-12 18:45:33,214 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-8-7569460cd415 prompt_tokens=1012 (images=0)
+2026-10-12 18:45:33,217 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-9-4a561c6b170c prompt_tokens=1014 (images=0)
+2026-10-12 18:45:33,218 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-10-68c9a5571634 prompt_tokens=1008 (images=0)
+2026-10-12 18:45:33,218 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-13-2a737f3955d1 prompt_tokens=1013 (images=0)
+2026-10-12 18:45:33,219 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-15-1191576fa3e3 prompt_tokens=1011 (images=0)
+2026-10-12 18:45:33,220 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-14-0d7b096dffa8 prompt_tokens=1016 (images=0)
+2026-10-12 18:45:36,711 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-0-af7ab646a8fb prompt cache store: 1015 tokens, 1 checkpoints, 136.3 MB (11 entries, 2534.9 MB total) reused=0 gap=40 absorbed=0 pieces=1
+2026-10-12 18:45:36,754 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-2-9e74e54df7b2 prompt cache HIT: 967/1008 tokens reused (common prefix 972), prefilling 41
+2026-10-12 18:45:36,919 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-2-9e74e54df7b2 prompt cache store: 1007 tokens, 1 checkpoints, 137.6 MB (12 entries, 2587.7 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:36,962 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-1-6ca8a64d6a89 prompt cache HIT: 967/1014 tokens reused (common prefix 972), prefilling 47
+2026-10-12 18:45:37,125 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-1-6ca8a64d6a89 prompt cache store: 1013 tokens, 1 checkpoints, 137.8 MB (13 entries, 2640.7 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:37,165 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-3-115b73010cb2 prompt cache HIT: 967/1010 tokens reused (common prefix 972), prefilling 43
+2026-10-12 18:45:37,327 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-3-115b73010cb2 prompt cache store: 1009 tokens, 1 checkpoints, 137.7 MB (14 entries, 2693.6 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:37,369 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-5-72b8b839783f prompt cache HIT: 967/1015 tokens reused (common prefix 972), prefilling 48
+2026-10-12 18:45:37,536 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-5-72b8b839783f prompt cache store: 1014 tokens, 1 checkpoints, 137.8 MB (15 entries, 2746.7 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:37,581 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-4-6c91fc0c1dd2 prompt cache HIT: 967/1012 tokens reused (common prefix 972), prefilling 45
+2026-10-12 18:45:37,743 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-4-6c91fc0c1dd2 prompt cache store: 1011 tokens, 1 checkpoints, 137.7 MB (16 entries, 2799.6 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:37,822 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-6-f04bce333648 prompt cache HIT: 967/1013 tokens reused (common prefix 972), prefilling 46
+2026-10-12 18:45:37,991 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-6-f04bce333648 prompt cache store: 1012 tokens, 1 checkpoints, 137.8 MB (17 entries, 2852.6 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:38,072 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-12-2b4e4b38a895 prompt cache HIT: 967/1014 tokens reused (common prefix 972), prefilling 47
+2026-10-12 18:45:38,239 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-12-2b4e4b38a895 prompt cache store: 1013 tokens, 1 checkpoints, 137.8 MB (18 entries, 2905.6 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:38,325 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-7-cc7f69644e29 prompt cache HIT: 967/1006 tokens reused (common prefix 972), prefilling 39
+2026-10-12 18:45:38,491 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-7-cc7f69644e29 prompt cache store: 1005 tokens, 1 checkpoints, 137.5 MB (19 entries, 2958.4 MB total) reused=967 gap=5 absorbed=0 pieces=2
+2026-10-12 18:45:38,614 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-11-e0f2e4b15452 prompt cache HIT: 967/1014 tokens reused (common prefix 973), prefilling 47
+2026-10-12 18:45:38,784 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-11-e0f2e4b15452 prompt cache store: 1013 tokens, 1 checkpoints, 137.8 MB (20 entries, 3011.4 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:38,909 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-8-7569460cd415 prompt cache HIT: 967/1012 tokens reused (common prefix 973), prefilling 45
+2026-10-12 18:45:39,097 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-8-7569460cd415 prompt cache store: 1011 tokens, 1 checkpoints, 137.7 MB (21 entries, 3064.4 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:39,230 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-9-4a561c6b170c prompt cache HIT: 967/1014 tokens reused (common prefix 973), prefilling 47
+2026-10-12 18:45:39,420 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-9-4a561c6b170c prompt cache store: 1013 tokens, 1 checkpoints, 137.8 MB (22 entries, 3117.4 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:39,615 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-10-68c9a5571634 prompt cache HIT: 967/1008 tokens reused (common prefix 973), prefilling 41
+2026-10-12 18:45:39,804 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-10-68c9a5571634 prompt cache store: 1007 tokens, 1 checkpoints, 137.6 MB (23 entries, 3170.2 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:40,009 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-13-2a737f3955d1 prompt cache HIT: 967/1013 tokens reused (common prefix 973), prefilling 46
+2026-10-12 18:45:40,223 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-13-2a737f3955d1 prompt cache store: 1012 tokens, 1 checkpoints, 137.8 MB (23 entries, 3170.1 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:40,447 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-15-1191576fa3e3 prompt cache HIT: 967/1011 tokens reused (common prefix 973), prefilling 44
+2026-10-12 18:45:40,662 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-15-1191576fa3e3 prompt cache store: 1010 tokens, 1 checkpoints, 137.7 MB (23 entries, 3170.0 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:40,665 INFO  qwen.worker batch: rows=15 waiting=1 prefilling=- steps/s=9.1 mean_rows=3.29 reserved=2.17/15.75GiB pcache=2.95GiB active=13.06GiB groups=0 grouped=0
+2026-10-12 18:45:40,896 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-14-0d7b096dffa8 prompt cache HIT: 967/1016 tokens reused (common prefix 973), prefilling 49
+2026-10-12 18:45:41,135 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-14-0d7b096dffa8 prompt cache store: 1015 tokens, 1 checkpoints, 137.9 MB (23 entries, 3170.4 MB total) reused=967 gap=6 absorbed=0 pieces=2
+2026-10-12 18:45:50,697 INFO  qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=14.2 mean_rows=15.98 reserved=2.31/15.75GiB pcache=2.95GiB active=13.39GiB groups=0 grouped=0
+2026-10-12 18:45:56,623 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-0-af7ab646a8fb finish=length gen_tokens=256 ttft_ms=3772 tps=13.0 cached=0 peak=14.61GB active=14.46GB pool=0.73GB queue_ms=10 batch=15.28
+2026-10-12 18:45:56,690 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-2-9e74e54df7b2 finish=length gen_tokens=256 ttft_ms=416 tps=13.1 cached=967 peak=14.63GB active=14.46GB pool=1.74GB queue_ms=3568 batch=15.33
+2026-10-12 18:45:56,760 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-1-6ca8a64d6a89 finish=length gen_tokens=256 ttft_ms=411 tps=13.2 cached=967 peak=14.63GB active=14.34GB pool=2.81GB queue_ms=3777 batch=15.38
+2026-10-12 18:45:56,829 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-3-115b73010cb2 finish=length gen_tokens=256 ttft_ms=418 tps=13.3 cached=967 peak=14.63GB active=14.22GB pool=3.22GB queue_ms=3971 batch=15.42
+2026-10-12 18:45:56,896 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-5-72b8b839783f finish=length gen_tokens=256 ttft_ms=421 tps=13.4 cached=967 peak=14.63GB active=14.11GB pool=3.21GB queue_ms=4164 batch=15.45
+2026-10-12 18:45:56,961 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-4-6c91fc0c1dd2 finish=length gen_tokens=256 ttft_ms=242 tps=13.4 cached=967 peak=14.63GB active=14.04GB pool=3.19GB queue_ms=4368 batch=15.47
+2026-10-12 18:45:57,089 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-6-f04bce333648 finish=length gen_tokens=256 ttft_ms=251 tps=13.5 cached=967 peak=14.63GB active=13.83GB pool=3.19GB queue_ms=4606 batch=15.51
+2026-10-12 18:45:57,216 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-12-2b4e4b38a895 finish=length gen_tokens=256 ttft_ms=254 tps=13.5 cached=967 peak=14.63GB active=13.71GB pool=3.20GB queue_ms=4856 batch=15.52
+2026-10-12 18:45:57,309 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-7-cc7f69644e29 finish=length gen_tokens=256 ttft_ms=285 tps=13.7 cached=967 peak=14.63GB active=13.60GB pool=3.19GB queue_ms=5108 batch=15.52
+2026-10-12 18:45:57,391 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-11-e0f2e4b15452 finish=length gen_tokens=256 ttft_ms=296 tps=13.8 cached=967 peak=14.63GB active=13.50GB pool=3.19GB queue_ms=5389 batch=15.51
+2026-10-12 18:45:57,471 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-8-7569460cd415 finish=length gen_tokens=256 ttft_ms=323 tps=14.0 cached=967 peak=14.63GB active=13.39GB pool=3.22GB queue_ms=5681 batch=15.47
+2026-10-12 18:45:57,550 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-9-4a561c6b170c finish=length gen_tokens=256 ttft_ms=329 tps=14.2 cached=967 peak=14.63GB active=13.27GB pool=3.21GB queue_ms=6000 batch=15.43
+2026-10-12 18:45:57,664 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-10-68c9a5571634 finish=length gen_tokens=256 ttft_ms=334 tps=14.4 cached=967 peak=14.63GB active=13.17GB pool=3.18GB queue_ms=6384 batch=15.33
+2026-10-12 18:45:57,776 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-13-2a737f3955d1 finish=length gen_tokens=256 ttft_ms=375 tps=14.7 cached=967 peak=14.63GB active=13.05GB pool=3.19GB queue_ms=6776 batch=15.22
+2026-10-12 18:45:57,902 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-15-1191576fa3e3 finish=length gen_tokens=256 ttft_ms=382 tps=15.0 cached=967 peak=14.63GB active=12.93GB pool=3.20GB queue_ms=7214 batch=15.08
+2026-10-12 18:45:58,012 INFO  qwen.worker id=chatcmpl-bench-ed1753-r0-c16-14-0d7b096dffa8 finish=length gen_tokens=256 ttft_ms=407 tps=15.3 cached=967 peak=14.63GB active=12.81GB pool=3.21GB queue_ms=7661 batch=14.91
+2026-10-12 18:45:58,905 INFO  qwen.worker worker stopped

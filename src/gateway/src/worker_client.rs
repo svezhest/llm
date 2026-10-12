@@ -52,6 +52,7 @@ pub fn spawn_health_poll(mut client: Client, pool: Pool, fixed: Option<usize>, m
         tick.tick().await; // the first tick is immediate; connect() just asked
         let mut up = true;
         let mut pcache = None;
+        let mut cascade = None;
         loop {
             tick.tick().await;
             let mut req = tonic::Request::new(Empty {});
@@ -83,6 +84,11 @@ pub fn spawn_health_poll(mut client: Client, pool: Pool, fixed: Option<usize>, m
                 debug!(entries = pc.0, bytes = pc.1, hits = pc.2, misses = pc.3, evictions = pc.4,
                        "worker prompt cache");
                 pcache = Some(pc);
+            }
+            let cs = (reply.cascade_groups, reply.cascade_rows);
+            if cascade != Some(cs) {
+                debug!(groups = cs.0, rows = cs.1, "worker cascade groups");
+                cascade = Some(cs);
             }
             if !reply.ready || reply.max_batch == max_batch {
                 continue;

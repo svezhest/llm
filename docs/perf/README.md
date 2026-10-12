@@ -19,6 +19,13 @@ distilled version; these are the evidence.
   SDPA, synthetic 9B shapes (`scripts/perf/microbench/microbench_cascade.py`): B=16/P=8K saves 13–16
   ms per step (+20–28 % decode), 32K ×1.75; fp32 formulation beats today's kernel numerically,
   fp16 scores fail; worth it only for groups ≥ 8 rows on ≥ ~4K prefixes; raw `raw/cascade_*`.
+  `prompt_cache_phase1_gpu.md`, `segments_partA_gpu.md` — the prompt-cache rework on the real
+  model (hit == cold 26/26 each; segments: 16 siblings of an 8K prefix = 1.35 GB, 120K store
+  4.56 GB without OOM), raw `raw/pcache2_*`, `raw/pcache3_*`. `cascade_gpu.md` — the cascade
+  gate (top-1 ≥ 99.7 % at B=8/16, 8K/32K) and waves: step 8K×16 66 → 54 ms, 16×32K all admitted,
+  default flipped to on; raw `raw/cascade_*`. Reviews: `reviews/prompt_cache_phase1.md`,
+  `segments_partA.md`, `cascade_b1.md`, `cascade_b2b3.md`, `cascade_b2b3_fixes.md`; design:
+  `design/prompt_cache_opt.md`, `prompt_cache_opt_2.md`, `cascade_plan.md`.
 
 Tools live in `scripts/perf/` (`prof/` in-process profilers and A/B scripts run from
 `src/worker` with its venv, `microbench/` kernel-level microbenchmarks and the batching
