@@ -1,0 +1,66 @@
+2026-10-12 16:30:04 === start (V1 V2 V3 V4)
+2026-10-12 16:30:04 therm:  load: { 4.06 3.23 3.07 }
+2026-10-12 16:30:04 kill worker 31776
+2026-10-12 16:30:08 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache3/worker_v1.log
+2026-10-12 16:30:14 worker up pid 40380 nice  0: 2026-10-12 16:30:13,297 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 16:30:13,745 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 16:30:27 gateway: 2026-10-12T13:30:24.594153Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 16:30:27 phase V1on start
+2026-10-12 16:30:27 therm:  load: { 3.15 3.08 3.02 }
+2026-10-12 16:31:56 phase V1on end rc=0
+2026-10-12 16:31:56 therm:  load: { 3.63 3.37 3.14 }
+2026-10-12 16:31:56 health: {"entries": 10, "bytes": 1414889472, "hits": 12, "misses": 8, "evictions": 0, "max_batch": 16}
+2026-10-12 16:31:56 V1 cmp rc=0 20/20 identical (text+reasoning+finish+tokens) to the cache-off run
+2026-10-12 16:31:56 GPU busy, waiting: 40902 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 40908 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py --ignore tests/test_cascade.py -p no:cacheprovider 
+2026-10-12 16:32:26 GPU busy, waiting: 40902 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 40908 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py --ignore tests/test_cascade.py -p no:cacheprovider 
+2026-10-12 16:32:56 GPU busy, waiting: 40902 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 40908 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py --ignore tests/test_cascade.py -p no:cacheprovider 
+2026-10-12 16:33:26 GPU busy, waiting: 40902 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 40908 uv run --group dev pytest -q --ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py --ignore tests/test_cascade.py -p no:cacheprovider 
+2026-10-12 16:33:56 GPU busy, waiting: 41510 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 41516 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 
+2026-10-12 16:34:26 GPU busy, waiting: 41510 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 41690 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 
+2026-10-12 16:34:56 GPU busy, waiting: 41510 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 41690 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 
+2026-10-12 16:35:26 GPU busy, waiting: 41510 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 41690 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 
+2026-10-12 16:35:56 GPU busy, waiting: 41510 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 42159 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 
+2026-10-12 16:36:26 GPU busy, waiting: 41510 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 42315 /bin/zsh -c setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QU 
+2026-10-12 16:36:57 kill worker 40380
+2026-10-12 16:37:01 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache3/worker_v1x.log
+2026-10-12 16:37:06 worker up pid 42455 nice  0: 2026-10-12 16:37:05,116 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 16:37:05,553 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 16:38:09 gateway: 2026-10-12T13:30:24.594153Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 16:38:09 phase V1x on start
+2026-10-12 16:39:08 phase V1x on end rc=0
+2026-10-12 16:39:08 health: {"entries": 4, "bytes": 1403781120, "hits": 5, "misses": 1, "evictions": 0, "max_batch": 16}
+2026-10-12 16:39:09 V1x cmp rc=0 6/6 identical (text+reasoning+finish+tokens) to the cache-off run
+2026-10-12 16:39:09 kill worker 42455
+2026-10-12 16:39:13 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache3/worker_v2.log
+2026-10-12 16:39:18 worker up pid 42978 nice  0: 2026-10-12 16:39:17,308 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 16:39:17,772 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 16:39:26 gateway: 2026-10-12T13:39:24.597170Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 16:39:26 phase V2s1 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 16:39:26 therm:  load: { 2.40 2.96 3.06 }
+2026-10-12 16:41:08 phase V2s1 end rc=0
+2026-10-12 16:41:08 therm:  load: { 2.77 2.89 3.01 }
+2026-10-12 16:41:08 health: {"entries": 18, "bytes": 2577793024, "hits": 15, "misses": 3, "evictions": 0, "max_batch": 16}
+2026-10-12 16:41:08 phase V2d start: --prefix distinct --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 16:41:08 therm:  load: { 2.77 2.89 3.01 }
+2026-10-12 16:47:12 phase V2d end rc=0
+2026-10-12 16:47:12 therm:  load: { 1.66 2.12 2.59 }
+2026-10-12 16:47:12 health: {"entries": 6, "bytes": 3169452032, "hits": 15, "misses": 21, "evictions": 30, "max_batch": 16}
+2026-10-12 16:47:12 phase V2s2 start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 256 --prompt-tokens 8000
+2026-10-12 16:47:12 therm:  load: { 1.66 2.12 2.59 }
+2026-10-12 16:49:05 phase V2s2 end rc=0
+2026-10-12 16:49:06 therm:  load: { 2.79 2.20 2.55 }
+2026-10-12 16:49:06 health: {"entries": 19, "bytes": 3078356992, "hits": 30, "misses": 24, "evictions": 35, "max_batch": 16}
+2026-10-12 16:49:06 phase V3s32k start: --prefix shared --concurrency 16 --requests-per-level 16 --max-tokens 128 --prompt-tokens 32000
+2026-10-12 16:49:06 therm:  load: { 2.79 2.20 2.55 }
+2026-10-12 16:54:03 phase V3s32k end rc=0
+2026-10-12 16:54:03 therm:  load: { 2.44 2.08 2.37 }
+2026-10-12 16:54:03 health: {"entries": 3, "bytes": 1863974912, "hits": 45, "misses": 27, "evictions": 69, "max_batch": 16}
+2026-10-12 16:54:03 kill worker 42978
+2026-10-12 16:54:07 start worker env: QWEN_PROMPT_CACHE=1 log: /tmp/scratch/pcache3/worker_v4.log
+2026-10-12 16:54:13 worker up pid 43620 nice  0: 2026-10-12 16:54:12,877 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True 2026-10-12 16:54:13,306 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 3.0 GiB, evicted on demand) 
+2026-10-12 16:54:27 gateway: 2026-10-12T13:54:24.597146Z  INFO qwen_gateway::worker_client: worker Health changed ready=true model=ornith15-9b-mlx-8bit
+2026-10-12 16:54:27 phase V4 start
+2026-10-12 16:54:27 therm:  load: { 2.66 2.17 2.39 }
+2026-10-12 17:02:25 phase V4 end rc=0
+2026-10-12 17:02:25 therm:  load: { 2.51 2.55 2.48 }
+2026-10-12 17:02:25 health: {"entries": 1, "bytes": 1707016192, "hits": 1, "misses": 2, "evictions": 1, "max_batch": 16}
+2026-10-12 17:02:25 === done (worker left running, cache on, log /tmp/scratch/pcache3/worker_v4.log)
+2026-10-12 17:03:12 phase V4b start load { 2.54 2.58 2.49 }
+2026-10-12 17:12:26 phase V4b end rc=0

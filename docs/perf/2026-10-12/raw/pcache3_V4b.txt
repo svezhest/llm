@@ -1,0 +1,2 @@
+L: prompt=120356 ttft=401.0s health={'entries': 1, 'bytes': 4613439488, 'hits': 1, 'misses': 3, 'evictions': 2, 'max_batch': 16}
+after 150s: health={'entries': 1, 'bytes': 1824718848, 'hits': 1, 'misses': 5, 'evictions': 3, 'max_batch': 16} finished=0

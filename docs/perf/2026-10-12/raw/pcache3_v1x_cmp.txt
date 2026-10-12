@@ -1,0 +1,7 @@
+same P2.cold      == off P2       prompt=12272 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=617
+same P3.hit       == off P3       prompt=12276 cached=7359 tok=128 finish=length reasoning_chars=0 text_chars=564
+same P4.hit       == off P4       prompt=7697 cached=4096 tok=128 finish=length reasoning_chars=0 text_chars=575
+same sysA.hit     == off sysA     prompt=7405 cached=7359 tok=128 finish=length reasoning_chars=0 text_chars=441
+same P2.hit       == off P2       prompt=12272 cached=12271 tok=128 finish=length reasoning_chars=0 text_chars=617
+same P3.hit2      == off P3       prompt=12276 cached=12275 tok=128 finish=length reasoning_chars=0 text_chars=564
+6/6 identical (text+reasoning+finish+tokens) to the cache-off run

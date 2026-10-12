@@ -1,0 +1,32 @@
+{
+ "tag": "v4b-13792",
+ "L": {
+  "id": "chatcmpl-bench-v4b-13792-L",
+  "t_start": 1704352.169350416,
+  "t_end": 1704754.358183916,
+  "ttft_s": 400.97519987495616,
+  "latency_s": 402.1888335000258,
+  "completion_tokens": 32,
+  "content_chunks": 15,
+  "usage_present": true,
+  "prompt_tokens": 120356,
+  "finish_reason": "length",
+  "decode_tps": 26.367100695783684
+ },
+ "health_after_L": {
+  "entries": 1,
+  "bytes": 4613439488,
+  "hits": 1,
+  "misses": 3,
+  "evictions": 2,
+  "max_batch": 16
+ },
+ "health_at_hold": {
+  "entries": 1,
+  "bytes": 1824718848,
+  "hits": 1,
+  "misses": 5,
+  "evictions": 3,
+  "max_batch": 16
+ }
+}

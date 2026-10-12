@@ -1,0 +1,21 @@
+same code0.cold   == off code0    prompt=46 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=330
+same code0.hit    == off code0    prompt=46 cached=45 tok=128 finish=length reasoning_chars=0 text_chars=330
+same code1.cold   == off code1    prompt=38 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=437
+same code1.hit    == off code1    prompt=38 cached=37 tok=128 finish=length reasoning_chars=0 text_chars=437
+same code2.cold   == off code2    prompt=34 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=495
+same code2.hit    == off code2    prompt=34 cached=33 tok=128 finish=length reasoning_chars=0 text_chars=495
+same code3.cold   == off code3    prompt=39 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=555
+same code3.hit    == off code3    prompt=39 cached=38 tok=128 finish=length reasoning_chars=0 text_chars=555
+same code4.cold   == off code4    prompt=30 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=292
+same code4.hit    == off code4    prompt=30 cached=29 tok=128 finish=length reasoning_chars=0 text_chars=292
+same sysA.cold    == off sysA     prompt=7405 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=441
+same sysA.hit     == off sysA     prompt=7405 cached=7404 tok=128 finish=length reasoning_chars=0 text_chars=441
+same sysB.sib     == off sysB.sib prompt=7396 cached=7359 tok=128 finish=length reasoning_chars=0 text_chars=537
+same sysC.sib     == off sysC.sib prompt=7395 cached=7359 tok=128 finish=length reasoning_chars=0 text_chars=584
+same chatT.1      == off chatT.1  prompt=2647 cached=0 tok=92 finish=stop reasoning_chars=138 text_chars=15
+same chatT.2      == off chatT.2  prompt=2684 cached=2625 tok=48 finish=stop reasoning_chars=55 text_chars=17
+same chatT.3      == off chatT.3  prompt=2719 cached=2625 tok=42 finish=stop reasoning_chars=100 text_chars=29
+same chatN.1      == off chatN.1  prompt=2643 cached=0 tok=128 finish=length reasoning_chars=0 text_chars=588
+same chatN.2      == off chatN.2  prompt=2791 cached=2625 tok=84 finish=stop reasoning_chars=0 text_chars=339
+same chatN.3      == off chatN.3  prompt=2899 cached=2625 tok=128 finish=length reasoning_chars=0 text_chars=443
+20/20 identical (text+reasoning+finish+tokens) to the cache-off run

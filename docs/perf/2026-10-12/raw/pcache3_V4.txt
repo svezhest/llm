@@ -1,0 +1,3 @@
+L1: prompt=118747 ttft=389.21s tok=32 hit=False reused=0 peak=21.31 store_mb=4560.7 health={'entries': 1, 'bytes': 4560715776, 'hits': 0, 'misses': 1, 'evictions': 0, 'max_batch': 16} err=None
+L2: prompt=118747 ttft=0.51s tok=32 hit=True reused=118746 peak=18.05 store_mb=4560.7 health={'entries': 1, 'bytes': 4560715776, 'hits': 1, 'misses': 1, 'evictions': 0, 'max_batch': 16} err=None
+M1: prompt=31659 ttft=80.85s tok=32 hit=False reused=0 peak=19.53 store_mb=1707.0 health={'entries': 1, 'bytes': 1707016192, 'hits': 1, 'misses': 2, 'evictions': 1, 'max_batch': 16} err=None
