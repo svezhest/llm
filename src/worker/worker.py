@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import typing
 from concurrent import futures
 
 import grpc
@@ -600,15 +601,38 @@ CACHE_LIMIT_GB = float(os.environ.get("QWEN_CACHE_LIMIT_GB", "3"))
 # (not on quantized KV when only the old one is unquantized: it is the one
 # resume point below quantized_kv_start). Past
 # QWEN_PROMPT_CACHE_CKPTS an entry's checkpoints are thinned, never the end of
-# the system block or the last three message starts. QWEN_PROMPT_CACHE_GB is a
-# soft cap: past it entries are LRU-evicted at store (the newest stays, alone
-# if need be); the cache's live bytes count in the batch budget, and an
-# admission or a growing row evicts LRU entries on demand. The library's own
-# trim is never used (broken for quantized tuples).
+# the system block or the last three message starts (on quantized KV none
+# below quantized_kv_start: never resumable there).
+# Entries share their KV: an entry is a chain of immutable segments (buffers of
+# their own, per full-attention layer); a store copies only the tokens past
+# the resume point out of the row and reuses the parent's segments below it,
+# so siblings over one system prompt hold it once and a chat turn adds its own
+# tokens only. A restore concatenates the pieces once into the buffer the
+# row's first update would have built (same shape, same bits); nothing ever
+# holds a view of a row's buffer or of a segment. Bytes count every buffer
+# once; a segment is freed with the last entry holding it.
+# QWEN_PROMPT_CACHE_GB is a soft cap: past it entries are LRU-evicted at store
+# (the newest stays, alone if need be); the cache's live bytes count in the
+# batch budget: a store evicts down to the batch's headroom (budget + prefill
+# reserve - the rows' reservations; the new entry is dropped, the cache left as
+# it was, if it alone is over), an admission evicts LRU entries on demand
+# (sparing the one it would resume from a full slab deep, and nothing when that
+# would not admit it), a growing row too (never the parent of the running
+# prefill). When only the entry the head of the queue would resume from keeps
+# it out, the head waits for a row to end if that saves at least
+# QWEN_PROMPT_CACHE_KEEP_TOKENS of prefill, for at most
+# QWEN_PROMPT_CACHE_KEEP_WAIT_S; else (or then) the entry goes and the head is
+# admitted cold. 8192 / 10 s: the 9B prefills 8K in ~14 s (35B ~13 s, 27B
+# longer), so a hit that deep saves more than the longest wait costs; one slab
+# (2048 tokens, ~3 s; 512 on the 35B recipe) saves less than waiting for a row
+# that may decode for minutes. The library's own trim is never used (broken
+# for quantized tuples).
 PROMPT_CACHE = os.environ.get("QWEN_PROMPT_CACHE", "0") == "1"
 PROMPT_CACHE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_GB", "3"))
 PROMPT_CACHE_STRIDE = int(os.environ.get("QWEN_PROMPT_CACHE_STRIDE", "2048"))
 PROMPT_CACHE_CKPTS = int(os.environ.get("QWEN_PROMPT_CACHE_CKPTS", "12"))
+PROMPT_CACHE_KEEP_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_KEEP_TOKENS", "8192"))
+PROMPT_CACHE_KEEP_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_KEEP_WAIT_S", "10"))
 
 # Compute dtype (QWEN_FP16=1): cast every bfloat16 parameter (quant scales/
 # biases, norms, embeddings, A_log...) to float16 after load. M1/M2-class GPUs
@@ -748,19 +772,109 @@ def _thin(ckpts, cap, protect=()):
     return ckpts
 
 
+def _own_slice(x, a, b):
+    """x[..., a:b, :] in a buffer of its own, never a view of x's. A
+    concatenate of two non-empty inputs always writes a new buffer
+    (mx.contiguous of a slice spanning the whole axis hands back x's own
+    buffer); a 1-token slice keeps a 2-token buffer of its own."""
+    if b - a >= 2:
+        m = (a + b) // 2
+        return mx.concatenate([x[..., a:m, :], x[..., m:b, :]], axis=-2)
+    s = x[..., a:b, :]
+    return mx.concatenate([s, s], axis=-2)[..., :1, :]
+
+
+class _Seg:
+    """KV of tokens [a, b) of every full-attention layer, in buffers of its
+    own (copied out of a row's cache, never a view of one). kv[j] = (k, v) of
+    the j-th full-attention layer in cache order: (1, Hkv, b-a, D) arrays, or
+    for quantized KV (packed, scales, biases) tuples. Immutable; shared by
+    every entry whose chain covers it, freed when the last one goes (plain
+    object references)."""
+    __slots__ = ("a", "b", "kv", "arrays", "nbytes", "__weakref__")
+
+    def __init__(self, a, b, kv):
+        self.a, self.b, self.kv = a, b, kv
+        self.arrays = [y for kv_ in kv for x in kv_ for y in (x if isinstance(x, tuple) else (x,))]
+        self.nbytes = sum(x.nbytes for x in self.arrays)
+
+    @classmethod
+    def copy_from(cls, cache, a, b):
+        def own(x):
+            return tuple(_own_slice(y, a, b) for y in x) if isinstance(x, (tuple, list)) \
+                else _own_slice(x, a, b)
+        seg = cls(a, b, [(own(c.keys), own(c.values)) for c in cache if not hasattr(c, "cache")])
+        mx.eval(seg.arrays)
+        return seg
+
+    @staticmethod
+    def estimate(cache, a, b):
+        """The bytes copy_from(cache, a, b) will hold, from the row's shapes
+        alone (nothing is allocated): every buffer is uniform per token."""
+        n = 0
+        for c in cache:
+            if hasattr(c, "cache"):
+                continue
+            for x in (c.keys, c.values):
+                for y in (x if isinstance(x, (tuple, list)) else (x,)):
+                    n += y.nbytes // y.shape[-2] * (b - a)
+        return n
+
+
+def _layout(cache):
+    """What restore needs to rebuild each layer's cache object."""
+    out = []
+    for c in cache:
+        if hasattr(c, "cache"):
+            out.append(("arr", type(c), len(c.cache)))
+        elif isinstance(c.keys, (tuple, list)):
+            out.append(("q", type(c), c.group_size, c.bits, type(c.keys)))
+        else:
+            out.append(("kv", type(c)))
+    return out
+
+
+class _Inherit(typing.NamedTuple):
+    """What a resumed prefill needs of its parent entry at store time (the
+    snapshot closure holds this, not the entry)."""
+    pieces: list                    # the parent's chain cut at the resume point
+    ckpts: dict                     # the parent's checkpoints <= the resume point
+    end: list | None                # its end state when it resumed at its end
+    quantized: bool
+
+
 class _Entry:
-    def __init__(self, ids, cache, ckpts):
+    """The cache state after the prefill of `ids` (= prompt[:-1]): the KV as
+    a chain of pieces (seg, lo, hi) (absolute positions, [lo, hi) within
+    [seg.a, seg.b), contiguous from 0 to len(ids)), recurrent-state
+    checkpoints and the end state. Pieces and checkpoints are shared objects
+    between entries."""
+
+    def __init__(self, ids, chain, ckpts, end, layout, quantized, low=0):
         self.ids = ids
-        self.cache = cache
+        self.chain = chain
         self.ckpts = ckpts                            # pos -> recurrent states, pos < len(ids)
+        self.end = end                                # recurrent states at len(ids), or None
+        self.layout = layout
+        self.quantized = quantized
+        self.low = low                                # resumable from here on (quantized KV)
         self.used = time.time()
-        self.quantized = _quantized(cache)
-        arrs = _cache_arrays(cache)
-        mx.eval(arrs)
-        # every array the entry holds (KV views, its end state, checkpoint
-        # states: the latter are shared objects between entries)
-        self.arrays = arrs + _state_arrays(ckpts)
+        self.index()
+
+    def index(self):
+        """(Re)build `arrays` / `nbytes` (store attaches the new segment after
+        deciding the entry is kept)."""
+        segs = {id(s): s for s, _, _ in self.chain}
+        arrs = [a for s in segs.values() for a in s.arrays]
+        arrs += [a for layer in (self.end or []) for a in layer if a is not None]
+        arrs += _state_arrays(self.ckpts)
+        # every array once: checkpoint states are shared objects between entries
+        self.arrays = list({id(a): a for a in arrs}.values())
         self.nbytes = sum(a.nbytes for a in self.arrays)
+
+    def cut(self, at):
+        """The pieces covering [0, at)."""
+        return [(s, lo, min(hi, at)) for s, lo, hi in self.chain if lo < at]
 
     def best(self, ids, ends):
         """Deepest resumable position within the common prefix (one token is
@@ -769,8 +883,8 @@ class _Entry:
         differently from a cold run. A quantized KV cut below the
         quantization start would not match a cold run either."""
         common = min(_lcp(self.ids, ids), len(ids) - 1)
-        low = KV_KWARGS["quantized_kv_start"] if self.quantized else 0
-        pos = [p for p in (*self.ckpts, len(self.ids)) if low <= p <= common and p in ends]
+        tops = (*self.ckpts, len(self.ids)) if self.end is not None else tuple(self.ckpts)
+        pos = [p for p in tops if self.low <= p <= common and p in ends]
         return max(pos, default=0), common
 
 
@@ -780,26 +894,39 @@ class _PrefixCache:
 
     def __init__(self):
         self.entries: list[_Entry] = []
-        self.bytes = 0                  # live bytes: every array once (checkpoints are shared)
+        self.bytes = 0                  # live bytes: every buffer once (segments, states are shared)
         self.hits = self.misses = self.evictions = 0
 
-    def _recount(self):
+    def bytes_of(self, entries):
+        """Unique bytes of a subset of the entries."""
         seen, n = set(), 0
-        for e in self.entries:
+        for e in entries:
             for a in e.arrays:
                 if id(a) not in seen:
                     seen.add(id(a))
                     n += a.nbytes
-        self.bytes = n
+        return n
 
-    def lookup(self, ids, ends):
-        """-> (entry, resume position, longest common prefix over all entries)."""
+    def _recount(self):
+        self.bytes = self.bytes_of(self.entries)
+
+    def _scan(self, ids, ends):
         hit, at, split = None, 0, 0
         for e in self.entries:
             pos, common = e.best(ids, ends)
             split = max(split, common)
             if pos > at:
                 hit, at = e, pos
+        return hit, at, split
+
+    def peek(self, ids, ends):
+        """-> (the entry lookup would resume from, its position); no side
+        effects (no LRU touch, no counters): for admission."""
+        return self._scan(ids, ends)[:2]
+
+    def lookup(self, ids, ends):
+        """-> (entry, resume position, longest common prefix over all entries)."""
+        hit, at, split = self._scan(ids, ends)
         if hit is not None:
             hit.used = time.time()
             self.hits += 1
@@ -807,22 +934,56 @@ class _PrefixCache:
             self.misses += 1
         return hit, at, split
 
-    def restore(self, entry, at):
-        if at == len(entry.ids):
-            return _copy_cache(entry.cache)
-        return _copy_cache(entry.cache, upto=at, states=entry.ckpts[at])
+    def restore(self, entry, at, first=1):
+        """Caches for a row resuming at `at`. Each full-attention layer: one
+        concatenate of the entry's pieces over [0, at) and a zeros tail of
+        round_up(first, step) tokens, `first` being the first update's token
+        count (the first slab, or 1 when no slab runs). That is the buffer
+        the first update_and_fetch built from a [:at] view before (same
+        shape, same bits), so it writes in place, and the row never holds a
+        view of a segment. Recurrent layers: the end state at len(ids), else
+        the checkpoint at `at` (fresh lists, shared arrays: the model
+        replaces them whole)."""
+        pieces = entry.cut(at)
+        states = iter(entry.end if at == len(entry.ids) else entry.ckpts[at])
+        out, j = [], 0
 
-    def closest(self, ids):
-        """-> (the entry sharing the longest prefix with `ids`, its length);
-        (None, 0) when empty."""
-        return max(((e, _lcp(e.ids, ids)) for e in self.entries), key=lambda x: x[1],
-                   default=(None, 0))
+        def build(parts, tail):
+            x = parts[0]
+            pad = mx.zeros((*x.shape[:-2], tail, x.shape[-1]), dtype=x.dtype)
+            return mx.concatenate(parts + [pad], axis=-2)
+        for lay in entry.layout:
+            kind, cls = lay[0], lay[1]
+            if kind == "arr":
+                n = cls(size=lay[2])
+                n.cache = list(next(states))
+                out.append(n)
+                continue
+            tail = (cls.step + first - 1) // cls.step * cls.step
+            sl = [(s.kv[j], lo - s.a, hi - s.a) for s, lo, hi in pieces]
+            if kind == "q":
+                n = cls(group_size=lay[2], bits=lay[3])
+                parts = len(sl[0][0][0])                # (packed, scales, biases)
+                k = [build([x[0][i][..., a:b, :] for x, a, b in sl], tail) for i in range(parts)]
+                v = [build([x[1][i][..., a:b, :] for x, a, b in sl], tail) for i in range(parts)]
+                n.keys, n.values = lay[4](k), lay[4](v)
+            else:
+                n = cls()
+                n.keys = build([x[0][..., a:b, :] for x, a, b in sl], tail)
+                n.values = build([x[1][..., a:b, :] for x, a, b in sl], tail)
+            n.offset = at
+            out.append(n)
+            j += 1
+        mx.eval(_cache_arrays(out))
+        return out
 
-    def evict(self, keep=None):
-        """Drop the least recently used entry but `keep` -> False: nothing to drop.
-        Safe while a row resumed from it runs: a restore holds its own views
-        of the entry's arrays (and copies them on its first slab)."""
-        left = [e for e in self.entries if e is not keep]
+    def evict(self, keep=()):
+        """Drop the least recently used entry but those in `keep` -> False:
+        nothing to drop. Its segments go with the last entry holding them. A
+        row resumed from it holds copies (restore); a prefill still running
+        from it holds its pieces until it ends (the scheduler keeps that
+        entry: _Scheduler._regrow)."""
+        left = [e for e in self.entries if not any(e is k for k in keep)]
         if not left:
             return False
         self.entries.remove(min(left, key=lambda e: e.used))
@@ -830,11 +991,23 @@ class _PrefixCache:
         self._recount()
         return True
 
-    def store(self, ids, cache, ckpts, parent=None, at=0, ends=(), protect=()):
+    def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
+              kv_start=None):
         """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
-        and checkpoints. `ends`: the prompt's slab ends; `protect`: the
-        checkpoint positions thinning keeps (see _thin) -> (entry, number of
-        older entries it absorbed).
+        and checkpoints -> (entry or None when it was not kept, number of
+        older entries it absorbed). `inherit`: the parent's part when the
+        prefill resumed at `at`; `ends`: the prompt's slab ends; `protect`:
+        the checkpoint positions thinning keeps (see _thin); `limit`: the
+        bytes the whole cache may hold beside the batch (LRU entries go
+        first; when the new one alone is over, sized from the row's shapes
+        before any copy, it is dropped and the cache left as it was: nothing
+        absorbed, evicted or copied); `kv_start`:
+        the quantization start (quantized entries resume from there on).
+
+        The KV over [0, at) is the parent's pieces (the row's [0, at) is a
+        copy of them), only [at, len) is copied out of the row; an fp16
+        parent of a row its prefill quantized is not this entry's bits there,
+        so then all of [0, len) is copied.
 
         A checkpoint at p is valid for this entry only where p is a slab end
         of this prompt: then the entry's KV over [0, p) is the cold prefill's
@@ -844,38 +1017,74 @@ class _PrefixCache:
         is one of `ends` (usually not: it is the token after the previous
         turn's <think>, so an exact repeat of that older prompt now resumes
         at its deepest checkpoint instead)."""
+        if kv_start is None:
+            kv_start = KV_KWARGS["quantized_kv_start"]
+        quantized = _quantized(cache)
+        L = len(ids)
         ckpts = dict(ckpts)
-        if parent is not None:                        # inherit the shared part
-            for p, s in parent.ckpts.items():
-                if p <= at:
-                    ckpts.setdefault(p, s)
-            if at == len(parent.ids) and at < len(ids):
-                ckpts[at] = _recurrent_states(parent.cache)
+        pieces, lo = [], 0
+        if inherit is not None:                       # inherit the shared part
+            if inherit.quantized == quantized:
+                pieces, lo = list(inherit.pieces), at
+            for p, s in inherit.ckpts.items():
+                ckpts.setdefault(p, s)
+            if inherit.end is not None and at < L:
+                ckpts[at] = inherit.end
+        # The new segment is sized before anything changes: an entry that
+        # does not fit the batch's headroom alone is neither copied nor
+        # allowed to absorb or evict anything (the cache stays as it was).
+        extra = _Seg.estimate(cache, lo, L) if L > lo else 0
         # An entry whose ids are a prefix of the new one (the previous turn of
         # this conversation, an exact repeat) is covered by it: its
         # checkpoints move over and it goes. Not an unquantized entry for a
         # quantized new one: its checkpoints below quantized_kv_start are only
         # resumable from fp16 KV, it is the one resume point there.
-        quantized = _quantized(cache)
         covered = [e for e in self.entries
-                   if len(e.ids) <= len(ids) and ids[: len(e.ids)] == e.ids
+                   if len(e.ids) <= L and ids[: len(e.ids)] == e.ids
                    and not (quantized and not e.quantized)]
         for e in covered:
             for p, s in e.ckpts.items():
                 ckpts.setdefault(p, s)
-            if len(e.ids) in ends and len(e.ids) < len(ids):
-                ckpts.setdefault(len(e.ids), _recurrent_states(e.cache))
-        ckpts.pop(len(ids), None)
+            if e.end is not None and len(e.ids) in ends and len(e.ids) < L:
+                ckpts.setdefault(len(e.ids), e.end)
+        if quantized:                                 # never resumable below the start
+            ckpts = {p: s for p, s in ckpts.items() if p >= kv_start}
+        ckpts.pop(L, None)
         _thin(ckpts, PROMPT_CACHE_CKPTS, protect)
-        new = _Entry(ids, _copy_cache(cache), ckpts)
+        # the chain without its own segment yet: nbytes + extra = its size
+        new = _Entry(ids, pieces, ckpts, _recurrent_states(cache), _layout(cache), quantized,
+                     kv_start if quantized else 0)
+        if limit is not None and new.nbytes + extra > limit:
+            # beside the batch (the rows' reservations + the cache within the
+            # budget + the idle prefill reserve) it does not fit even alone
+            self.evictions += 1
+            log.info("prompt cache: entry of %d tokens (%.2f GiB) not kept: over the "
+                     "batch's headroom (%.2f GiB); counted as an eviction, the cache is "
+                     "unchanged", L, (new.nbytes + extra) / GIB, max(limit, 0) / GIB)
+            return None, 0
         self.entries = [e for e in self.entries if not any(e is c for c in covered)] + [new]
         self._recount()
         budget = PROMPT_CACHE_GB * GIB
-        while len(self.entries) > 1 and self.bytes > budget:
-            self.evict(keep=new)
+        while len(self.entries) > 1 and self.bytes + extra > budget:
+            self.evict(keep=(new,))
+        if limit is not None:
+            # it fits alone: LRU others go until it fits beside the batch
+            while len(self.entries) > 1 and self.bytes + extra > limit and self.evict(keep=(new,)):
+                pass
+        if L > lo:                                    # copied once room is made
+            try:
+                new.chain = pieces + [(_Seg.copy_from(cache, lo, L), lo, L)]
+            except BaseException:
+                # no half-built entry: the absorbed ones come back (the
+                # evicted ones are gone), the caller logs and goes on
+                self.entries = [e for e in self.entries if e is not new] + covered
+                self._recount()
+                raise
+            new.index()
+            self._recount()
         if self.bytes > budget:
             log.warning("prompt cache: the newest entry alone (%d tokens, %.2f GiB) is over "
-                        "QWEN_PROMPT_CACHE_GB=%.1f; kept, evicted on demand", len(ids),
+                        "QWEN_PROMPT_CACHE_GB=%.1f; kept, evicted on demand", L,
                         self.bytes / GIB, PROMPT_CACHE_GB)
         return new, len(covered)
 
@@ -1762,6 +1971,8 @@ class _Req:
     t0: float = 0.0                             # prefill start
     queue_ms: int = 0
     reused: int = 0                             # prompt-cache tokens
+    bounds: list | None = None                  # _bounds(ids) (memoized: _Scheduler._bounds)
+    keep_since: float | None = None             # first blocked by the entry it would resume from
     steps: int = 0                              # decode steps (DFlash: rounds) taken
     rows_sum: int = 0                           # sum of the batch sizes of those steps
     # snapshot taken on the scheduler when the request ends (before anything
@@ -1794,6 +2005,8 @@ class _Row:
         self.n = 0                                  # tokens sent
         self.done = False
         self.sampler = self.pen = None
+        self.parent = None                          # the entry the running prefill resumed from
+        self.started = False                        # its prefill / DFlash run began
 
     @property
     def sync(self):
@@ -2036,8 +2249,12 @@ class _Scheduler:
         headroom = self.budget + self.prefill_reserve
         pc = self.eng._pcache
         if rows <= headroom < rows + pc.bytes:
+            # not the entry a running prefill resumed from: its pieces stay
+            # allocated until that prefill stores, whatever the count says
+            task = self.task_row
+            keep = (task.parent,) if task is not None and task.parent is not None else ()
             n = 0
-            while rows + pc.bytes > headroom and pc.evict():
+            while rows + pc.bytes > headroom and pc.evict(keep):
                 n += 1
             if n:
                 log.info("prompt cache: %d entries evicted for the growth of id=%s "
@@ -2052,30 +2269,66 @@ class _Scheduler:
         row.reserved = need
 
     def _fits(self, req, rows):
-        """Would `req` be admitted next to `rows` running rows? The rows'
-        reservations + the prompt cache's live bytes + `req` within the
-        budget: when only the cache is in the way, its LRU entries are
-        evicted, but not the one `req` would resume from (it waits for a
-        row to end instead of re-prefilling a cached prefix)."""
+        """Would `req` (the head of the queue) be admitted next to `rows`
+        running rows? The rows' reservations + the prompt cache's live bytes
+        + `req` within the budget: when only the cache is in the way, its LRU
+        entries are evicted, sparing the one `req` would resume from when
+        that is at least a full slab deep, and nothing when evicting all the
+        others would not admit it either. When that entry alone keeps `req`
+        out, `req` waits for a row to end only if the hit saves at least
+        QWEN_PROMPT_CACHE_KEEP_TOKENS and for at most
+        QWEN_PROMPT_CACHE_KEEP_WAIT_S (from the first time it blocked); else
+        the entry is evicted too and `req` admitted now."""
         if rows == 0:
             return True
         need = self._reserve(req)
         if rows >= self.max_batch or self.reserved + need > self.budget:
             return False
         pc = self.eng._pcache
+        live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
         if self.reserved + need + pc.bytes > self.budget:
-            keep, common = pc.closest(req.ids)
-            keep = keep if common >= PREFILL_MIN_STEP else None
+            keep, depth = (), 0
+            if PROMPT_CACHE and not req.images:
+                e, depth = pc.peek(req.ids, self._ends(req))
+                if e is not None and depth >= PREFILL_STEP:
+                    keep = (e,)
+
+            def blocked(floor):                 # out even with every other entry evicted
+                return (self.reserved + need + floor > self.budget
+                        or live - (pc.bytes - floor) + need + self.prefill_reserve > self.cap)
+            floor = pc.bytes_of(keep)
+            if keep and blocked(floor) and not blocked(0):
+                # only the entry it would resume from is in the way
+                now = time.time()
+                if req.keep_since is None:
+                    req.keep_since = now
+                waited = now - req.keep_since
+                if depth >= PROMPT_CACHE_KEEP_TOKENS and waited <= PROMPT_CACHE_KEEP_WAIT_S:
+                    return False                # worth waiting for a row to end
+                log.info("prompt cache: id=%s gives up its %d-token hit to be admitted (%s)",
+                         req.id, depth, f"waited {waited:.1f} s" if depth
+                         >= PROMPT_CACHE_KEEP_TOKENS else "under QWEN_PROMPT_CACHE_KEEP_TOKENS")
+                keep, floor = (), 0
+            if blocked(floor):
+                return False                    # it waits either way: evict nothing
             n = 0
             while self.reserved + need + pc.bytes > self.budget and pc.evict(keep):
                 n += 1
             if n:
                 log.info("prompt cache: %d entries evicted to admit id=%s (%.2f GiB left)",
                          n, req.id, pc.bytes / GIB)
-        if self.reserved + need + pc.bytes > self.budget:
-            return False
-        live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
+            live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
         return live + need + self.prefill_reserve <= self.cap
+
+    def _bounds(self, req):
+        """The prompt's slab ends (memoized on the request: _fits asks every
+        tick while it waits)."""
+        if req.bounds is None:
+            req.bounds = [] if req.images else _bounds(req.ids, self.eng._im_start)
+        return req.bounds
+
+    def _ends(self, req):
+        return set(self._bounds(req)) | {len(req.ids) - 1}
 
     def _admit(self):
         req = self.waiting[0]
@@ -2087,8 +2340,7 @@ class _Scheduler:
         tokens = self._tokens(req)
         row = _Row(req, tokens, self._bytes(tokens))
         self.reserved += row.reserved
-        req.t0 = time.time()
-        req.queue_ms = int((req.t0 - req.t_arrival) * 1000)
+        req.t0 = time.time()                    # reset when its prefill starts (_advance)
         try:
             row.sampler = make_sampler(req.sampling, seed=req.sampling.get("seed"))
             row.pen = _Penalties(req.sampling, req.ids, self.eng.vocab)
@@ -2115,6 +2367,13 @@ class _Scheduler:
         return not self.rows and (self.max_batch == 1 or not self.waiting)
 
     def _advance(self):
+        row = self.task_row
+        if not row.started:
+            # admitted is not started: with rows running, the first slab
+            # waits for decode's share (resume) like any other
+            row.started = True
+            row.req.t0 = time.time()
+            row.req.queue_ms = int((row.req.t0 - row.req.t_arrival) * 1000)
         try:
             next(self.task)
         except StopIteration:
@@ -2132,11 +2391,20 @@ class _Scheduler:
         req, eng, lm = row.req, self.eng, self.lm
         ids = req.ids
         use_cache = PROMPT_CACHE and not req.images
-        bounds = [] if req.images else _bounds(ids, eng._im_start)
-        ends = set(bounds) | {len(ids) - 1}
+        bounds = self._bounds(req)
+        ends = self._ends(req)
         parent, reused, split = eng._pcache.lookup(ids, ends) if use_cache else (None, 0, 0)
+        inherit = None
         if parent is not None:
-            cache = eng._pcache.restore(parent, reused)
+            # the first update's size: restore pre-sizes the buffer for it
+            left = len(ids) - 1 - reused
+            first = _slab(reused, left, set(bounds)) if left > 0 else 1
+            cache = eng._pcache.restore(parent, reused, first)
+            inherit = _Inherit(parent.cut(reused),
+                               {p: s for p, s in parent.ckpts.items() if p <= reused},
+                               parent.end if reused == len(parent.ids) else None,
+                               parent.quantized)
+            row.parent = parent                 # kept while this prefill runs (_regrow)
             input_ids = mx.array([ids[reused:]])
             # Text-only mRoPE continues from the cache offset with a zero
             # delta; a preceding vision request leaves its own delta here.
@@ -2171,26 +2439,49 @@ class _Scheduler:
             protect = {b for b in map(below, marks) if b is not None}
             # checkpoints only at slab ends
             keep = {b for b in map(below, want) if b is not None and b > reused}
+            start = self.kv["quantized_kv_start"]
+            if self.kv["kv_bits"] and end >= start:
+                # the entry will be quantized: nothing below the start is
+                # resumable from it (the unquantized entry there is)
+                keep = {b for b in keep if b >= start}
+                protect = {b for b in protect if b >= start}
 
         def checkpoint(pos, cache):
             if pos in keep:
                 ckpts[pos] = _recurrent_states(cache)
 
         def snapshot(cache):
-            if not use_cache or any(getattr(c, "keys", 1) is None for c in cache):
-                return
+            nonlocal inherit
+            row.parent = None
+            try:
+                if use_cache and all(getattr(c, "keys", 1) is not None for c in cache):
+                    store(cache)
+            finally:
+                # The caller's frame keeps this closure (a DFlash run: for its
+                # whole decode): let go of the parent's pieces and of the
+                # checkpoint states (the entry holds the ones it kept), so an
+                # eviction frees them at once.
+                inherit = None
+                ckpts.clear()
+
+        def store(cache):
             pc = eng._pcache
             try:
-                e, covered = pc.store(ids[:-1], cache, ckpts, parent, reused, ends, protect)
+                e, covered = pc.store(ids[:-1], cache, ckpts, inherit, reused, ends, protect,
+                                      limit=self.budget + self.prefill_reserve - self.reserved,
+                                      kv_start=self.kv["quantized_kv_start"])
             except Exception:  # noqa: BLE001 — the prefill succeeded: the request goes on uncached
                 log.exception("id=%s prompt cache store failed (the request goes on)", req.id)
                 return
-            # "MB total": live bytes, shared checkpoints once; gap: tokens the
-            # cache held but could not resume from (no checkpoint there)
+            if e is None:
+                return
+            # MB: the entry's buffers (shared ones included); "MB total": live
+            # bytes, every buffer once; gap: tokens the cache held but could
+            # not resume from (no checkpoint there); pieces: its KV chain
             log.info("id=%s prompt cache store: %d tokens, %d checkpoints, %.1f MB "
-                     "(%d entries, %.1f MB total) reused=%d gap=%d absorbed=%d", req.id,
-                     len(e.ids), len(e.ckpts), e.nbytes / 1e6, len(pc.entries), pc.bytes / 1e6,
-                     reused, split - reused, covered)
+                     "(%d entries, %.1f MB total) reused=%d gap=%d absorbed=%d pieces=%d",
+                     req.id, len(e.ids), len(e.ckpts), e.nbytes / 1e6, len(pc.entries),
+                     pc.bytes / 1e6, reused, split - reused, covered, len(e.chain))
 
         return input_ids, cache, reused, set(bounds), checkpoint, snapshot
 
@@ -2359,6 +2650,7 @@ class _Scheduler:
             if ctx.shape[1] > 0:
                 yield
         on_prefilled(cache)
+        on_ckpt = on_prefilled = None           # nothing of the prefill outlives it here
         out = lm(input_ids[:, -1:], cache=cache, capture_layer_ids=layers)
         hidden.append(mx.concatenate(out.hidden_states, axis=-1))
         hidden = mx.concatenate(hidden, axis=1)[:, -win:]
@@ -2490,6 +2782,7 @@ class _Scheduler:
         """The row's last event, with its stats snapshot taken here (the next
         admission may reset the peak before the handler reads it)."""
         row.done = True
+        row.parent = None
         self.reserved -= row.reserved
         req = row.req
         req.peak, req.active, req.pool = (mx.get_peak_memory(), mx.get_active_memory(),

@@ -333,7 +333,19 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   24 layers on the 9B) at slab ends forced onto `cuts`: every 2048 tokens,
   `<|im_start|>` boundaries (end of system block, last two messages) and the
   divergence point from the closest entry. Hit = deepest checkpoint ≤ longest
-  common prefix with any entry (`_copy_cache(upto=, states=)`). A checkpoint at p
+  common prefix with any entry. **Segments** (`_Seg`, since 2026-10-12): an
+  entry's KV is a chain of pieces `(seg, lo, hi)` over immutable per-FA-layer
+  buffers of its own; `store` copies only `[at, len)` out of the row (the parent's
+  pieces cover `[0, at)`; all of `[0, len)` when the row's prefill quantized an
+  fp16 parent's part) and never keeps a view of the row (its first decode write
+  stays in place; phase 1 pinned the whole buffer and the row COW-copied it);
+  `restore(e, at, first)` concatenates the pieces + a zeros tail of
+  round_up(first slab, 256) = the buffer the first `update_and_fetch` built from
+  the old `[:at]` view (bit-identical, tested). Bytes count every buffer once; a
+  segment dies with the last entry holding it. 16 siblings of an 8K prompt:
+  ~1.38 GB for all 16 by the plan's estimate (cascade_plan A.7; not yet measured —
+  phase 1 measured 6 kept in 3.18 GB); a chat keeps one chain (+ the
+  dead tail of each resumed turn, ≤ a slab + the reply opener). A checkpoint at p
   is valid for an entry only where p is a slab end of *that entry's* prompt (its
   KV over [0, p) was cut there). An older entry whose ids are a prefix of the new
   one (the previous turn) is absorbed at store: its checkpoints move over (shared
@@ -346,12 +358,26 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   ones too); strides and older turns' boundaries go first, closest pair's left.
   `QWEN_PROMPT_CACHE_GB` (3) is a soft cap (LRU at store, the newest stays, alone
   if over with a warning); the cache's live bytes (`_PrefixCache.bytes`: every
-  array once, shared checkpoints once) count against the batch budget in `_fits`
-  / `_regrow`, which evict LRU entries on demand (`_fits` keeps the entry the
-  waiting request shares ≥ `PREFILL_MIN_STEP` tokens with: it waits instead).
-  Eviction is safe mid-use (a restore holds its own views). A failed store is
+  buffer once) count against the batch budget: a store first sizes the new entry
+  (its segment from the row's shapes, `_Seg.estimate`, exact) and, if it alone is
+  over budget + prefill reserve − reserved, drops it before anything changes —
+  nothing absorbed, evicted or copied, logged "not kept", counted in `evictions`;
+  else it absorbs, evicts LRU entries down to that headroom, then copies `[at, len)`;
+  `_fits` evicts on demand but spares the entry `peek` says the request would resume
+  from when that is ≥ `QWEN_PREFILL_STEP` deep (memoized `req.bounds`), and evicts
+  nothing when even that would not admit it (budget or live check). When that entry
+  alone keeps the head out, the head waits for a row to end only for a hit ≥
+  `QWEN_PROMPT_CACHE_KEEP_TOKENS` (8192) and at most `QWEN_PROMPT_CACHE_KEEP_WAIT_S`
+  (10 s, from its first refusal: `req.keep_since`); then, or at once for a shallower
+  hit, the entry goes too (logged "gives up its N-token hit"). `_regrow` never evicts
+  the running prefill's parent (`row.parent`; the snapshot closure holds an
+  `_Inherit`, not the entry, and drops it and the checkpoint dict right after its
+  store — a DFlash run keeps the closure for its whole decode). Quantized entries keep
+  no checkpoint below `quantized_kv_start` (never resumable; `_Entry.low`). A
+  restore holds copies, so eviction frees memory at once, except the pieces an
+  in-flight prefill resumed from (its `_Inherit`, released at its store). A failed store is
   logged, the request goes on. Store log: `… MB (n entries, X MB total) reused=r
-  gap=split−reused absorbed=k`; `Usage.cached_tokens` = reused; Health has
+  gap=split−reused absorbed=k pieces=c`; `Usage.cached_tokens` = reused; Health has
   entries / bytes / hits / misses / evictions. Never trim with the library; never share mx.array
   *objects* between cache copies (`a[i] = v` rebinds the Python object in place
   — slice to get a new one, buffers are copy-on-write). On a hit set
@@ -413,7 +439,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   - `Usage.peak_gb` / log `peak=`: MLX peak since the batch was last empty, read by
     the scheduler when the request ends (= the process peak during the request
     when rows overlap). `Usage.queue_ms` / `batch_mean` / `cached_tokens` are
-    worker-side; the gateway returns `usage.prompt_tokens_details.cached_tokens`
+    worker-side (`queue_ms` = arrival → the first prefill slab, which waits for
+    decode's share after admission; the worker's `ttft_ms` counts from there,
+    `_advance`); the gateway returns `usage.prompt_tokens_details.cached_tokens`
     (always, 0 without a hit) and counts `qwen_gateway_cached_tokens_total`.
   - Tests: `cd src/worker && uv run --group dev pytest -q --ignore
     tests/test_mrqmm.py` (CPU, tiny random models, ~15 s; the scheduler's key
@@ -546,6 +574,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — whitespace-run cap in response_format answers |
 | `GATEWAY_OPENAI_DEFAULTS` / `GATEWAY_THINKING` / `GATEWAY_SERVED_MODEL_NAMES` / `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | unset / unset (`on`/`off` forces) / unset / `0` (= rest of context) — see README |
 | `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: LRU at store; counted live in the batch budget, evicted on demand) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
+| `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
 | `QWEN_MAX_BATCH` | worker | `16` — rows decoded together (`1` = serialized); Health reports it (1 when the budget holds < 2 typical rows) |
@@ -581,6 +610,13 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 - Aggregate tok/s through the gateway counts completion tokens over the level's wall
   time, prefill included; the worker log's `batch=`/`queue_ms=` join by
   `chatcmpl-<request_id>-<12 hex>` (the gateway's per-generation id).
+- Worker-side TTFT (`Usage.ttft_ms`, the `w_ttft_ms` columns of `bench_concurrency.py` /
+  `scripts/perf/final/pcache_tables.py`) counts from the start of prefill since Part A
+  of the segment store (2026-10-12; `queue_ms` + `ttft_ms` = arrival → first token).
+  Before it, `t0` was admission, so a request admitted behind another prefill had the
+  decode-share wait in `ttft_ms` (and not in `queue_ms`): `w_ttft_ms` columns from
+  before (e.g. `prompt_cache_bench.md`) are not comparable for such requests. The
+  gateway's `qwen_ttft_seconds` (its own clock) is unaffected.
 - The old (ca28690) baseline was taken on a drifting machine; "old → new" at c=1
   (22.5 → 31.9 tok/s) is mostly the machine. The honest batching gain is the
   serialized-vs-batched pair on the same code (`docs/perf/2026-10-12/final_bench.md`).

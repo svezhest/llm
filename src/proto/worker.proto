@@ -71,7 +71,10 @@ message Done  { string finish = 1; Usage usage = 2; repeated ToolCall tool_calls
 message Error { string kind = 1; string msg = 2; }
 message Usage {
   uint32 prompt_tokens = 1; uint32 gen_tokens = 2;
-  float tps = 3; uint32 ttft_ms = 4; float peak_gb = 5;
+  float tps = 3;
+  uint32 ttft_ms = 4;        // from the start of prefill (queue_ms is the wait before it):
+                             // queue_ms + ttft_ms = arrival to first token
+  float peak_gb = 5;
   uint32 reasoning_tokens = 6;
   uint32 queue_ms = 7;       // worker-side wait from arrival to the start of prefill
   float batch_mean = 8;      // mean number of rows in the decode steps this request took part in
@@ -82,7 +85,8 @@ message CancelReq { string id = 1; }
 // model: id of the loaded model (its weights dir name); model_path: what was loaded.
 // max_batch: how many generations the worker decodes concurrently (1 = serialized).
 // prompt_cache_*: the worker's prompt cache (QWEN_PROMPT_CACHE; all 0 when off):
-// entries and live bytes now, lookups that hit / missed and entries evicted since start.
+// entries and live bytes now, lookups that hit / missed and entries evicted since start
+// (a new entry not kept at store, over the batch's headroom, counts as an eviction).
 message HealthReply {
   bool ready = 1; string model = 2; uint32 load_ms = 3; string model_path = 4;
   uint32 max_batch = 5;

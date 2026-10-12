@@ -249,9 +249,24 @@ older prompt resumes at its deepest checkpoint instead. At most
 `QWEN_PROMPT_CACHE_CKPTS` (12) checkpoints per entry: the end of the system block
 and the last three message starts are never thinned. `QWEN_PROMPT_CACHE_GB` (3) is
 a soft cap: past it the least recently used entries go at store (the newest stays,
-alone if need be). The cache's live bytes count against the batch memory budget,
-and an admission or a growing row evicts LRU entries when only the cache is in the
-way (an admission keeps the entry it would resume from and waits instead). A
+alone if need be). Entries **share their KV**: an entry is a chain of immutable
+segments, a store copies only the tokens past its resume point out of the request's
+cache and reuses the older entry's segments for the rest, so 16 conversations over
+one 8K system prompt hold it once (~1.4 GB for all 16 on the 9B by the design
+estimate, not yet measured; every entry used to carry its own copy: 6 fit in 3.2 GB,
+measured); a hit concatenates the pieces once
+into the buffer its prefill would have built anyway (bit-identical). The cache's
+live bytes (every buffer once) count against the batch memory budget: a store
+evicts LRU entries down to what the running rows leave; a new entry that does not
+fit there even alone is not kept, and then the cache stays as it was (nothing
+absorbed, evicted or copied; counted as an eviction). An admission or a growing row
+evicts LRU entries when only the cache is in the way (an admission spares the entry
+it would resume from at least one slab deep, and evicts nothing when that would not
+get it in; a growing row never evicts the entry a running prefill resumed from).
+When that entry alone keeps the next request out, the request waits for a running
+row to end only if the hit saves at least `QWEN_PROMPT_CACHE_KEEP_TOKENS` (8192)
+tokens of prefill, and at most `QWEN_PROMPT_CACHE_KEEP_WAIT_S` (10 s); then (or at
+once for a shallower hit) the entry is evicted and the request starts cold. A
 failed store only logs; the request goes on. mlx-vlm's own trim is never used
 (broken for quantized KV tuples). Vision requests never touch the cache.
 
@@ -271,10 +286,12 @@ a cold prefill (±noise over 3 A/B runs). Through the gateway, 4.3K prompt: 9.4 
 past 5K): cold, `QWEN_PROMPT_CACHE=0`, exact repeat, next turn, same system
 prompt only. Logs: `prompt cache HIT n/m tokens reused (common
 prefix k)` / `MISS` / `store: n tokens, c checkpoints, MB (e entries, X MB total)
-reused=r gap=g absorbed=a` (gap: common-prefix tokens it could not resume from).
+reused=r gap=g absorbed=a pieces=p` (gap: common-prefix tokens it could not resume
+from; pieces: segments in its KV chain).
 Responses carry `usage.prompt_tokens_details.cached_tokens` (vLLM's field);
 the gateway counts `qwen_gateway_cached_tokens_total`; the worker's Health reports
-entries, live bytes, hits, misses and evictions (gateway debug log on change).
+entries, live bytes, hits, misses and evictions (a new entry not kept at store counts
+as one; gateway debug log on change).
 
 ## Context & memory
 
@@ -427,6 +444,7 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — cap on a whitespace run in a `response_format` answer |
 | `QWEN_PROMPT_CACHE` | worker | `0` (set `1`: multi-slot prefix cache with recurrent-state checkpoints) |
 | `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (LRU at store, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
+| `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — a request kept out only by the cache entry it would resume from waits for a running row to end only for a hit this deep, and only this long; else the entry is evicted and the request starts cold (8K tokens ≈ 14 s of 9B prefill, more than the wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `QWEN_MAX_BATCH` | worker | `16` — requests decoded together (continuous batching); `1` = one at a time, as before. Reported to the gateway (Health) as its in-flight limit |

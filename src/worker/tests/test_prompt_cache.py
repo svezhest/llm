@@ -9,7 +9,7 @@ import types
 import pytest
 
 import worker
-from conftest import IM_START, prompts, request, run, scheduler
+from conftest import IM_START, Cold, check_cold, prompts, request, run, scheduler
 
 # stand-ins for the chat template's tokens (anything but IM_START / EOS)
 A, NL, TH, NN, THC, IM_END = 11, 12, 13, 14, 15, 16
@@ -18,12 +18,16 @@ GEN = [IM_START, A, NL, TH, NL]          # <|im_start|>assistant\n<think>\n
 
 @pytest.fixture
 def small(monkeypatch):
-    """Cache on, slabs of 8 (message starts >= 4 apart cut too), a stride of 16."""
+    """Cache on, slabs of 8 (message starts >= 4 apart cut too), a stride of 16;
+    admission waits for any hit a slab deep, without a time bound (the
+    bounded wait has its own tests, on a fake clock)."""
     monkeypatch.setattr(worker, "PROMPT_CACHE", True)
     monkeypatch.setattr(worker, "PREFILL_STEP", 8)
     monkeypatch.setattr(worker, "PREFILL_MIN_STEP", 4)
     monkeypatch.setattr(worker, "PROMPT_CACHE_STRIDE", 16)
     monkeypatch.setattr(worker, "PROMPT_CACHE_CKPTS", 12)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_KEEP_TOKENS", 8)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_KEEP_WAIT_S", float("inf"))
 
 
 def cold(lm, ids, n, rid, **kw):
@@ -69,13 +73,16 @@ def test_turns_absorb_the_previous_entry(dense, small, caplog):
     caplog.set_level(logging.INFO, logger="qwen.worker")
     sched = scheduler(dense)
     pc = sched.eng._pcache
+    bits = Cold(dense)
     for i, ids in enumerate(convo):
         r = request(ids, 6, f"t{i}")
         assert run(sched, [r])[r.id] == ref[i]
         assert [e.ids for e in pc.entries] == [ids[:-1]]
         assert (r.reused > 0) == (i > 0)
+        assert check_cold(pc, bits)               # the entry, bit for bit (review finding 6)
     assert (pc.hits, pc.misses, pc.evictions) == (5, 1, 0)
-    stores = [RX_STORE.search(m) for m in caplog.messages if "prompt cache store" in m]
+    stores = [RX_STORE.search(m) for m in caplog.messages
+              if "prompt cache store" in m and "id=cold" not in m]
     assert len(stores) == 6 and all(stores)
     assert [int(m.group(9)) for m in stores] == [0, 1, 1, 1, 1, 1]          # absorbed
     assert all(int(m.group(8)) >= 0 for m in stores)                       # gap = split - reused
@@ -98,6 +105,7 @@ def test_repeat_of_an_absorbed_prompt(dense, small):
     run(sched, [request(p2, 4, "b")])
     (new,) = pc.entries
     assert L not in worker._bounds(p2, IM_START) and L not in new.ckpts
+    assert check_cold(pc, Cold(dense))           # token ids alone miss a wrong cut
     assert set(old.ckpts) <= set(new.ckpts)                    # its checkpoints moved over
     depth = max(p for p in old.ckpts if p in ends_of(p1))
     assert new.best(p1, ends_of(p1))[0] == depth
@@ -118,6 +126,7 @@ def test_repeat_of_an_absorbed_prompt(dense, small):
     run(sched, [request(q2, 4, "b")])
     (new,) = pc.entries
     assert len(q1) - 1 in new.ckpts
+    assert check_cold(pc, Cold(dense))
     assert new.best(q1, ends_of(q1))[0] == len(q1) - 1
     r = request(q1, 6, "c")
     assert run(sched, [r])["c"] == cold(dense, q1, 6, "c") and r.reused == len(q1) - 1
@@ -197,6 +206,7 @@ def test_quantized_floor_entry_survives(dense, small):
     assert r.reused == below(other, 17) and 0 < r.reused < 40
     # without the floor entry the quantized one could not serve it
     assert last.best(other, ends_of(other))[0] == 0
+    assert check_cold(pc, Cold(dense, **kw))
 
 
 def test_store_failure_does_not_fail_the_request(dense, small, monkeypatch):
@@ -291,8 +301,9 @@ def test_admission_evicts_the_cache_on_demand(dense, small):
 
 
 def test_admission_keeps_the_entry_it_would_resume_from(dense, small):
-    """When only the entry the waiting request would hit is left in the way,
-    it is not evicted: the request waits for the running row and then hits."""
+    """When the entry the waiting request would hit is in the way even alone,
+    it is not evicted, and neither are the others (that would not admit it):
+    the request waits for the running row and then hits."""
     sched = scheduler(dense)
     pc = sched.eng._pcache
     ws = fill(sched)
@@ -309,7 +320,8 @@ def test_admission_keeps_the_entry_it_would_resume_from(dense, small):
     got = run(sched, [a, b], arrive={3: [b]}, on_tick=squeeze)
     assert got == {"a": cold(dense, a_ids, 30, "a"), "b": cold(dense, b_ids, 6, "b")}
     assert max(rows) == 1                                        # b waited for a
-    assert pc.evictions >= 3 and b.reused > 0                    # the others went, it hit
+    assert pc.evictions == 0 and b.reused > 0                    # nothing went, it hit
+    assert target in pc.entries
 
 
 def test_growing_rows_evict_the_cache_before_cutting(dense, small, monkeypatch):

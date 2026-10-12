@@ -201,3 +201,58 @@ def prompts(n_list, seed=1):
         ids = [int(x) for x in mx.random.randint(10, 400, (n,)).tolist()]
         out.append(ids)
     return out
+
+
+# --- prompt cache: the bitwise "hit == cold" check (tests/test_segments.py) ----
+def view(caches):
+    """Every array cut to its cache's offset (restore pre-sizes a zeros tail)."""
+    out = []
+    for c in caches:
+        if hasattr(c, "cache"):
+            out += [a for a in c.cache if a is not None]
+            continue
+        for x in (c.keys, c.values):
+            out += [y[..., :c.offset, :] for y in (x if isinstance(x, (tuple, list)) else [x])]
+    return out
+
+
+def same(a, b):
+    """Two cache lists hold the same arrays, bit for bit."""
+    x, y = view(a), view(b)
+    return len(x) == len(y) and all(u.shape == v.shape and u.dtype == v.dtype
+                                    and mx.array_equal(u, v).item() for u, v in zip(x, y))
+
+
+def positions(e):
+    """Every position best() can return for prompt-cache entry e."""
+    tops = [*e.ckpts] + ([len(e.ids)] if e.end is not None else [])
+    return sorted(p for p in tops if p >= e.low)
+
+
+class Cold:
+    """The entry a fresh worker stores for ids[:p] (= prompt ids[:p] + [x]),
+    restored at its end: the cold prefill's caches at p. Memoized."""
+
+    def __init__(self, lm, **kw):
+        self.lm, self.kw, self.memo = lm, kw, {}
+
+    def __call__(self, ids):
+        key = tuple(ids)
+        if key not in self.memo:
+            sched = scheduler(self.lm, max_batch=1, **self.kw)
+            run(sched, [request(list(ids) + [1], 1, "cold")])
+            (e,) = sched.eng._pcache.entries
+            assert e.ids == list(ids)
+            self.memo[key] = sched.eng._pcache.restore(e, len(ids))
+        return self.memo[key]
+
+
+def check_cold(pc, ref):
+    """Restore of every entry at every resumable position == the cold
+    prefill of its ids up to there -> number of positions checked."""
+    n = 0
+    for e in pc.entries:
+        for p in positions(e):
+            assert same(pc.restore(e, p), ref(e.ids[:p])), (len(e.ids), p)
+            n += 1
+    return n
