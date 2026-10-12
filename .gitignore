@@ -28,3 +28,6 @@ deploy/**/data/
 
 # Model weights (large; kept out of git)
 weights/
+
+# perf raw worker logs are evidence, keep them
+!docs/perf/**/*.log

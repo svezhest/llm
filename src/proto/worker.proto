@@ -73,11 +73,17 @@ message Usage {
   uint32 prompt_tokens = 1; uint32 gen_tokens = 2;
   float tps = 3; uint32 ttft_ms = 4; float peak_gb = 5;
   uint32 reasoning_tokens = 6;
+  uint32 queue_ms = 7;       // worker-side wait from arrival to the start of prefill
+  float batch_mean = 8;      // mean number of rows in the decode steps this request took part in
 }
 
 message CancelReq { string id = 1; }
 // model: id of the loaded model (its weights dir name); model_path: what was loaded.
-message HealthReply { bool ready = 1; string model = 2; uint32 load_ms = 3; string model_path = 4; }
+// max_batch: how many generations the worker decodes concurrently (1 = serialized).
+message HealthReply {
+  bool ready = 1; string model = 2; uint32 load_ms = 3; string model_path = 4;
+  uint32 max_batch = 5;
+}
 // error empty = ok; internal: the worker failed (500), else the request is bad (400)
 message CheckReply { string error = 1; string model = 2; bool internal = 3; }
 message Ack {}

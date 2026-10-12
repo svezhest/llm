@@ -216,6 +216,22 @@ pub fn check_fields(body: &Map<String, Value>) -> Result<(), BadRequest> {
     Ok(())
 }
 
+/// List caps (vLLM has none; these bound the per-request setup the worker does before
+/// generating — a stop string is matched on every chunk, a bad word is tokenized
+/// twice, an allowed-ids list becomes a vocab mask). allowed_token_ids: 2^18 covers a
+/// whole 248K vocab.
+pub const MAX_STOP: usize = 64;
+pub const MAX_STOP_TOKEN_IDS: usize = 1024;
+pub const MAX_BAD_WORDS: usize = 1024;
+pub const MAX_ALLOWED_TOKEN_IDS: usize = 1 << 18;
+
+fn cap<T>(name: &'static str, v: &[T], max: usize) -> Result<(), BadRequest> {
+    if v.len() > max {
+        return bad(format!("{name} must contain at most {max} items, got {}.", v.len()), name);
+    }
+    Ok(())
+}
+
 /// vLLM's SamplingParams._verify_args and request validators, same messages.
 pub fn validate(r: &ChatRequest) -> Result<(), BadRequest> {
     match r.n {
@@ -286,8 +302,15 @@ pub fn validate(r: &ChatRequest) -> Result<(), BadRequest> {
             }
         }
     }
-    if r.stop_token_ids.iter().flatten().chain(r.allowed_token_ids.iter().flatten()).any(|&t| t < 0) {
-        return bad("token ids must be non-negative", "stop_token_ids");
+    cap("stop", &r.stop, MAX_STOP)?;
+    cap("stop_token_ids", r.stop_token_ids.as_deref().unwrap_or_default(), MAX_STOP_TOKEN_IDS)?;
+    cap("allowed_token_ids", r.allowed_token_ids.as_deref().unwrap_or_default(), MAX_ALLOWED_TOKEN_IDS)?;
+    cap("bad_words", r.bad_words.as_deref().unwrap_or_default(), MAX_BAD_WORDS)?;
+    // ids travel as uint32; whether one is in the vocab is the worker's call
+    for (name, ids) in [("stop_token_ids", &r.stop_token_ids), ("allowed_token_ids", &r.allowed_token_ids)] {
+        if let Some(t) = ids.iter().flatten().find(|&&t| u32::try_from(t).is_err()) {
+            return bad(format!("{name} contains an invalid token id: {t}."), name);
+        }
     }
     if r.allowed_token_ids.as_ref().is_some_and(Vec::is_empty) {
         return bad("allowed_token_ids is not allowed to be empty.", "allowed_token_ids");
@@ -477,9 +500,14 @@ fn openai_defaults() -> bool {
 }
 
 /// The template kwargs vLLM would render with: the request's chat_template_kwargs,
-/// `reasoning_effort` (also enable_thinking = effort != "none" unless set), this
-/// gateway's top-level `enable_thinking`, then GATEWAY_THINKING over all of them.
+/// `reasoning_effort` over them (also enable_thinking = effort != "none" unless
+/// chat_template_kwargs set it), this gateway's top-level `enable_thinking` over both,
+/// then GATEWAY_THINKING over all of them.
 fn template_kwargs(r: &ChatRequest, id: &str) -> Map<String, Value> {
+    template_kwargs_with(r, id, forced_thinking())
+}
+
+fn template_kwargs_with(r: &ChatRequest, id: &str, forced: Option<bool>) -> Map<String, Value> {
     let mut kw = r.chat_template_kwargs.clone().unwrap_or_default();
     // vLLM merges its own add_generation_prompt / continue_final_message over these
     // (merge_kwargs: the request fields win); they travel as Params fields here
@@ -495,9 +523,9 @@ fn template_kwargs(r: &ChatRequest, id: &str) -> Map<String, Value> {
         }
     }
     if let Some(t) = r.enable_thinking {
-        kw.entry("enable_thinking").or_insert(json!(t));
+        kw.insert("enable_thinking".into(), json!(t));
     }
-    if let Some(f) = forced_thinking() {
+    if let Some(f) = forced {
         if let Some(asked) = kw.get("enable_thinking").and_then(Value::as_bool) {
             if asked != f {
                 info!(id, asked, forced = f, "GATEWAY_THINKING overrides the request's enable_thinking");
@@ -542,7 +570,7 @@ pub fn to_pb(id: &str, r: &ChatRequest) -> Result<pb::Request, BadRequest> {
     };
     let kwargs = template_kwargs(r, id);
     let budget = match (r.thinking_token_budget, r.thinking_budget) {
-        (Some(b), _) if b >= 0 => Some(b as u32),
+        (Some(b), _) if b >= 0 => Some(b.min(u32::MAX as i64) as u32),
         (Some(_), _) => None,                  // -1 = unlimited
         (None, Some(b)) if b > 0 => Some(b),
         _ => None,
@@ -564,7 +592,7 @@ pub fn to_pb(id: &str, r: &ChatRequest) -> Result<pb::Request, BadRequest> {
             parallel_tool_calls: r.parallel_tool_calls,
             temperature: d(r.temperature, 1.0),
             top_p: d(r.top_p, 1.0),
-            top_k: r.top_k.map(|k| k.max(0) as u32).or(openai.then_some(0)),
+            top_k: r.top_k.map(|k| k.clamp(0, u32::MAX as i64) as u32).or(openai.then_some(0)),
             min_p: d(r.min_p, 0.0),
             presence_penalty: d(r.presence_penalty, 0.0),
             frequency_penalty: d(r.frequency_penalty, 0.0),
@@ -572,7 +600,8 @@ pub fn to_pb(id: &str, r: &ChatRequest) -> Result<pb::Request, BadRequest> {
             response_format_json: response_format_json(r.response_format.as_ref())?,
             chat_template_kwargs_json: if kwargs.is_empty() { String::new() }
                                        else { Value::Object(kwargs).to_string() },
-            min_tokens: r.min_tokens.unwrap_or(0) as u32,
+            min_tokens: r.min_tokens.unwrap_or(0).clamp(0, u32::MAX as i64) as u32,
+            // in range (validate)
             stop_token_ids: r.stop_token_ids.iter().flatten().map(|&t| t as u32).collect(),
             ignore_eos: r.ignore_eos,
             bad_words: r.bad_words.clone().unwrap_or_default(),
@@ -661,11 +690,83 @@ mod tests {
     #[test]
     fn thinking_kwargs() {
         let r = req(json!({"reasoning_effort": "none"})).ok().unwrap();
-        assert_eq!(template_kwargs(&r, "x").get("enable_thinking"), Some(&json!(false)));
+        assert_eq!(template_kwargs_with(&r, "x", None).get("enable_thinking"), Some(&json!(false)));
         let r = req(json!({"reasoning_effort": "high",
                            "chat_template_kwargs": {"enable_thinking": false}})).ok().unwrap();
-        assert_eq!(template_kwargs(&r, "x").get("enable_thinking"), Some(&json!(false)));
+        assert_eq!(template_kwargs_with(&r, "x", None).get("enable_thinking"), Some(&json!(false)));
         let r = req(json!({})).ok().unwrap();
-        assert!(template_kwargs(&r, "x").is_empty());
+        assert!(template_kwargs_with(&r, "x", None).is_empty());
+    }
+
+    fn thinking(extra: Value) -> Option<Value> {
+        let r = req(extra).ok().unwrap();
+        template_kwargs_with(&r, "x", None).get("enable_thinking").cloned()
+    }
+
+    #[test]
+    fn thinking_precedence() {
+        assert_eq!(thinking(json!({"chat_template_kwargs": {"enable_thinking": true}})), Some(json!(true)));
+        // reasoning_effort derives enable_thinking only when chat_template_kwargs has none
+        assert_eq!(thinking(json!({"reasoning_effort": "high"})), Some(json!(true)));
+        assert_eq!(thinking(json!({"reasoning_effort": "none",
+                                   "chat_template_kwargs": {"enable_thinking": true}})), Some(json!(true)));
+        // the top-level field beats both (review finding #3)
+        assert_eq!(thinking(json!({"reasoning_effort": "high", "enable_thinking": false})), Some(json!(false)));
+        assert_eq!(thinking(json!({"reasoning_effort": "none", "enable_thinking": true})), Some(json!(true)));
+        assert_eq!(thinking(json!({"chat_template_kwargs": {"enable_thinking": true},
+                                   "enable_thinking": false})), Some(json!(false)));
+        assert_eq!(thinking(json!({"chat_template_kwargs": {"enable_thinking": false},
+                                   "reasoning_effort": "high", "enable_thinking": true})), Some(json!(true)));
+        // reasoning_effort itself is passed to the template, over chat_template_kwargs' copy
+        let r = req(json!({"reasoning_effort": "low",
+                           "chat_template_kwargs": {"reasoning_effort": "high"}})).ok().unwrap();
+        assert_eq!(template_kwargs_with(&r, "x", None).get("reasoning_effort"), Some(&json!("low")));
+        // GATEWAY_THINKING beats everything
+        let r = req(json!({"chat_template_kwargs": {"enable_thinking": true},
+                           "reasoning_effort": "high", "enable_thinking": true})).ok().unwrap();
+        assert_eq!(template_kwargs_with(&r, "x", Some(false)).get("enable_thinking"), Some(&json!(false)));
+        let r = req(json!({"reasoning_effort": "none"})).ok().unwrap();
+        assert_eq!(template_kwargs_with(&r, "x", Some(true)).get("enable_thinking"), Some(&json!(true)));
+        let r = req(json!({})).ok().unwrap();
+        assert_eq!(template_kwargs_with(&r, "x", Some(true)).get("enable_thinking"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn list_caps_and_token_ids() {
+        let n = |k: usize| (0..k as i64).collect::<Vec<_>>();
+        let w = |k: usize| (0..k).map(|i| format!("w{i}")).collect::<Vec<_>>();
+        for good in [
+            json!({"stop": w(MAX_STOP)}), json!({"stop": "x"}),
+            json!({"stop_token_ids": n(MAX_STOP_TOKEN_IDS)}),
+            json!({"allowed_token_ids": n(MAX_ALLOWED_TOKEN_IDS)}),
+            json!({"bad_words": w(MAX_BAD_WORDS)}),
+            json!({"stop_token_ids": [0, 248319, u32::MAX]}),
+            json!({"allowed_token_ids": [u32::MAX]}),
+        ] {
+            assert!(req(good.clone()).is_ok(), "{}", &good.to_string()[..60.min(good.to_string().len())]);
+        }
+        for (bad, param) in [
+            (json!({"stop": w(MAX_STOP + 1)}), "stop"),
+            (json!({"stop_token_ids": n(MAX_STOP_TOKEN_IDS + 1)}), "stop_token_ids"),
+            (json!({"allowed_token_ids": n(MAX_ALLOWED_TOKEN_IDS + 1)}), "allowed_token_ids"),
+            (json!({"bad_words": w(MAX_BAD_WORDS + 1)}), "bad_words"),
+            (json!({"stop_token_ids": [1, -1]}), "stop_token_ids"),
+            (json!({"stop_token_ids": [u32::MAX as i64 + 1]}), "stop_token_ids"),
+            (json!({"allowed_token_ids": [4294967296i64 + 5]}), "allowed_token_ids"),
+            (json!({"allowed_token_ids": [-3]}), "allowed_token_ids"),
+        ] {
+            let mut body = json!({"messages": [{"role": "user", "content": "hi"}]});
+            body.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
+            let r: ChatRequest = serde_json::from_value(body).unwrap();
+            let e = validate(&r).err().unwrap_or_else(|| panic!("{param} passed"));
+            assert_eq!(e.param, Some(param), "{}", e.msg);
+        }
+        // in-range ids reach the worker unchanged; oversized ints are clamped, not wrapped
+        let r = req(json!({"stop_token_ids": [u32::MAX], "top_k": 4294967301i64,
+                           "min_tokens": 4294967301i64})).ok().unwrap();
+        let p = to_pb("x", &r).ok().unwrap().params.unwrap();
+        assert_eq!(p.stop_token_ids, vec![u32::MAX]);
+        assert_eq!(p.top_k, Some(u32::MAX));
+        assert_eq!(p.min_tokens, u32::MAX);
     }
 }

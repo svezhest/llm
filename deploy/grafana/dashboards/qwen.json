@@ -12,9 +12,12 @@
       "targets": [{ "expr": "qwen_worker_up", "refId": "A" }]
     },
     {
-      "type": "stat", "title": "In flight", "id": 2,
+      "type": "stat", "title": "In flight / capacity", "id": 2,
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
-      "targets": [{ "expr": "qwen_in_flight", "refId": "A" }]
+      "targets": [
+        { "expr": "qwen_in_flight", "refId": "A", "legendFormat": "in flight" },
+        { "expr": "qwen_inflight_capacity", "refId": "B", "legendFormat": "capacity" }
+      ]
     },
     {
       "type": "stat", "title": "Queue depth", "id": 3,
@@ -66,6 +69,24 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
       "targets": [{ "expr": "{job=\"qwen\"}", "refId": "A" }]
+    },
+    {
+      "type": "timeseries", "title": "Queue wait p50/p95 (s): gateway slot / worker", "id": 11,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(qwen_gateway_queue_seconds_bucket[5m])) by (le))", "refId": "A", "legendFormat": "gateway p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(qwen_gateway_queue_seconds_bucket[5m])) by (le))", "refId": "B", "legendFormat": "gateway p95" },
+        { "expr": "histogram_quantile(0.5, sum(rate(qwen_worker_queue_seconds_bucket[5m])) by (le))", "refId": "C", "legendFormat": "worker p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(qwen_worker_queue_seconds_bucket[5m])) by (le))", "refId": "D", "legendFormat": "worker p95" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Decode batch size (mean per request)", "id": 12,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "targets": [
+        { "expr": "sum(rate(qwen_batch_mean_sum[5m])) / sum(rate(qwen_batch_mean_count[5m]))", "refId": "A", "legendFormat": "mean" },
+        { "expr": "qwen_in_flight", "refId": "B", "legendFormat": "in flight" }
+      ]
     }
   ]
 }
