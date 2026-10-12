@@ -1,0 +1,1 @@
+mlx 0.32.3 mlx-vlm 0.7.6 qwen38-27b-mlx-5bit: 3400 tokens, 3400 scored, prefill+score 33.3 s, peak 24.7 GB -> <scratchpad>/bump/gpu/new/kl27.npz

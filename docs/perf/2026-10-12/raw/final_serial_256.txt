@@ -1,0 +1,45 @@
+model=ornith15-9b-mlx-8bit calibration: 877 prompt tokens for 1800 filler chars -> 2.31 chars/token, filler 1159 chars
+cooldown 30s before c=1
+probe before c=1: decode 38.6 tok/s, ttft 1.36s
+rep 0 c=1: 8 req, wall 64.3s, agg 31.8 tok/s, ttft mean 1.23s, errors 0
+cooldown 30s before c=2
+probe before c=2: decode 38.6 tok/s, ttft 1.38s
+rep 0 c=2: 8 req, wall 65.0s, agg 31.5 tok/s, ttft mean 8.35s, errors 0
+cooldown 30s before c=4
+probe before c=4: decode 38.4 tok/s, ttft 1.40s
+rep 0 c=4: 8 req, wall 64.4s, agg 31.8 tok/s, ttft mean 19.34s, errors 0
+cooldown 30s before c=8
+probe before c=8: decode 38.4 tok/s, ttft 1.38s
+rep 0 c=8: 16 req, wall 128.8s, agg 31.8 tok/s, ttft mean 43.46s, errors 0
+cooldown 30s before c=8
+probe before c=8: decode 38.5 tok/s, ttft 1.38s
+rep 1 c=8: 16 req, wall 129.0s, agg 31.8 tok/s, ttft mean 43.51s, errors 0
+cooldown 30s before c=4
+probe before c=4: decode 38.5 tok/s, ttft 1.38s
+rep 1 c=4: 8 req, wall 66.1s, agg 31.0 tok/s, ttft mean 20.06s, errors 0
+cooldown 30s before c=2
+probe before c=2: decode 38.4 tok/s, ttft 1.38s
+rep 1 c=2: 8 req, wall 64.6s, agg 31.7 tok/s, ttft mean 8.33s, errors 0
+cooldown 30s before c=1
+probe before c=1: decode 38.5 tok/s, ttft 1.38s
+rep 1 c=1: 8 req, wall 64.2s, agg 31.9 tok/s, ttft mean 1.22s, errors 0
+
+wrote <scratchpad>/results/final_serial_256.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 1 | 8 | 608 | 64.3 | 31.8 | 1.23 | 1.24 | 8.04 | 8.07 | 37.6 | 38.6 | 10.40 |
+| 0 | 2 | 8 | 621 | 65.0 | 31.5 | 8.35 | 9.51 | 15.22 | 16.45 | 37.3 | 38.6 | 10.42 |
+| 0 | 4 | 8 | 621 | 64.4 | 31.8 | 19.34 | 25.38 | 26.16 | 32.21 | 37.6 | 38.4 | 10.43 |
+| 0 | 8 | 16 | 620 | 128.8 | 31.8 | 43.46 | 57.61 | 50.28 | 64.45 | 37.6 | 38.4 | 10.42 |
+| 1 | 8 | 16 | 622 | 129.0 | 31.8 | 43.51 | 57.70 | 50.33 | 64.55 | 37.5 | 38.5 | 10.42 |
+| 1 | 4 | 8 | 620 | 66.1 | 31.0 | 20.06 | 26.46 | 26.91 | 33.31 | 37.4 | 38.5 | 10.42 |
+| 1 | 2 | 8 | 620 | 64.6 | 31.7 | 8.33 | 9.48 | 15.14 | 16.29 | 37.5 | 38.4 | 10.42 |
+| 1 | 1 | 8 | 621 | 64.2 | 31.9 | 1.22 | 1.24 | 8.03 | 8.04 | 37.6 | 38.5 | 10.41 |
+
+| conc | reps | agg tok/s mean (min-max) | agg / probe | TTFT mean s | lat mean s | decode tok/s/req |
+|---|---|---|---|---|---|---|
+| 1 | 2 | 31.9 (31.8-31.9) | 0.83 | 1.23 | 8.04 | 37.6 |
+| 2 | 2 | 31.6 (31.5-31.7) | 0.82 | 8.34 | 15.18 | 37.4 |
+| 4 | 2 | 31.4 (31.0-31.8) | 0.82 | 19.70 | 26.53 | 37.5 |
+| 8 | 2 | 31.8 (31.8-31.8) | 0.83 | 43.49 | 50.30 | 37.5 |

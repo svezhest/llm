@@ -1,0 +1,4 @@
+q 2048 x kv 32768: default 174.8 ms, fused 186.1 ms, x1.06
+q 1024 x kv 65536: default 271.1 ms, fused 160.5 ms, x0.59
+q 512 x kv 65536: default 125.5 ms, fused 82.2 ms, x0.66
+q 512 x kv 120000: default 227.4 ms, fused 163.3 ms, x0.72

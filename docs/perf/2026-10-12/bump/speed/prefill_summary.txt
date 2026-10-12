@@ -1,0 +1,23 @@
+old 8192 r1: prefill+score 19.9 s, peak 20.1 GB
+f1 8192 r1: prefill+score 19.9 s, peak 17.9 GB
+f0 8192 r1: prefill+score 19.7 s, peak 17.9 GB
+g1 8192 r1: prefill+score 19.3 s, peak 17.9 GB
+old 32768 r1: prefill+score 83.4 s, peak 24.3 GB
+f1 32768 r1: prefill+score 85.8 s, peak 22.4 GB
+f0 32768 r1: prefill+score 88.7 s, peak 22.2 GB
+g1 32768 r1: prefill+score 88.8 s, peak 22.4 GB
+old 65536 r1: prefill+score 205.8 s, peak 20.8 GB
+f1 65536 r1: prefill+score 210.0 s, peak 17.3 GB
+f0 65536 r1: prefill+score 208.8 s, peak 18.6 GB
+g1 8192 r2: prefill+score 19.9 s, peak 17.9 GB
+f0 8192 r2: prefill+score 20.6 s, peak 17.9 GB
+f1 8192 r2: prefill+score 20.6 s, peak 17.9 GB
+old 8192 r2: prefill+score 20.6 s, peak 20.1 GB
+g1 32768 r2: prefill+score 90.0 s, peak 22.4 GB
+f0 32768 r2: prefill+score 92.6 s, peak 22.2 GB
+f1 32768 r2: prefill+score 91.3 s, peak 22.4 GB
+old 32768 r2: prefill+score 91.2 s, peak 24.3 GB
+f0 65536 r2: prefill+score 206.5 s, peak 18.6 GB
+f1 65536 r2: prefill+score 211.2 s, peak 17.3 GB
+old 65536 r2: prefill+score 206.0 s, peak 20.8 GB
+PREFILL DONE

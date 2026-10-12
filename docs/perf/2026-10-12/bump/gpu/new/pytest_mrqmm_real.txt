@@ -1,0 +1,2 @@
+SKIPPED [1] tests/test_mrqmm.py:263: mlx-vlm >= 0.7 has no fused GDN in-projection
+137 passed, 1 skipped, 2 warnings in 2.30s

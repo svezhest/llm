@@ -1,0 +1,11 @@
+wall 44.1s, aggregate 34.2 tok/s, 8 requests
+  j0     finish=stop tok=124 ttft=44.087s tps=33.05 queue_ms=40221 batch=1.0 peak=13.09 err=None
+  j1     finish=stop tok=47 ttft=38.9s tps=33.15 queue_ms=38684 batch=1.0 peak=13.09 err=None
+  j2     finish=length tok=500 ttft=23.651s tps=33.04 queue_ms=23445 batch=1.0 peak=13.09 err=None
+  j3     finish=stop tok=38 ttft=22.445s tps=32.83 queue_ms=22175 batch=1.0 peak=13.09 err=None
+  p0     finish=length tok=200 ttft=16.844s tps=37.29 queue_ms=16623 batch=1.0 peak=13.13 err=None
+  p1     finish=length tok=200 ttft=11.301s tps=37.33 queue_ms=11081 batch=1.0 peak=13.1 err=None
+  p2     finish=length tok=200 ttft=5.758s tps=37.33 queue_ms=5540 batch=1.0 peak=13.09 err=None
+  p3     finish=length tok=200 ttft=0.216s tps=37.33 queue_ms=3 batch=1.0 peak=13.11 err=None
+  invalid JSON: {"name": "Aliens", "year": 1986, "tags": ["science fiction", "action", "horror", "space opera", "post-apocalyptic", "military sci-fi", "space marine", "mother ship", "space colony", "space station", "
+FAIL

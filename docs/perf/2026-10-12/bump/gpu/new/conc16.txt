@@ -1,0 +1,18 @@
+wall 17.1s, aggregate 238.9 tok/s, 16 requests
+  p0     finish=length tok=256 ttft=2.727s tps=17.69 queue_ms=448 batch=16.0 peak=11.7 err=None
+  p1     finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=280 batch=16.0 peak=11.7 err=None
+  p10    finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=1572 batch=16.0 peak=11.7 err=None
+  p11    finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=1740 batch=16.0 peak=11.7 err=None
+  p12    finish=length tok=256 ttft=2.725s tps=17.69 queue_ms=1908 batch=16.0 peak=11.7 err=None
+  p13    finish=length tok=256 ttft=2.725s tps=17.69 queue_ms=2077 batch=16.0 peak=11.7 err=None
+  p14    finish=length tok=256 ttft=2.725s tps=17.68 queue_ms=2333 batch=16.0 peak=11.7 err=None
+  p15    finish=length tok=256 ttft=2.725s tps=17.69 queue_ms=2167 batch=16.0 peak=11.7 err=None
+  p2     finish=length tok=256 ttft=2.726s tps=17.68 queue_ms=790 batch=16.0 peak=11.7 err=None
+  p3     finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=1135 batch=16.0 peak=11.7 err=None
+  p4     finish=length tok=256 ttft=2.727s tps=17.69 queue_ms=182 batch=16.0 peak=11.7 err=None
+  p5     finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=620 batch=16.0 peak=11.7 err=None
+  p6     finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=7 batch=16.0 peak=11.7 err=None
+  p7     finish=length tok=256 ttft=2.726s tps=17.68 queue_ms=961 batch=16.0 peak=11.7 err=None
+  p8     finish=length tok=256 ttft=2.726s tps=17.69 queue_ms=1309 batch=16.0 peak=11.7 err=None
+  p9     finish=length tok=256 ttft=2.725s tps=17.69 queue_ms=1479 batch=16.0 peak=11.7 err=None
+identical to solo: 14/16; first divergence (chars) [386, 409]

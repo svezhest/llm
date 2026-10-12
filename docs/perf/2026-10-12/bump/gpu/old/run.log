@@ -1,0 +1,76 @@
++<scratchpad>/bump/run_old.sh:14> <scratchpad>/bump/sw.sh <scratchpad>/bump/gpu/old/w9.log old 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' 'QWEN_MAX_BATCH=1'
+worker pid 88126 nice  0
+2026-10-12 05:29:17,971 INFO  qwen.worker batching: max_batch 1, KV budget 13.78 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 05:29:17,974 INFO  qwen.worker model loaded in 4018 ms
++<scratchpad>/bump/run_old.sh:15> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py corpus --out <scratchpad>/bump/gpu/old/corpus9.json
++<scratchpad>/bump/run_old.sh:15> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py seq --n 16 --max-tokens 256 --out <scratchpad>/bump/gpu/old/seq16.json
++<scratchpad>/bump/run_old.sh:16> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py think
++<scratchpad>/bump/run_old.sh:17> s=stops
++<scratchpad>/bump/run_old.sh:17> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py stops
++<scratchpad>/bump/run_old.sh:17> s=mixedmax
++<scratchpad>/bump/run_old.sh:17> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py mixedmax
++<scratchpad>/bump/run_old.sh:17> s=grammar
++<scratchpad>/bump/run_old.sh:17> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py grammar
++<scratchpad>/bump/run_old.sh:18> stop
++stop:0> pkill -f 'worker.py --addr 127.0.0.1:50051'
++stop:0> sleep 6
++<scratchpad>/bump/run_old.sh:19> <scratchpad>/bump/sw.sh <scratchpad>/bump/gpu/old/w9p.log old 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' 'QWEN_PROMPT_CACHE=1'
+worker pid 88806 nice  0
+2026-10-12 05:35:05,419 INFO  qwen.worker batching: max_batch 16, KV budget 10.73 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new token
+2026-10-12 05:35:05,422 INFO  qwen.worker model loaded in 2876 ms
++<scratchpad>/bump/run_old.sh:20> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py pcache
++<scratchpad>/bump/run_old.sh:21> stop
++stop:0> pkill -f 'worker.py --addr 127.0.0.1:50051'
++stop:0> sleep 6
++<scratchpad>/bump/run_old.sh:22> <scratchpad>/bump/sw.sh <scratchpad>/bump/gpu/old/w10.log old 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith10-9b-mlx-8bit' 'QWEN_KV_BITS=0'
+worker pid 88903 nice  0
+2026-10-12 05:35:40,294 INFO  qwen.worker batching: max_batch 16, KV budget 14.85 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new token
+2026-10-12 05:35:40,296 INFO  qwen.worker model loaded in 4200 ms
++<scratchpad>/bump/run_old.sh:23> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/vision_test.py ref --out <scratchpad>/bump/gpu/old/vision.json
++<scratchpad>/bump/run_old.sh:24> stop
++stop:0> pkill -f 'worker.py --addr 127.0.0.1:50051'
++stop:0> sleep 6
++<scratchpad>/bump/run_old.sh:25> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/agree.py
++<scratchpad>/bump/run_old.sh:26> <scratchpad>/bump/sw.sh <scratchpad>/bump/gpu/old/w9d.log old 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' 'QWEN_MAX_BATCH=1' 'QWEN_DRAFT=/Users/user/Projects/llm/weights/qwen35-9b-dflash'
+worker pid 89058 nice  0
+2026-10-12 05:38:23,779 INFO  qwen.worker batching: max_batch 1, KV budget 13.10 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 05:38:23,812 INFO  qwen.worker model loaded in 4021 ms
++<scratchpad>/bump/run_old.sh:27> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py corpus --out <scratchpad>/bump/gpu/old/corpus9_dflash.json
++<scratchpad>/bump/run_old.sh:28> stop
++stop:0> pkill -f 'worker.py --addr 127.0.0.1:50051'
++stop:0> sleep 6
++<scratchpad>/bump/run_old.sh:29> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/bump/gpu/stack_kl.py dump --out <scratchpad>/bump/gpu/old/kl9.npz
+no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+mlx 0.31.2 mlx-vlm 0.6.2 ornith15-9b-mlx-8bit: 3400 tokens, 3400 scored, prefill+score 21.4 s, peak 30.9 GB -> <scratchpad>/bump/gpu/old/kl9.npz
++<scratchpad>/bump/run_old.sh:30> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/bump/gpu/stack_kl.py dump --len 32768 --score-from 32000 --out <scratchpad>/bump/gpu/old/kl9_32k.npz
+no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+mlx 0.31.2 mlx-vlm 0.6.2 ornith15-9b-mlx-8bit: 32768 tokens, 768 scored, prefill+score 77.0 s, peak 24.3 GB -> <scratchpad>/bump/gpu/old/kl9_32k.npz
++<scratchpad>/bump/run_old.sh:31> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit' 'QWEN_KV_BITS=0' env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/bump/gpu/stack_kl.py dump --len 65536 --score-from 65000 --out <scratchpad>/bump/gpu/old/kl9_64k.npz
+no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+mlx 0.31.2 mlx-vlm 0.6.2 ornith15-9b-mlx-8bit: 65536 tokens, 536 scored, prefill+score 186.0 s, peak 20.8 GB -> <scratchpad>/bump/gpu/old/kl9_64k.npz
++<scratchpad>/bump/run_old.sh:32> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/qwen36-35b-a3b-mlx-ud3' 'QWEN_KV_BITS=4' 'QWEN_WIRED_LIMIT_GB=27' 'QWEN_PREFILL_STEP=512' env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/bump/gpu/stack_kl.py dump --out <scratchpad>/bump/gpu/old/kl35.npz
+mlx 0.31.2 mlx-vlm 0.6.2 qwen36-35b-a3b-mlx-ud3: 3400 tokens, 3400 scored, prefill+score 7.4 s, peak 22.3 GB -> <scratchpad>/bump/gpu/old/kl35.npz
++<scratchpad>/bump/run_old.sh:33> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/qwen36-35b-a3b-mlx-ud3' 'QWEN_KV_BITS=4' 'QWEN_WIRED_LIMIT_GB=27' 'QWEN_PREFILL_STEP=512' env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/bump/gpu/stack_kl.py dump --len 8192 --score-from 8000 --out <scratchpad>/bump/gpu/old/kl35_8k.npz
+mlx 0.31.2 mlx-vlm 0.6.2 qwen36-35b-a3b-mlx-ud3: 8192 tokens, 192 scored, prefill+score 14.0 s, peak 20.5 GB -> <scratchpad>/bump/gpu/old/kl35_8k.npz
++<scratchpad>/bump/run_old.sh:34> <scratchpad>/bump/sw.sh <scratchpad>/bump/gpu/old/w35.log old 'QWEN_MODEL=/Users/user/Projects/llm/weights/qwen36-35b-a3b-mlx-ud3' 'QWEN_KV_BITS=4' 'QWEN_WIRED_LIMIT_GB=27' 'QWEN_PREFILL_STEP=512'
+worker pid 89446 nice  0
+2026-10-12 05:45:26,421 INFO  qwen.worker batching: max_batch 16, KV budget 7.40 GiB (cap 27.0 GiB, prefill reserve 2.4 GiB), KV 5760 B/token, recurrent state 61.4 MiB/row, reserve <= 4096 new tokens/
+2026-10-12 05:45:26,424 INFO  qwen.worker model loaded in 5820 ms
++<scratchpad>/bump/run_old.sh:35> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py corpus --out <scratchpad>/bump/gpu/old/corpus35.json
++<scratchpad>/bump/run_old.sh:35> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py seq --n 4 --max-tokens 128 --out <scratchpad>/bump/gpu/old/seq4_35.json
++<scratchpad>/bump/run_old.sh:36> stop
++stop:0> pkill -f 'worker.py --addr 127.0.0.1:50051'
++stop:0> sleep 6
++<scratchpad>/bump/run_old.sh:37> env 'QWEN_MODEL=/Users/user/Projects/llm/weights/qwen38-27b-mlx-5bit' 'QWEN_KV_BITS=8' 'QWEN_WIRED_LIMIT_GB=27' 'QWEN_PREFILL_STEP=512' env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/bump/gpu/stack_kl.py dump --out <scratchpad>/bump/gpu/old/kl27.npz
+mlx 0.31.2 mlx-vlm 0.6.2 qwen38-27b-mlx-5bit: 3400 tokens, 3400 scored, prefill+score 34.4 s, peak 24.7 GB -> <scratchpad>/bump/gpu/old/kl27.npz
++<scratchpad>/bump/run_old.sh:38> <scratchpad>/bump/sw.sh <scratchpad>/bump/gpu/old/w27.log old 'QWEN_MODEL=/Users/user/Projects/llm/weights/qwen38-27b-mlx-5bit' 'QWEN_KV_BITS=8' 'QWEN_WIRED_LIMIT_GB=27' 'QWEN_PREFILL_STEP=512'
+worker pid 89574 nice  0
+2026-10-12 05:47:10,349 INFO  qwen.worker batching: max_batch 16, KV budget 4.53 GiB (cap 27.0 GiB, prefill reserve 3.4 GiB), KV 34816 B/token, recurrent state 146.8 MiB/row, reserve <= 4096 new token
+2026-10-12 05:47:10,353 INFO  qwen.worker model loaded in 6366 ms
++<scratchpad>/bump/run_old.sh:39> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py corpus --out <scratchpad>/bump/gpu/old/corpus27.json
++<scratchpad>/bump/run_old.sh:39> env 'PYTHONPATH=<scratchpad>/bump/oldsrc' <scratchpad>/bump/venv_old/bin/python <scratchpad>/gpu_tests/wtest.py seq --n 4 --max-tokens 128 --out <scratchpad>/bump/gpu/old/seq4_27.json
++<scratchpad>/bump/run_old.sh:40> stop
++stop:0> pkill -f 'worker.py --addr 127.0.0.1:50051'
++stop:0> sleep 6
++<scratchpad>/bump/run_old.sh:41> echo OLD DONE
+OLD DONE

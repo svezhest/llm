@@ -1,0 +1,10 @@
+wall 200.0s, aggregate 10.2 tok/s, 8 requests
+  m0     finish=length tok=256 ttft=49.102s tps=2.78 queue_ms=21260 batch=3.74 peak=13.28 err=None
+  m1     finish=length tok=256 ttft=96.26s tps=3.38 queue_ms=66713 batch=4.04 peak=13.28 err=None
+  m2     finish=length tok=256 ttft=26.58s tps=2.36 queue_ms=12 batch=3.44 peak=13.28 err=None
+  m3     finish=length tok=256 ttft=72.128s tps=3.15 queue_ms=43564 batch=3.97 peak=13.28 err=None
+  m4     finish=length tok=256 ttft=147.106s tps=5.31 queue_ms=115843 batch=3.29 peak=13.28 err=None
+  m5     finish=length tok=256 ttft=171.368s tps=9.49 queue_ms=141658 batch=2.93 peak=13.28 err=None
+  m6     finish=length tok=256 ttft=190.027s tps=25.46 queue_ms=165942 batch=2.37 peak=13.28 err=None
+  m7     finish=length tok=256 ttft=121.335s tps=3.66 queue_ms=90789 batch=3.86 peak=13.28 err=None
+max peak 13.28 GB

@@ -1,0 +1,3 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+mlx 0.32.3 mlx-vlm 0.7.6 ornith15-9b-mlx-8bit: 3400 tokens, 3400 scored, prefill+score 15.6 s, peak 28.7 GB -> <scratchpad>/bump/gpu/new/kl9.npz

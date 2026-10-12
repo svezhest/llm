@@ -1,0 +1,51 @@
+2026-10-12 05:35:01,955 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit
+2026-10-12 05:35:01,955 WARNING qwen.worker no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+2026-10-12 05:35:03,458 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 05:35:03,458 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 05:35:04,832 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True
+2026-10-12 05:35:04,841 INFO  worker.mrqmm mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8) + fused GDN in-projection x24; left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-12 05:35:05,419 INFO  qwen.worker batching: max_batch 16, KV budget 10.73 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50
+2026-10-12 05:35:05,422 INFO  qwen.worker model loaded in 2876 ms
+2026-10-12 05:35:05,434 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+2026-10-12 05:35:05,889 INFO  qwen.worker Generate id=pcache-warm images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:05,920 INFO  qwen.worker id=pcache-warm prompt_tokens=7405 (images=0)
+2026-10-12 05:35:06,022 INFO  qwen.worker id=pcache-warm prompt cache MISS (common prefix 0, 0 entries)
+2026-10-12 05:35:19,824 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pcache-warm steps/s=0.0 mean_rows=0.00 reserved=0.34/10.73GiB active=11.98GiB
+2026-10-12 05:35:22,856 INFO  qwen.worker id=pcache-warm prompt cache store: 7404 tokens, 4 checkpoints, 500.2 MB (1 entries, 500.2 MB total)
+2026-10-12 05:35:24,755 INFO  qwen.worker id=pcache-warm finish=length gen_tokens=64 ttft_ms=16958 tps=36.0 cached=0 peak=13.85GB active=13.75GB pool=0.34GB queue_ms=130 batch=1.00
+2026-10-12 05:35:24,756 INFO  qwen.worker Generate id=c2-e1bb25 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,757 INFO  qwen.worker Generate id=c3-e8ae4a images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,758 INFO  qwen.worker Generate id=c5-e6f1cf images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,758 INFO  qwen.worker Generate id=c4-4b7f4d images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,758 INFO  qwen.worker Generate id=c1-933322 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,758 INFO  qwen.worker Generate id=c7-71f6b4 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,759 INFO  qwen.worker Generate id=c6-9dfcc6 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:24,768 INFO  qwen.worker id=c2-e1bb25 prompt_tokens=7393 (images=0)
+2026-10-12 05:35:24,772 INFO  qwen.worker id=c2-e1bb25 prompt cache HIT: 7359/7393 tokens reused (common prefix 7364), prefilling 34
+2026-10-12 05:35:24,776 INFO  qwen.worker id=c3-e8ae4a prompt_tokens=7398 (images=0)
+2026-10-12 05:35:24,785 INFO  qwen.worker id=c5-e6f1cf prompt_tokens=7396 (images=0)
+2026-10-12 05:35:24,785 INFO  qwen.worker id=c6-9dfcc6 prompt_tokens=7396 (images=0)
+2026-10-12 05:35:24,786 INFO  qwen.worker id=c1-933322 prompt_tokens=7397 (images=0)
+2026-10-12 05:35:24,786 INFO  qwen.worker id=c4-4b7f4d prompt_tokens=7389 (images=0)
+2026-10-12 05:35:24,786 INFO  qwen.worker id=c7-71f6b4 prompt_tokens=7395 (images=0)
+2026-10-12 05:35:24,913 INFO  qwen.worker id=c2-e1bb25 prompt cache store: 7392 tokens, 4 checkpoints, 499.8 MB (2 entries, 999.9 MB total)
+2026-10-12 05:35:24,917 INFO  qwen.worker id=c3-e8ae4a prompt cache HIT: 7359/7398 tokens reused (common prefix 7364), prefilling 39
+2026-10-12 05:35:25,059 INFO  qwen.worker id=c3-e8ae4a prompt cache store: 7397 tokens, 4 checkpoints, 499.9 MB (3 entries, 1499.9 MB total)
+2026-10-12 05:35:25,066 INFO  qwen.worker id=c5-e6f1cf prompt cache HIT: 7359/7396 tokens reused (common prefix 7364), prefilling 37
+2026-10-12 05:35:25,211 INFO  qwen.worker id=c5-e6f1cf prompt cache store: 7395 tokens, 4 checkpoints, 499.9 MB (4 entries, 1999.8 MB total)
+2026-10-12 05:35:25,220 INFO  qwen.worker id=c6-9dfcc6 prompt cache HIT: 7359/7396 tokens reused (common prefix 7364), prefilling 37
+2026-10-12 05:35:25,361 INFO  qwen.worker id=c6-9dfcc6 prompt cache store: 7395 tokens, 4 checkpoints, 499.9 MB (5 entries, 2499.6 MB total)
+2026-10-12 05:35:25,370 INFO  qwen.worker id=c1-933322 prompt cache HIT: 7359/7397 tokens reused (common prefix 7362), prefilling 38
+2026-10-12 05:35:25,514 INFO  qwen.worker id=c1-933322 prompt cache store: 7396 tokens, 4 checkpoints, 499.9 MB (6 entries, 2999.5 MB total)
+2026-10-12 05:35:25,525 INFO  qwen.worker id=c4-4b7f4d prompt cache HIT: 7359/7389 tokens reused (common prefix 7363), prefilling 30
+2026-10-12 05:35:25,616 INFO  qwen.worker id=c4-4b7f4d prompt cache store: 7388 tokens, 4 checkpoints, 499.6 MB (6 entries, 2999.4 MB total)
+2026-10-12 05:35:25,626 INFO  qwen.worker id=c7-71f6b4 prompt cache HIT: 7359/7395 tokens reused (common prefix 7363), prefilling 36
+2026-10-12 05:35:25,770 INFO  qwen.worker id=c7-71f6b4 prompt cache store: 7394 tokens, 4 checkpoints, 499.8 MB (6 entries, 2999.3 MB total)
+2026-10-12 05:35:28,729 INFO  qwen.worker id=c7-71f6b4 finish=length gen_tokens=64 ttft_ms=286 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=857 batch=7.00
+2026-10-12 05:35:28,729 INFO  qwen.worker id=c4-4b7f4d finish=length gen_tokens=64 ttft_ms=388 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=756 batch=7.00
+2026-10-12 05:35:28,729 INFO  qwen.worker id=c5-e6f1cf finish=length gen_tokens=64 ttft_ms=843 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=302 batch=7.00
+2026-10-12 05:35:28,729 INFO  qwen.worker id=c3-e8ae4a finish=length gen_tokens=64 ttft_ms=989 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=155 batch=7.00
+2026-10-12 05:35:28,730 INFO  qwen.worker id=c1-933322 finish=length gen_tokens=64 ttft_ms=540 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=603 batch=7.00
+2026-10-12 05:35:28,730 INFO  qwen.worker id=c6-9dfcc6 finish=length gen_tokens=64 ttft_ms=691 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=452 batch=7.00
+2026-10-12 05:35:28,730 INFO  qwen.worker id=c2-e1bb25 finish=length gen_tokens=64 ttft_ms=1133 tps=22.6 cached=7359 peak=17.23GB active=17.11GB pool=0.33GB queue_ms=12 batch=7.00
+2026-10-12 05:35:28,759 INFO  qwen.worker worker stopped

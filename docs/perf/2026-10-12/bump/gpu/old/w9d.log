@@ -1,0 +1,76 @@
+2026-10-12 05:38:19,757 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit
+2026-10-12 05:38:19,758 WARNING qwen.worker no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+2026-10-12 05:38:21,654 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 05:38:21,656 INFO  mlx_vlm.speculative.drafters Auto-detected --draft-kind='dflash' for drafter '/Users/user/Projects/llm/weights/qwen35-9b-dflash' (model_type='qwen3').
+2026-10-12 05:38:22,254 INFO  qwen.worker dflash drafter loaded: /Users/user/Projects/llm/weights/qwen35-9b-dflash (4-bit, block adaptive, target layers [1, 5, 9, 13, 17, 21, 25, 29])
+2026-10-12 05:38:22,254 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 05:38:23,779 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-10-12 05:38:23,779 INFO  qwen.worker batching: max_batch 1, KV budget 13.10 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50
+2026-10-12 05:38:23,812 INFO  qwen.worker model loaded in 4021 ms
+2026-10-12 05:38:23,829 INFO  qwen.worker worker serving on 127.0.0.1:50051 (8 generation slots, 16 threads)
+2026-10-12 05:38:24,838 INFO  qwen.worker Generate id=corpus-code0 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:38:24,861 INFO  qwen.worker id=corpus-code0 prompt_tokens=46 (images=0)
+2026-10-12 05:38:33,563 INFO  qwen.worker dflash: 256 tokens, accept rate 53% (169/321 drafts)
+2026-10-12 05:38:33,568 INFO  qwen.worker id=corpus-code0 finish=length gen_tokens=256 ttft_ms=1289 tps=34.5 cached=0 peak=14.96GB active=13.88GB pool=0.00GB queue_ms=24 batch=1.00
+2026-10-12 05:38:33,569 INFO  qwen.worker Generate id=corpus-code1 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:38:33,570 INFO  qwen.worker id=corpus-code1 prompt_tokens=38 (images=0)
+2026-10-12 05:38:33,843 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=corpus-code1 steps/s=0.0 mean_rows=0.00 reserved=0.11/13.10GiB active=13.55GiB
+2026-10-12 05:38:42,005 INFO  qwen.worker dflash: 256 tokens, accept rate 45% (150/333 drafts)
+2026-10-12 05:38:42,009 INFO  qwen.worker id=corpus-code1 finish=length gen_tokens=256 ttft_ms=161 tps=30.9 cached=0 peak=14.96GB active=14.09GB pool=0.00GB queue_ms=1 batch=1.00
+2026-10-12 05:38:42,009 INFO  qwen.worker Generate id=corpus-code2 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:38:42,010 INFO  qwen.worker id=corpus-code2 prompt_tokens=34 (images=0)
+2026-10-12 05:38:43,921 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=corpus-code2 steps/s=0.0 mean_rows=0.00 reserved=0.11/13.10GiB active=13.16GiB
+2026-10-12 05:38:49,381 INFO  qwen.worker dflash: 256 tokens, accept rate 50% (173/349 drafts)
+2026-10-12 05:38:49,386 INFO  qwen.worker id=corpus-code2 finish=length gen_tokens=256 ttft_ms=159 tps=35.5 cached=0 peak=14.96GB active=13.88GB pool=0.00GB queue_ms=1 batch=1.00
+2026-10-12 05:38:49,386 INFO  qwen.worker Generate id=corpus-code3 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:38:49,387 INFO  qwen.worker id=corpus-code3 prompt_tokens=39 (images=0)
+2026-10-12 05:38:53,953 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=corpus-code3 steps/s=0.0 mean_rows=0.00 reserved=0.11/13.10GiB active=13.11GiB
+2026-10-12 05:38:56,661 INFO  qwen.worker dflash: 256 tokens, accept rate 57% (171/301 drafts)
+2026-10-12 05:38:56,664 INFO  qwen.worker id=corpus-code3 finish=length gen_tokens=256 ttft_ms=168 tps=36.0 cached=0 peak=14.96GB active=13.99GB pool=0.00GB queue_ms=1 batch=1.00
+2026-10-12 05:38:56,664 INFO  qwen.worker Generate id=corpus-code4 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:38:56,665 INFO  qwen.worker id=corpus-code4 prompt_tokens=30 (images=0)
+2026-10-12 05:39:03,391 INFO  qwen.worker dflash: 256 tokens, accept rate 59% (180/304 drafts)
+2026-10-12 05:39:03,396 INFO  qwen.worker id=corpus-code4 finish=length gen_tokens=256 ttft_ms=114 tps=38.7 cached=0 peak=14.96GB active=14.14GB pool=0.00GB queue_ms=1 batch=1.00
+2026-10-12 05:39:03,397 INFO  qwen.worker Generate id=corpus-seeded images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:03,397 INFO  qwen.worker id=corpus-seeded prompt_tokens=35 (images=0)
+2026-10-12 05:39:03,966 INFO  qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=1.5 mean_rows=1.00 reserved=0.11/13.10GiB active=12.80GiB
+2026-10-12 05:39:07,103 INFO  qwen.worker id=corpus-seeded finish=length gen_tokens=128 ttft_ms=204 tps=36.6 cached=0 peak=13.82GB active=13.75GB pool=0.02GB queue_ms=1 batch=1.00
+2026-10-12 05:39:07,105 INFO  qwen.worker Generate id=corpus-penalties images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:07,106 INFO  qwen.worker id=corpus-penalties prompt_tokens=40 (images=0)
+2026-10-12 05:39:10,690 INFO  qwen.worker id=corpus-penalties finish=length gen_tokens=128 ttft_ms=188 tps=37.7 cached=0 peak=13.84GB active=13.74GB pool=0.01GB queue_ms=4 batch=1.00
+2026-10-12 05:39:10,692 INFO  qwen.worker Generate id=corpus-think-budget images=0 max_tokens=200 template_kwargs={"enable_thinking": true} budget=48
+2026-10-12 05:39:10,693 INFO  qwen.worker id=corpus-think-budget prompt_tokens=22 (images=0)
+2026-10-12 05:39:12,531 INFO  qwen.worker id=corpus-think-budget finish=stop gen_tokens=64 ttft_ms=128 tps=37.5 cached=0 peak=13.81GB active=13.73GB pool=0.02GB queue_ms=3 batch=1.00
+2026-10-12 05:39:12,532 INFO  qwen.worker Generate id=corpus-think-on images=0 max_tokens=300 template_kwargs={"enable_thinking": true} budget=-
+2026-10-12 05:39:12,533 INFO  qwen.worker id=corpus-think-on prompt_tokens=17 (images=0)
+2026-10-12 05:39:14,053 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=corpus-think-on steps/s=30.6 mean_rows=1.00 reserved=0.11/13.10GiB active=13.68GiB
+2026-10-12 05:39:19,433 INFO  qwen.worker dflash: 300 tokens, accept rate 61% (230/377 drafts)
+2026-10-12 05:39:19,441 INFO  qwen.worker id=corpus-think-on finish=length gen_tokens=300 ttft_ms=109 tps=44.1 cached=0 peak=14.96GB active=14.76GB pool=0.15GB queue_ms=3 batch=1.00
+2026-10-12 05:39:19,442 INFO  qwen.worker Generate id=corpus-stop images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:19,443 INFO  qwen.worker id=corpus-stop prompt_tokens=46 (images=0)
+2026-10-12 05:39:21,009 INFO  qwen.worker dflash: 52 tokens, accept rate 51% (36/71 drafts)
+2026-10-12 05:39:21,025 INFO  qwen.worker id=corpus-stop finish=stop gen_tokens=41 ttft_ms=174 tps=29.2 cached=0 peak=14.97GB active=14.08GB pool=2.14GB queue_ms=2 batch=1.00
+2026-10-12 05:39:21,026 INFO  qwen.worker Generate id=corpus-min-ignore images=0 max_tokens=40 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:21,026 INFO  qwen.worker id=corpus-min-ignore prompt_tokens=15 (images=0)
+2026-10-12 05:39:21,027 INFO  qwen.worker grammar / token options: speculative decoding off for this request
+2026-10-12 05:39:22,204 INFO  qwen.worker id=corpus-min-ignore finish=length gen_tokens=40 ttft_ms=129 tps=38.2 cached=0 peak=13.78GB active=13.73GB pool=0.02GB queue_ms=1 batch=1.00
+2026-10-12 05:39:22,206 INFO  qwen.worker Generate id=corpus-bad-words images=0 max_tokens=96 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:22,207 INFO  qwen.worker id=corpus-bad-words prompt_tokens=38 (images=0)
+2026-10-12 05:39:22,209 INFO  qwen.worker grammar / token options: speculative decoding off for this request
+2026-10-12 05:39:24,061 INFO  qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=10.0 mean_rows=1.00 reserved=0.11/13.10GiB active=12.79GiB
+2026-10-12 05:39:25,159 INFO  qwen.worker id=corpus-bad-words finish=length gen_tokens=96 ttft_ms=168 tps=34.5 cached=0 peak=13.83GB active=13.73GB pool=0.03GB queue_ms=2 batch=1.00
+2026-10-12 05:39:25,160 INFO  qwen.worker Generate id=corpus-json images=0 max_tokens=200 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:25,161 INFO  qwen.worker id=corpus-json prompt_tokens=19 (images=0)
+2026-10-12 05:39:25,164 INFO  qwen.worker id=corpus-json constrained: response_format=json_schema tool_choice=auto
+2026-10-12 05:39:25,165 INFO  qwen.worker grammar / token options: speculative decoding off for this request
+2026-10-12 05:39:26,813 INFO  qwen.worker id=corpus-json finish=stop gen_tokens=52 ttft_ms=111 tps=33.8 cached=0 peak=13.79GB active=13.71GB pool=0.02GB queue_ms=5 batch=1.00
+2026-10-12 05:39:26,814 INFO  qwen.worker Generate id=corpus-tools-auto images=0 max_tokens=200 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:26,815 INFO  qwen.worker id=corpus-tools-auto prompt_tokens=288 (images=0)
+2026-10-12 05:39:28,654 INFO  qwen.worker dflash: 37 tokens, accept rate 39% (24/61 drafts)
+2026-10-12 05:39:28,675 INFO  qwen.worker id=corpus-tools-auto finish=stop gen_tokens=37 ttft_ms=647 tps=30.5 cached=0 peak=14.98GB active=14.35GB pool=1.98GB queue_ms=2 batch=1.00
+2026-10-12 05:39:28,677 INFO  qwen.worker Generate id=corpus-tools-required images=0 max_tokens=200 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:39:28,679 INFO  qwen.worker id=corpus-tools-required prompt_tokens=281 (images=0)
+2026-10-12 05:39:28,680 INFO  qwen.worker id=corpus-tools-required constrained: response_format=- tool_choice=required
+2026-10-12 05:39:28,682 INFO  qwen.worker grammar / token options: speculative decoding off for this request
+2026-10-12 05:39:30,156 INFO  qwen.worker id=corpus-tools-required finish=stop gen_tokens=26 ttft_ms=703 tps=33.7 cached=0 peak=14.14GB active=13.72GB pool=0.03GB queue_ms=4 batch=1.00
+2026-10-12 05:39:30,183 INFO  qwen.worker worker stopped

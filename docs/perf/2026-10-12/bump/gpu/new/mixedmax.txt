@@ -1,0 +1,8 @@
+wall 15.8s, aggregate 37.4 tok/s, 6 requests
+  p0     finish=length tok=1 ttft=1.106s tps=874.96 queue_ms=824 batch=6.0 peak=10.29 err=None
+  p1     finish=length tok=7 ttft=1.143s tps=33.28 queue_ms=2 batch=4.5 peak=10.29 err=None
+  p2     finish=length tok=64 ttft=1.143s tps=26.96 queue_ms=464 batch=2.31 peak=10.29 err=None
+  p3     finish=length tok=512 ttft=1.143s tps=34.74 queue_ms=286 batch=1.17 peak=10.29 err=None
+  p4     finish=length tok=7 ttft=1.143s tps=33.34 queue_ms=181 batch=4.5 peak=10.29 err=None
+  p5     finish=length tok=1 ttft=1.105s tps=944.42 queue_ms=639 batch=6.0 peak=10.29 err=None
+PASS

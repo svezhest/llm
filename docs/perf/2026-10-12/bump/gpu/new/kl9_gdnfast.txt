@@ -1,0 +1,1 @@
+3400 positions: top-1 agreement 99.85%, KL mean 6.32e-05 p99 8.04e-04 max 3.27e-02, |dlogp top-1| mean 2.31e-03 max 2.41e-01; prefill+score 10.2 s, peak 16.9 GB

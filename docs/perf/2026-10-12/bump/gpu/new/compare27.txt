@@ -1,0 +1,21 @@
+same code0
+same code1
+same code2
+same code3
+same code4
+DIFF seeded: fields ['text']; text diverges at char 0: '# Hash Map Collision Handling: Open Addr' vs 'A hash map stores key-value pairs by com'
+same penalties
+same think-budget
+same think-on
+same stop
+same min-ignore
+same bad-words
+same json
+same tools-auto
+same tools-required
+14/15 byte-identical
+same p0
+same p1
+same p2
+same p3
+4/4 byte-identical

@@ -1,0 +1,12 @@
+PASS plain: Hello there, friend!
+PASS stream: '1, 2, 3, 4, 5.'
+PASS stop: '1, 2, 3, 4, '
+PASS tools auto: [{"index": 0, "id": "chatcmpl-tool-443ed67617c86f56", "type": "function", "function": {"name": "get_weather", "arguments
+PASS tools required: [{"index": 0, "id": "chatcmpl-tool-db7fd13ab460af9f", "type": "function", "function": {"name": "get_weather", "arguments
+PASS json_schema: {'name': 'Alien', 'year': 1979}
+PASS thinking default on: reasoning chars 181, answer '\n\n17 × 23 = **391**'
+PASS thinking off: "17 × 23 = **391**\n\nHere's the breakdown:\n- 17 × 20 = 340\n- 1"
+PASS thinking_budget: status 200 usage {'prompt_tokens': 15, 'total_tokens': 315, 'completion_tokens': 300, 'completion_tokens_details': {'reasoning_tokens': 18}}
+PASS image on text-only -> 400: {"error":{"message":"ornith15-9b-mlx-8bit is a text-only checkpoint: image inputs are not supported","type":"BadRequestError","param":null,"code":400}}
+PASS unknown model -> 404: {"error":{"message":"The model `nope` does not exist.","type":"NotFoundError","param":"model","code"
+ALL PASS

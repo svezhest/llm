@@ -1,0 +1,1 @@
+mlx 0.32.3 mlx-vlm 0.7.6 qwen36-35b-a3b-mlx-ud3: 8192 tokens, 192 scored, prefill+score 12.8 s, peak 20.5 GB -> <scratchpad>/bump/speed/pf35_new_2.npz

@@ -1,0 +1,11 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+loaded; max_batch 16 sync=False consumer=handler
+round 0 B= 1 new: period median 27.47 ms (q1 27.1 q3 30.3, n=169) wait 0.01
+round 0 B= 1 nofuse: period median 28.13 ms (q1 27.6 q3 33.0, n=156) wait 0.01
+round 0 B= 4 new: period median 40.26 ms (q1 39.4 q3 40.9, n=156) wait 0.02
+round 0 B= 4 nofuse: period median 40.52 ms (q1 40.0 q3 41.1, n=169) wait 0.02
+round 0 B= 8 new: period median 41.39 ms (q1 41.2 q3 42.0, n=169) wait 0.02
+round 0 B= 8 nofuse: period median 41.74 ms (q1 41.3 q3 42.2, n=157) wait 0.02
+round 0 B=16 new: period median 61.85 ms (q1 60.8 q3 62.3, n=158) wait 0.02
+round 0 B=16 nofuse: period median 62.84 ms (q1 61.8 q3 63.2, n=168) wait 0.02

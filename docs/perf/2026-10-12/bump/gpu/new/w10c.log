@@ -1,0 +1,37 @@
+2026-10-12 06:22:49,381 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/ornith10-9b-mlx-8bit
+2026-10-12 06:22:50,708 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 06:22:50,709 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 06:22:52,035 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-10-12 06:22:52,035 INFO  qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-12 06:22:52,109 INFO  qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 24 layers
+2026-10-12 06:22:52,109 INFO  qwen.worker batching: max_batch 1, KV budget 14.90 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50
+2026-10-12 06:22:52,110 INFO  qwen.worker model loaded in 2653 ms
+2026-10-12 06:22:52,121 INFO  qwen.worker worker serving on 127.0.0.1:50051 (8 generation slots, 16 threads)
+2026-10-12 06:22:53,236 INFO  qwen.worker Generate id=pc-c0 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 06:22:53,267 INFO  qwen.worker id=pc-c0 prompt_tokens=7405 (images=0)
+2026-10-12 06:23:02,817 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c0 steps/s=0.0 mean_rows=0.00 reserved=0.34/14.90GiB active=10.72GiB
+2026-10-12 06:23:12,791 INFO  qwen.worker id=pc-c0 finish=length gen_tokens=64 ttft_ms=17673 tps=36.2 cached=0 peak=12.55GB active=10.75GB pool=0.34GB queue_ms=115 batch=1.00
+2026-10-12 06:23:12,793 INFO  qwen.worker Generate id=pc-c1 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 06:23:12,803 INFO  qwen.worker id=pc-c1 prompt_tokens=7397 (images=0)
+2026-10-12 06:23:17,731 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c1 steps/s=4.4 mean_rows=1.00 reserved=0.34/14.90GiB active=10.62GiB
+2026-10-12 06:23:30,326 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c1 steps/s=0.0 mean_rows=0.00 reserved=0.34/14.90GiB active=10.49GiB
+2026-10-12 06:23:32,312 INFO  qwen.worker id=pc-c1 finish=length gen_tokens=64 ttft_ms=17753 tps=36.5 cached=0 peak=12.55GB active=10.75GB pool=0.33GB queue_ms=11 batch=1.00
+2026-10-12 06:23:32,313 INFO  qwen.worker Generate id=pc-c2 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 06:23:32,323 INFO  qwen.worker id=pc-c2 prompt_tokens=7393 (images=0)
+2026-10-12 06:23:41,915 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c2 steps/s=5.6 mean_rows=1.00 reserved=0.34/14.90GiB active=10.71GiB
+2026-10-12 06:23:51,727 INFO  qwen.worker id=pc-c2 finish=length gen_tokens=64 ttft_ms=17649 tps=36.5 cached=0 peak=12.55GB active=10.75GB pool=0.33GB queue_ms=10 batch=1.00
+2026-10-12 06:23:51,728 INFO  qwen.worker Generate id=pc-c3 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 06:23:51,738 INFO  qwen.worker id=pc-c3 prompt_tokens=7398 (images=0)
+2026-10-12 06:23:56,648 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c3 steps/s=4.4 mean_rows=1.00 reserved=0.34/14.90GiB active=10.67GiB
+2026-10-12 06:24:09,186 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c3 steps/s=0.0 mean_rows=0.00 reserved=0.34/14.90GiB active=10.49GiB
+2026-10-12 06:24:11,172 INFO  qwen.worker id=pc-c3 finish=length gen_tokens=64 ttft_ms=17678 tps=36.5 cached=0 peak=12.55GB active=10.75GB pool=0.01GB queue_ms=10 batch=1.00
+2026-10-12 06:24:11,173 INFO  qwen.worker Generate id=pc-c0-again images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 06:24:11,182 INFO  qwen.worker id=pc-c0-again prompt_tokens=7405 (images=0)
+2026-10-12 06:24:20,829 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c0-again steps/s=5.6 mean_rows=1.00 reserved=0.34/14.90GiB active=10.77GiB
+2026-10-12 06:24:30,702 INFO  qwen.worker id=pc-c0-again finish=length gen_tokens=64 ttft_ms=17761 tps=36.4 cached=0 peak=12.55GB active=10.75GB pool=0.34GB queue_ms=9 batch=1.00
+2026-10-12 06:24:30,704 INFO  qwen.worker Generate id=pc-c1-again images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 06:24:30,716 INFO  qwen.worker id=pc-c1-again prompt_tokens=7397 (images=0)
+2026-10-12 06:24:35,671 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c1-again steps/s=4.4 mean_rows=1.00 reserved=0.34/14.90GiB active=10.68GiB
+2026-10-12 06:24:48,401 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=pc-c1-again steps/s=0.0 mean_rows=0.00 reserved=0.34/14.90GiB active=10.55GiB
+2026-10-12 06:24:50,398 INFO  qwen.worker id=pc-c1-again finish=length gen_tokens=64 ttft_ms=17918 tps=36.3 cached=0 peak=12.55GB active=10.75GB pool=0.33GB queue_ms=13 batch=1.00
+2026-10-12 06:24:50,434 INFO  qwen.worker worker stopped

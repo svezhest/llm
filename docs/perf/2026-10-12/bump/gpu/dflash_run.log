@@ -1,0 +1,33 @@
+worker pid 91615 nice  0
+2026-10-12 06:27:38,926 INFO  qwen.worker batching: max_batch 1, KV budget 13.10 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:27:38,951 INFO  qwen.worker model loaded in 3438 ms
+old r1: tps=30.41 tps=27.36 tps=31.31 tps=31.95 tps=34.33 
+worker pid 91684 nice  0
+2026-10-12 06:29:02,827 INFO  qwen.worker batching: max_batch 1, KV budget 15.07 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:29:02,828 INFO  qwen.worker model loaded in 3657 ms
+c0 r1: tps=31.07 tps=29.62 tps=33.95 tps=34.24 tps=36.86 
+worker pid 91750 nice  0
+2026-10-12 06:30:22,119 INFO  qwen.worker batching: max_batch 1, KV budget 15.07 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:30:22,119 INFO  qwen.worker model loaded in 3253 ms
+c8 r1: tps=39.24 tps=40.5 tps=46.2 tps=49.67 tps=48.19 
+worker pid 91826 nice  0
+2026-10-12 06:31:28,617 INFO  qwen.worker batching: max_batch 1, KV budget 15.07 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:31:28,617 INFO  qwen.worker model loaded in 3162 ms
+c16 r1: tps=36.8 tps=36.48 tps=23.33 tps=39.86 tps=42.87 
+worker pid 91896 nice  0
+2026-10-12 06:32:56,839 INFO  qwen.worker batching: max_batch 1, KV budget 15.07 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:32:56,839 INFO  qwen.worker model loaded in 3166 ms
+c16 r2: tps=39.28 tps=36.8 tps=24.01 tps=40.28 tps=43.66 
+worker pid 91967 nice  0
+2026-10-12 06:34:23,775 INFO  qwen.worker batching: max_batch 1, KV budget 15.07 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:34:23,775 INFO  qwen.worker model loaded in 3159 ms
+c8 r2: tps=51.67 tps=42.75 tps=45.61 tps=50.39 tps=52.97 
+worker pid 92041 nice  0
+2026-10-12 06:35:27,520 INFO  qwen.worker batching: max_batch 1, KV budget 15.07 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:35:27,521 INFO  qwen.worker model loaded in 3174 ms
+c0 r2: tps=34.32 tps=31.06 tps=35.41 tps=35.57 tps=38.39 
+worker pid 92106 nice  0
+2026-10-12 06:36:44,246 INFO  qwen.worker batching: max_batch 1, KV budget 13.10 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens
+2026-10-12 06:36:44,272 INFO  qwen.worker model loaded in 3891 ms
+old r2: tps=32.47 tps=29.27 tps=33.49 tps=33.71 tps=36.57 
+DFLASH DONE

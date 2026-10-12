@@ -1,0 +1,13 @@
+wall 11.4s, aggregate 125.8 tok/s, 8 requests
+  p0     finish=length tok=256 ttft=1.436s tps=25.48 queue_ms=609 batch=5.81 peak=10.57 err=None
+  p1     finish=cancelled tok=27 ttft=1.436s tps=0.0 queue_ms=961 batch=8.0 peak=10.57 err=None
+  p2     finish=length tok=256 ttft=1.435s tps=25.48 queue_ms=440 batch=5.81 peak=10.57 err=None
+  p3     finish=length tok=256 ttft=1.435s tps=25.48 queue_ms=1131 batch=5.81 peak=10.57 err=None
+  p4     finish=cancelled tok=133 ttft=1.435s tps=0.0 queue_ms=342 batch=6.53 peak=10.57 err=None
+  p5     finish=length tok=256 ttft=1.435s tps=25.48 queue_ms=786 batch=5.81 peak=10.57 err=None
+  p6     finish=client-dropped tok=None ttft=1.435s tps=None queue_ms=None batch=None peak=None err=None
+  p7     finish=length tok=256 ttft=1.435s tps=25.48 queue_ms=176 batch=5.81 peak=10.57 err=None
+cancelled rows ended: ['cancelled', 'cancelled', 'client-dropped']; others identical 4/5
+health ready=True max_batch=16
+after: finish=stop peak=9.65 (worker log: active= after idle)
+PASS

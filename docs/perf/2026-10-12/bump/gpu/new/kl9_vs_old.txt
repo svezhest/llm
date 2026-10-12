@@ -1,0 +1,5 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+ref: mlx 0.31.2 mlx-vlm 0.6.2 ornith15-9b-mlx-8bit
+now: mlx 0.32.3 mlx-vlm 0.7.6 ornith15-9b-mlx-8bit  env QWEN_FP16=1 QWEN_GDN_FAST=0 QWEN_SDPA_FUSED=1
+3400 positions: top-1 agreement 99.76%, KL mean 1.53e-05 p99 2.18e-04 max 1.53e-03, |dlogp top-1| mean 1.43e-03 max 6.18e-02; prefill+score 11.2 s, peak 16.9 GB

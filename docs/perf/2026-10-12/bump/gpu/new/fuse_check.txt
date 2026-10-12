@@ -1,0 +1,14 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+active after load 9.51 GB
+24 GDN layers; 24 fused
+B= 1: GDN output fused vs unfused: bit-identical=True max|d|=0
+B= 2: GDN output fused vs unfused: bit-identical=True max|d|=0
+B= 3: GDN output fused vs unfused: bit-identical=False max|d|=0.000122
+B= 4: GDN output fused vs unfused: bit-identical=False max|d|=0.000122
+B= 8: GDN output fused vs unfused: bit-identical=False max|d|=0.000183
+B=16: GDN output fused vs unfused: bit-identical=False max|d|=0.000244
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+active after load 9.51 GB
+24 GDN layers; 0 fused

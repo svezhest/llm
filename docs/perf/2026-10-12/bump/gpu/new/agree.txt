@@ -1,0 +1,6 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+B= 2: top-1 agreement 100.00% (256/256), KL mean 0.00e+00 p99 0.00e+00 max 0.00e+00, peak 9.9 GB
+B= 4: top-1 agreement 100.00% (512/512), KL mean 7.65e-06 p99 1.02e-04 max 2.29e-04, peak 10.3 GB
+B= 8: top-1 agreement 99.90% (1023/1024), KL mean 6.76e-06 p99 9.90e-05 max 2.29e-04, peak 10.9 GB
+B=16: top-1 agreement 99.85% (2045/2048), KL mean 1.43e-05 p99 1.20e-04 max 4.81e-03, peak 12.1 GB

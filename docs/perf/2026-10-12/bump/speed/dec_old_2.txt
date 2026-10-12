@@ -1,0 +1,8 @@
+no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+loaded; max_batch 16 sync=False consumer=handler
+  period by decile: [26.6, 26.6, 26.6, 26.6, 26.7, 26.7, 26.7, 26.7, 26.7, 26.7]  wait: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+round 0 greedy new B= 1 ctx=1k n=295 tokens=172 wall=9.3s | period=26.67 tick=26.66 gap=0.01 iterate=26.65 step=26.61 fwd=2.65 fwd_cpu=2.65 sample=0.01 async_eval=23.89 async_cpu=4.21 enc=0.00 enc_cpu=0.00 wait=0.01 consume=0.03 compact=0.00 regrow=0.00 quantize=0.00 host=26.65 | samples/step=1 clear/100=0.3
+  period by decile: [37.9, 38.4, 41.2, 48.2, 45.3, 41.1, 40.4, 41.5, 43.4, 43.2]  wait: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+round 0 greedy new B= 8 ctx=1k n=295 tokens=1737 wall=22.6s | period=41.95 tick=41.94 gap=0.01 iterate=41.90 step=41.81 fwd=2.92 fwd_cpu=2.92 sample=0.00 async_eval=38.03 async_cpu=4.21 enc=0.00 enc_cpu=0.00 wait=0.02 consume=0.06 compact=0.01 regrow=0.00 quantize=0.01 host=41.93 | samples/step=0 clear/100=0.3
+  period by decile: [58.2, 57.9, 61.2, 62.8, 61.0, 60.2, 60.9, 61.7, 61.7, 61.4]  wait: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+round 0 greedy new B=16 ctx=1k n=294 tokens=3448 wall=40.1s | period=61.22 tick=61.21 gap=0.01 iterate=61.20 step=61.05 fwd=3.89 fwd_cpu=3.89 sample=0.00 async_eval=56.87 async_cpu=5.14 enc=0.00 enc_cpu=0.00 wait=0.02 consume=0.12 compact=0.01 regrow=0.01 quantize=0.01 host=61.21 | samples/step=0.0 clear/100=0.3

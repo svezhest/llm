@@ -1,0 +1,41 @@
+2026-10-12 07:59:40,587 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/qwen36-35b-a3b-mlx-ud3
+2026-10-12 07:59:44,852 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 07:59:44,852 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 07:59:47,150 INFO  qwen.worker wired limit set to 27.0 GB
+2026-10-12 07:59:47,150 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-10-12 07:59:47,150 INFO  qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-12 07:59:47,157 INFO  worker.mrqmm mrqmm: 130 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x30, linear_attn.in_proj_z x30, linear_attn.out_proj x30, self_attn.k_proj x10, self_attn.o_proj x10, self_attn.q_proj x10, self_attn.v_proj x10); left on quantized_matmul: 6-bit g64 x1, 8-bit g64 N % 8 x40, 4-bit g64 x120, 8-bit g64 N < 512 x100
+2026-10-12 07:59:47,384 INFO  qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 30 layers
+2026-10-12 07:59:47,384 INFO  qwen.worker batching: max_batch 16, KV budget 7.43 GiB (cap 27.0 GiB, prefill reserve 2.4 GiB), KV 5760 B/token, recurrent state 61.4 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50
+2026-10-12 07:59:47,385 INFO  qwen.worker model loaded in 5678 ms
+2026-10-12 07:59:47,397 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+2026-10-12 07:59:48,022 INFO  qwen.worker Generate id=long-0 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:59:48,098 INFO  qwen.worker id=long-0 prompt_tokens=56636 (images=0)
+2026-10-12 07:59:58,091 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.74GiB
+2026-10-12 08:00:08,574 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.82GiB
+2026-10-12 08:00:19,334 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.84GiB
+2026-10-12 08:00:30,160 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.83GiB
+2026-10-12 08:00:41,060 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.87GiB
+2026-10-12 08:00:51,654 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.92GiB
+2026-10-12 08:01:02,901 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.95GiB
+2026-10-12 08:01:13,346 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.97GiB
+2026-10-12 08:01:24,259 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.03GiB
+2026-10-12 08:01:35,704 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.05GiB
+2026-10-12 08:01:46,146 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-0 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.07GiB
+2026-10-12 08:01:51,075 INFO  qwen.worker id=long-0 finish=length gen_tokens=64 ttft_ms=120895 tps=30.8 cached=0 peak=19.62GB active=17.79GB pool=0.25GB queue_ms=76 batch=1.00
+2026-10-12 08:01:51,223 INFO  qwen.worker Generate id=long-1 images=0 max_tokens=64 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 08:01:51,274 INFO  qwen.worker id=long-1 prompt_tokens=56672 (images=0)
+2026-10-12 08:01:56,844 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=6.1 mean_rows=1.00 reserved=0.55/7.43GiB active=16.78GiB
+2026-10-12 08:02:07,212 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.76GiB
+2026-10-12 08:02:18,054 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.85GiB
+2026-10-12 08:02:28,969 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.86GiB
+2026-10-12 08:02:39,844 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.87GiB
+2026-10-12 08:02:50,469 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.94GiB
+2026-10-12 08:03:00,574 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.92GiB
+2026-10-12 08:03:11,367 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=16.98GiB
+2026-10-12 08:03:22,830 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.01GiB
+2026-10-12 08:03:33,473 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.03GiB
+2026-10-12 08:03:44,662 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.00GiB
+2026-10-12 08:03:54,708 INFO  qwen.worker batch: rows=0 waiting=0 prefilling=long-1 steps/s=0.0 mean_rows=0.00 reserved=0.55/7.43GiB active=17.07GiB
+2026-10-12 08:04:03,790 INFO  qwen.worker id=long-1 finish=length gen_tokens=64 ttft_ms=130189 tps=27.5 cached=0 peak=19.62GB active=17.79GB pool=0.26GB queue_ms=51 batch=1.00
+2026-10-12 08:04:03,830 INFO  qwen.worker worker stopped

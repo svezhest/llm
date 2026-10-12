@@ -1,0 +1,21 @@
+DIFF code0: fields ['text']; text diverges at char 422: 'y have\n    variable lengths. They are ig' vs 'ir\n    duration varies. They are ignored'
+DIFF code1: fields ['text']; text diverges at char 60: 'use std::rc::Rc;\nuse std::cell::RefCell;' vs '\n/// A node in the doubly linked list.\n/'
+same code2
+DIFF code3: fields ['text']; text diverges at char 557: 'partitioned by `customer_id` and ordered' vs 'to assign a sequential number to each da'
+DIFF code4: fields ['text']; text diverges at char 660: 'less critical in JS/TS due to number pre' vs 'in JS/TS numbers are 64-bit floats, so o'
+DIFF seeded: fields ['text']; text diverges at char 0: 'In computer science, a **Hash Map** (or ' vs 'To understand how hash maps handle colli'
+same penalties
+DIFF think-budget: fields ['reasoning']; text diverges at char 5: '' vs ''
+DIFF think-on: fields ['reasoning']; text diverges at char 0: '' vs ''
+same stop
+DIFF min-ignore: fields ['text']; text diverges at char 52: 'Say\n<|im_start|>assistant\n<think>\n\n\n\nHi!' vs 'What\n<|im_start|>assistant<think>\n\n\n\nHi '
+DIFF bad-words: fields ['text']; text diverges at char 60: 'use std::rc::Rc;\nuse std::cell::RefCell;' vs '\n/// A node in the doubly linked list.\n/'
+same json
+same tools-auto
+same tools-required
+6/15 byte-identical
+same p0
+DIFF p1: fields ['text']; text diverges at char 60: 'use std::rc::Rc;\nuse std::cell::RefCell;' vs '\n/// A node in the doubly linked list.\n/'
+same p2
+DIFF p3: fields ['text']; text diverges at char 557: 'partitioned by `customer' vs 'to assign a sequential number'
+2/4 byte-identical

@@ -1,0 +1,15 @@
+2026-10-12 05:35:36,040 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/ornith10-9b-mlx-8bit
+2026-10-12 05:35:38,853 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 05:35:38,853 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 05:35:40,241 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-10-12 05:35:40,244 INFO  worker.mrqmm mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8) + fused GDN in-projection x24; left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-12 05:35:40,294 INFO  qwen.worker batching: max_batch 16, KV budget 14.85 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50
+2026-10-12 05:35:40,296 INFO  qwen.worker model loaded in 4200 ms
+2026-10-12 05:35:40,311 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+2026-10-12 05:35:41,926 INFO  qwen.worker Generate id=vis-file images=1 max_tokens=96 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:41,960 INFO  qwen.worker id=vis-file prompt_tokens=213 (images=1)
+2026-10-12 05:35:45,465 INFO  qwen.worker id=vis-file finish=stop gen_tokens=77 ttft_ms=1401 tps=36.6 cached=0 peak=11.82GB active=11.81GB pool=0.11GB queue_ms=35 batch=1.00
+2026-10-12 05:35:45,472 INFO  qwen.worker Generate id=vis-datauri images=1 max_tokens=96 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 05:35:45,528 INFO  qwen.worker id=vis-datauri prompt_tokens=1047 (images=1)
+2026-10-12 05:35:49,309 INFO  qwen.worker id=vis-datauri finish=stop gen_tokens=1 ttft_ms=3737 tps=23.7 cached=0 peak=12.88GB active=11.83GB pool=0.46GB queue_ms=57 batch=1.00
+2026-10-12 05:35:49,351 INFO  qwen.worker worker stopped

@@ -1,0 +1,18 @@
+model=ornith15-9b-mlx-8bit calibration: 890 prompt tokens for 1800 filler chars -> 2.28 chars/token, filler 1140 chars
+cooldown 30s before c=16
+probe before c=16: decode 38.5 tok/s, ttft 1.36s
+rep 0 c=16: 32 req, wall 70.7s, agg 115.9 tok/s, ttft mean 10.98s, errors 0
+cooldown 30s before c=8
+probe before c=8: decode 38.4 tok/s, ttft 1.40s
+rep 0 c=8: 16 req, wall 37.0s, agg 110.7 tok/s, ttft mean 5.53s, errors 0
+cooldown 30s before c=4
+probe before c=4: decode 38.4 tok/s, ttft 1.44s
+rep 0 c=4: 8 req, wall 24.6s, agg 83.2 tok/s, ttft mean 3.16s, errors 0
+
+wrote <scratchpad>/results/final_256_check_desc.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 16 | 32 | 622 | 70.7 | 115.9 | 10.98 | 22.78 | 33.42 | 46.92 | 12.3 | 38.5 | 11.64 |
+| 0 | 8 | 16 | 626 | 37.0 | 110.7 | 5.53 | 10.21 | 18.07 | 23.64 | 21.2 | 38.4 | 11.02 |
+| 0 | 4 | 8 | 609 | 24.6 | 83.2 | 3.16 | 4.74 | 12.22 | 15.17 | 28.7 | 38.4 | 10.69 |

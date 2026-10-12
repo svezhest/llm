@@ -1,0 +1,14 @@
+wall 65.2s, aggregate 36.8 tok/s, 6 requests
+  p0     finish=length tok=400 ttft=32.753s tps=37.44 queue_ms=32534 batch=1.0 peak=13.13 err=None
+  p1     finish=length tok=400 ttft=21.884s tps=37.44 queue_ms=21666 batch=1.0 peak=13.1 err=None
+  p2     finish=length tok=400 ttft=54.496s tps=37.34 queue_ms=54278 batch=1.0 peak=13.09 err=None
+  p3     finish=length tok=400 ttft=0.214s tps=37.46 queue_ms=2 batch=1.0 peak=13.1 err=None
+  p4     finish=length tok=400 ttft=11.021s tps=37.46 queue_ms=10860 batch=1.0 peak=13.11 err=None
+  p5     finish=length tok=400 ttft=43.619s tps=37.41 queue_ms=43402 batch=1.0 peak=13.1 err=None
+  p0 thinking=off reasoning_tokens=0 reasoning_chars=0 answer_chars=1080
+  p1 thinking=on reasoning_tokens=400 reasoning_chars=1627 answer_chars=0
+  p2 thinking=off reasoning_tokens=0 reasoning_chars=0 answer_chars=1326
+  p3 thinking=on reasoning_tokens=400 reasoning_chars=1680 answer_chars=0
+  p4 thinking=off reasoning_tokens=0 reasoning_chars=0 answer_chars=1166
+  p5 thinking=on reasoning_tokens=34 reasoning_chars=120 answer_chars=1491
+PASS

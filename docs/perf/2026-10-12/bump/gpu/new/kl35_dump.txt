@@ -1,0 +1,1 @@
+mlx 0.32.3 mlx-vlm 0.7.6 qwen36-35b-a3b-mlx-ud3: 3400 tokens, 3400 scored, prefill+score 8.3 s, peak 22.3 GB -> <scratchpad>/bump/gpu/new/kl35.npz

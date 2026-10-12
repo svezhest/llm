@@ -1,0 +1,10 @@
+model=ornith15-9b-mlx-8bit calibration: 40815 prompt tokens for 96000 filler chars -> 2.36 chars/token, filler 75216 chars
+cooldown 30s before c=1
+probe before c=1: decode 33.9 tok/s, ttft 70.25s
+rep 0 c=1: 2 req, wall 152.7s, agg 1.7 tok/s, ttft mean 72.48s, errors 0
+
+wrote <scratchpad>/results/final_prefill_32000.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 1 | 2 | 32732 | 152.7 | 1.7 | 72.48 | 74.48 | 76.35 | 78.37 | 33.1 | 33.9 | 14.36 |

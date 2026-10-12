@@ -1,0 +1,8 @@
+lm cast to fp32
+mlx 0.32.3 mlx-vlm 0.7.6 qwen36-35b-a3b-mlx-ud3: 3400 tokens, 3400 scored, prefill+score 7.7 s, peak 24.7 GB -> <scratchpad>/bump/gpu/kl35ref/new_fp32.npz
+== ref new fp32
+new fp16: 3400 positions: top-1 agreement 96.97%, KL mean 8.32e-03 p99 1.45e-01 max 7.60e-01, |dlogp top-1| mean 3.83e-02 max 1.24e+00; prefill+score 5.9 s, peak 19.5 GB
+old fp16: 3400 positions: top-1 agreement 97.32%, KL mean 7.54e-03 p99 1.29e-01 max 1.52e+00, |dlogp top-1| mean 3.53e-02 max 1.43e+00; prefill+score 6.3 s, peak 19.5 GB
+new bf16: 3400 positions: top-1 agreement 96.18%, KL mean 1.44e-02 p99 2.08e-01 max 1.50e+00, |dlogp top-1| mean 5.32e-02 max 3.11e+00; prefill+score 6.8 s, peak 19.5 GB
+old bf16: 3400 positions: top-1 agreement 96.47%, KL mean 1.13e-02 p99 1.59e-01 max 1.93e+00, |dlogp top-1| mean 4.71e-02 max 2.28e+00; prefill+score 9.6 s, peak 19.5 GB
+old fp32: 3400 positions: top-1 agreement 99.91%, KL mean 1.55e-04 p99 2.40e-03 max 7.35e-02, |dlogp top-1| mean 1.92e-03 max 1.96e-01; prefill+score 7.3 s, peak 22.4 GB

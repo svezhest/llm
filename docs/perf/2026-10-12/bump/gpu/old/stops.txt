@@ -1,0 +1,12 @@
+wall 32.6s, aggregate 35.9 tok/s, 6 requests
+  p0     finish=stop tok=41 ttft=18.243s tps=37.3 queue_ms=18025 batch=1.0 peak=13.13 err=None
+  p1     finish=length tok=300 ttft=24.397s tps=36.61 queue_ms=24174 batch=1.0 peak=13.1 err=None
+  p2     finish=stop tok=173 ttft=19.525s tps=36.93 queue_ms=19308 batch=1.0 peak=13.09 err=None
+  p3     finish=stop tok=56 ttft=8.363s tps=37.34 queue_ms=8146 batch=1.0 peak=13.11 err=None
+  p4     finish=length tok=300 ttft=0.164s tps=37.43 queue_ms=2 batch=1.0 peak=13.11 err=None
+  p5     finish=length tok=300 ttft=10.043s tps=37.43 queue_ms=9830 batch=1.0 peak=13.1 err=None
+  p0 stops=['def '] finish=stop leak=False
+  p1 stops=['impl'] finish=length leak=False
+  p2 stops=['func'] finish=stop leak=False
+  p3 stops=['SELECT', 'select'] finish=stop leak=False
+PASS

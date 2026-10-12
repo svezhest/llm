@@ -1,0 +1,12 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+round 0 fused=True: total 203.3 s, slabs past 32K 116.6 s; calls {('default', True, False, 'causal'): 120, ('fused', True, True, 'causal'): 200}
+round 0 fused=False: total 218.9 s, slabs past 32K 126.4 s; calls {('default', True, False, 'causal'): 120, ('default', True, True, 'causal'): 200}
+round 1 fused=False: total 222.4 s, slabs past 32K 126.1 s; calls {('default', True, False, 'causal'): 120, ('default', True, True, 'causal'): 200}
+round 1 fused=True: total 215.5 s, slabs past 32K 120.8 s; calls {('default', True, False, 'causal'): 120, ('fused', True, True, 'causal'): 200}
+  slab @32768 n=2048: fused 6220 ms, default 6816 ms
+  slab @40308 n=1664: fused 5687 ms, default 5921 ms
+  slab @46597 n=1440: fused 5145 ms, default 5430 ms
+  slab @52112 n=1287: fused 4849 ms, default 5175 ms
+  slab @57082 n=1175: fused 4573 ms, default 4784 ms
+  slab @61645 n=1088: fused 4293 ms, default 4462 ms

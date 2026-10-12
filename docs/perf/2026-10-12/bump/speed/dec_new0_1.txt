@@ -1,0 +1,9 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+loaded; max_batch 16 sync=False consumer=handler
+  period by decile: [27.1, 27.1, 27.1, 27.1, 27.1, 27.1, 27.1, 27.1, 27.2, 27.2]  wait: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+round 0 greedy new B= 1 ctx=1k n=295 tokens=219 wall=9.3s | period=27.11 tick=27.10 gap=0.01 iterate=27.09 step=27.05 fwd=2.23 fwd_cpu=2.23 sample=0.01 async_eval=24.78 async_cpu=5.17 enc=0.00 enc_cpu=0.00 wait=0.01 consume=0.03 compact=0.00 regrow=0.00 quantize=0.00 host=27.10 | samples/step=1 clear/100=0.3
+  period by decile: [33.8, 33.1, 33.2, 33.3, 33.4, 33.5, 33.5, 33.7, 36.3, 39.9]  wait: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+round 0 greedy new B= 8 ctx=1k n=295 tokens=1731 wall=19.3s | period=33.48 tick=33.47 gap=0.01 iterate=33.47 step=33.38 fwd=3.30 fwd_cpu=3.30 sample=0.00 async_eval=30.07 async_cpu=5.91 enc=0.00 enc_cpu=0.00 wait=0.02 consume=0.06 compact=0.00 regrow=0.01 quantize=0.01 host=33.46 | samples/step=0 clear/100=0.3
+  period by decile: [56.5, 54.6, 56.6, 58.0, 57.3, 56.2, 56.5, 57.6, 58.3, 57.9]  wait: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+round 0 greedy new B=16 ctx=1k n=295 tokens=3446 wall=37.6s | period=57.16 tick=57.15 gap=0.01 iterate=57.14 step=56.92 fwd=5.06 fwd_cpu=5.04 sample=0.00 async_eval=51.54 async_cpu=8.88 enc=0.00 enc_cpu=0.00 wait=0.02 consume=0.15 compact=0.01 regrow=0.01 quantize=0.02 host=57.14 | samples/step=0 clear/100=0.3

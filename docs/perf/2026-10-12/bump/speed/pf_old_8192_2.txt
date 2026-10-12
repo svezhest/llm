@@ -1,0 +1,2 @@
+no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+mlx 0.31.2 mlx-vlm 0.6.2 ornith15-9b-mlx-8bit: 8192 tokens, 192 scored, prefill+score 20.6 s, peak 20.1 GB -> <scratchpad>/bump/speed/pf_old_8192_2.npz

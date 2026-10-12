@@ -1,0 +1,15 @@
+code0            finish=length tokens=256 tps=34.32 peak=11.46 err=None
+code1            finish=length tokens=256 tps=31.06 peak=11.45 err=None
+code2            finish=length tokens=256 tps=35.41 peak=11.45 err=None
+code3            finish=length tokens=256 tps=35.57 peak=11.46 err=None
+code4            finish=length tokens=256 tps=38.39 peak=11.45 err=None
+seeded           finish=length tokens=128 tps=36.62 peak=10.42 err=None
+penalties        finish=length tokens=128 tps=37.86 peak=10.43 err=None
+think-budget     finish=stop tokens=64 tps=37.78 peak=10.4 err=None
+think-on         finish=length tokens=300 tps=42.99 peak=11.45 err=None
+stop             finish=stop tokens=41 tps=29.63 peak=11.46 err=None
+min-ignore       finish=length tokens=40 tps=38.49 peak=10.37 err=None
+bad-words        finish=length tokens=96 tps=33.55 peak=10.43 err=None
+json             finish=stop tokens=52 tps=34.06 peak=10.39 err=None
+tools-auto       finish=tool_calls tokens=37 tps=30.92 peak=11.47 err=None
+tools-required   finish=tool_calls tokens=26 tps=32.15 peak=10.75 err=None

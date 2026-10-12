@@ -1,0 +1,12 @@
+wall 22.2s, aggregate 88.2 tok/s, 8 requests
+  j0     finish=stop tok=124 ttft=6.389s tps=24.03 queue_ms=947 batch=7.31 peak=10.57 err=None
+  j1     finish=length tok=500 ttft=1.376s tps=23.8 queue_ms=1053 batch=3.93 peak=10.57 err=None
+  j2     finish=length tok=500 ttft=1.376s tps=23.8 queue_ms=837 batch=3.93 peak=10.57 err=None
+  j3     finish=stop tok=38 ttft=1.474s tps=23.02 queue_ms=728 batch=8.0 peak=10.57 err=None
+  p0     finish=length tok=200 ttft=1.279s tps=23.63 queue_ms=535 batch=6.82 peak=10.57 err=None
+  p1     finish=length tok=200 ttft=1.279s tps=23.63 queue_ms=353 batch=6.82 peak=10.57 err=None
+  p2     finish=length tok=200 ttft=1.278s tps=23.63 queue_ms=2 batch=6.82 peak=10.57 err=None
+  p3     finish=length tok=200 ttft=1.278s tps=23.64 queue_ms=176 batch=6.82 peak=10.57 err=None
+  invalid JSON: {"name": "Alien", "year": 1979, "tags": ["horror", "science fiction", "space horror", "classic sci-fi", "cult classic", "body horror", "creature feature", "survival horror", "dystopian", "black and wh
+  invalid JSON: {"name": "Aliens", "year": 1986, "tags": ["science fiction", "action", "horror", "space opera", "post-apocalyptic", "military sci-fi", "space marine", "mother ship", "space colony", "space station", "
+FAIL

@@ -1,0 +1,16 @@
+{
+ "file": {
+  "text": "This image displays a smooth gradient transitioning from deep black on the left to bright white on the right, overlaid with a fine, colorful static-like noise pattern that gives it a grainy, analog television appearance. The diagonal sweep of light and shadow creates a sense of depth, while the pervasive digital artifacting suggests either a corrupted signal or an intentional stylistic effect mimicking old media.",
+  "finish": "stop",
+  "error": null,
+  "gen_tokens": 77,
+  "prompt_tokens": 213
+ },
+ "datauri": {
+  "text": " gray",
+  "finish": "stop",
+  "error": null,
+  "gen_tokens": 1,
+  "prompt_tokens": 1047
+ }
+}

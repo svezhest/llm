@@ -1,0 +1,10 @@
+wall 11.4s, aggregate 179.2 tok/s, 8 requests
+  p0     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=618 batch=8.0 peak=10.57 err=None
+  p1     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=452 batch=8.0 peak=10.57 err=None
+  p2     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=959 batch=8.0 peak=10.57 err=None
+  p3     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=2 batch=8.0 peak=10.57 err=None
+  p4     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=351 batch=8.0 peak=10.57 err=None
+  p5     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=791 batch=8.0 peak=10.57 err=None
+  p6     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=180 batch=8.0 peak=10.57 err=None
+  p7     finish=length tok=256 ttft=1.438s tps=25.54 queue_ms=1132 batch=8.0 peak=10.57 err=None
+identical to solo: 7/8; first divergence (chars) [473]

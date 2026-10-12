@@ -1,0 +1,6 @@
+wall 4.2s, aggregate 122.5 tok/s, 4 requests
+  p0     finish=length tok=128 ttft=0.778s tps=36.44 queue_ms=2 batch=4.0 peak=17.8 err=None
+  p1     finish=length tok=128 ttft=0.778s tps=36.45 queue_ms=364 batch=4.0 peak=17.8 err=None
+  p2     finish=length tok=128 ttft=0.778s tps=36.44 queue_ms=140 batch=4.0 peak=17.8 err=None
+  p3     finish=length tok=128 ttft=0.695s tps=36.44 queue_ms=247 batch=4.0 peak=17.8 err=None
+identical to solo: 3/4; first divergence (chars) [274]

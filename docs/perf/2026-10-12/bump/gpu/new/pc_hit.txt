@@ -1,0 +1,10 @@
+c0         ttft=19.57s tokens=64 prompt=7405 err=None
+c1         ttft=0.25s tokens=64 prompt=7397 err=None
+c2         ttft=0.29s tokens=64 prompt=7393 err=None
+c3         ttft=0.40s tokens=64 prompt=7398 err=None
+c4         ttft=0.22s tokens=64 prompt=7389 err=None
+c5         ttft=0.28s tokens=64 prompt=7396 err=None
+c6         ttft=0.29s tokens=64 prompt=7396 err=None
+c7         ttft=0.32s tokens=64 prompt=7395 err=None
+c0-again   ttft=0.10s tokens=64 prompt=7405 err=None
+c1-again   ttft=0.29s tokens=64 prompt=7397 err=None

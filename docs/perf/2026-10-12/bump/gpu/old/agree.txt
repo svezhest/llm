@@ -1,0 +1,5 @@
+no vision_config: text-only checkpoint, loading weights non-strictly (vision tower uninitialised; image requests will not work)
+B= 2: top-1 agreement 100.00% (256/256), KL mean 0.00e+00 p99 0.00e+00 max 0.00e+00, peak 13.2 GB
+B= 4: top-1 agreement 100.00% (512/512), KL mean 8.27e-06 p99 8.05e-05 max 1.33e-04, peak 13.7 GB
+B= 8: top-1 agreement 100.00% (1024/1024), KL mean 8.65e-06 p99 8.95e-05 max 1.46e-03, peak 14.3 GB
+B=16: top-1 agreement 99.71% (2042/2048), KL mean 9.70e-06 p99 1.04e-04 max 3.07e-04, peak 15.5 GB

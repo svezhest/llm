@@ -1,0 +1,9 @@
+file: finish=stop prompt_tokens=213 err=None text='This image displays a smooth gradient transitioning from deep black on'
+datauri: finish=stop prompt_tokens=1047 err=None text=' gray'
+vision identity vs reference: 2/2
+  txt0: 61 tokens, max gap 0.98s, max gap around the URL fetch 0.98s
+  txt1: 103 tokens, max gap 0.31s, max gap around the URL fetch 0.31s
+  txt2: 104 tokens, max gap 0.81s, max gap around the URL fetch 0.81s
+  txt3: 124 tokens, max gap 0.35s, max gap around the URL fetch 0.35s
+  vision row: finish=stop err=None wall 8.9s (URL served after 6.0s)
+PASS

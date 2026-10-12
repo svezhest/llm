@@ -1,0 +1,13 @@
+round 0 gdn_fast=True: 21.18 s
+round 0 gdn_fast=False: 21.10 s
+round 1 gdn_fast=False: 20.76 s
+round 1 gdn_fast=True: 20.33 s
+round 2 gdn_fast=True: 20.31 s
+round 2 gdn_fast=False: 20.91 s
+round 3 gdn_fast=False: 21.08 s
+round 3 gdn_fast=True: 20.92 s
+round 4 gdn_fast=True: 21.02 s
+round 4 gdn_fast=False: 21.60 s
+round 5 gdn_fast=False: 21.70 s
+round 5 gdn_fast=True: 21.61 s
+N=8192: fast 20.97 s, library 21.09 s, x0.994

@@ -1,0 +1,87 @@
+2026-10-12 07:45:21,754 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/qwen36-35b-a3b-mlx-ud3
+2026-10-12 07:45:25,935 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-12 07:45:25,935 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-12 07:45:28,172 INFO  qwen.worker wired limit set to 27.0 GB
+2026-10-12 07:45:28,172 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-10-12 07:45:28,172 INFO  qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-12 07:45:28,179 INFO  worker.mrqmm mrqmm: 130 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x30, linear_attn.in_proj_z x30, linear_attn.out_proj x30, self_attn.k_proj x10, self_attn.o_proj x10, self_attn.q_proj x10, self_attn.v_proj x10); left on quantized_matmul: 6-bit g64 x1, 8-bit g64 N % 8 x40, 4-bit g64 x120, 8-bit g64 N < 512 x100
+2026-10-12 07:45:28,393 INFO  qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 30 layers
+2026-10-12 07:45:28,393 INFO  qwen.worker batching: max_batch 16, KV budget 7.43 GiB (cap 27.0 GiB, prefill reserve 2.4 GiB), KV 5760 B/token, recurrent state 61.4 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50
+2026-10-12 07:45:28,393 INFO  qwen.worker model loaded in 5565 ms
+2026-10-12 07:45:28,413 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+2026-10-12 07:45:28,699 INFO  qwen.worker Generate id=corpus-code0 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:28,724 INFO  qwen.worker id=corpus-code0 prompt_tokens=46 (images=0)
+2026-10-12 07:45:32,840 INFO  qwen.worker id=corpus-code0 finish=length gen_tokens=256 ttft_ms=322 tps=67.5 cached=0 peak=17.56GB active=17.46GB pool=0.00GB queue_ms=26 batch=1.00
+2026-10-12 07:45:32,842 INFO  qwen.worker Generate id=corpus-code1 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:32,843 INFO  qwen.worker id=corpus-code1 prompt_tokens=38 (images=0)
+2026-10-12 07:45:36,735 INFO  qwen.worker id=corpus-code1 finish=length gen_tokens=256 ttft_ms=146 tps=68.3 cached=0 peak=17.54GB active=17.46GB pool=0.00GB queue_ms=2 batch=1.00
+2026-10-12 07:45:36,736 INFO  qwen.worker Generate id=corpus-code2 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:36,737 INFO  qwen.worker id=corpus-code2 prompt_tokens=34 (images=0)
+2026-10-12 07:45:38,400 INFO  qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=62.0 mean_rows=1.00 reserved=0.13/7.43GiB active=16.26GiB
+2026-10-12 07:45:40,618 INFO  qwen.worker id=corpus-code2 finish=length gen_tokens=256 ttft_ms=138 tps=68.4 cached=0 peak=17.54GB active=17.46GB pool=0.00GB queue_ms=3 batch=1.00
+2026-10-12 07:45:40,619 INFO  qwen.worker Generate id=corpus-code3 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:40,619 INFO  qwen.worker id=corpus-code3 prompt_tokens=39 (images=0)
+2026-10-12 07:45:44,518 INFO  qwen.worker id=corpus-code3 finish=length gen_tokens=256 ttft_ms=147 tps=68.3 cached=0 peak=17.55GB active=17.46GB pool=0.00GB queue_ms=2 batch=1.00
+2026-10-12 07:45:44,519 INFO  qwen.worker Generate id=corpus-code4 images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:44,519 INFO  qwen.worker id=corpus-code4 prompt_tokens=30 (images=0)
+2026-10-12 07:45:48,413 INFO  qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=66.4 mean_rows=1.00 reserved=0.13/7.43GiB active=16.26GiB
+2026-10-12 07:45:48,414 INFO  qwen.worker id=corpus-code4 finish=length gen_tokens=256 ttft_ms=139 tps=68.2 cached=0 peak=17.55GB active=17.46GB pool=0.00GB queue_ms=3 batch=1.00
+2026-10-12 07:45:48,415 INFO  qwen.worker Generate id=corpus-seeded images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:48,416 INFO  qwen.worker id=corpus-seeded prompt_tokens=35 (images=0)
+2026-10-12 07:45:50,519 INFO  qwen.worker id=corpus-seeded finish=length gen_tokens=128 ttft_ms=148 tps=65.5 cached=0 peak=17.54GB active=17.48GB pool=0.03GB queue_ms=2 batch=1.00
+2026-10-12 07:45:50,520 INFO  qwen.worker Generate id=corpus-penalties images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:50,520 INFO  qwen.worker id=corpus-penalties prompt_tokens=40 (images=0)
+2026-10-12 07:45:52,558 INFO  qwen.worker id=corpus-penalties finish=length gen_tokens=128 ttft_ms=154 tps=68.1 cached=0 peak=17.55GB active=17.46GB pool=0.01GB queue_ms=2 batch=1.00
+2026-10-12 07:45:52,559 INFO  qwen.worker Generate id=corpus-think-budget images=0 max_tokens=200 template_kwargs={"enable_thinking": true} budget=48
+2026-10-12 07:45:52,559 INFO  qwen.worker id=corpus-think-budget prompt_tokens=22 (images=0)
+2026-10-12 07:45:53,476 INFO  qwen.worker id=corpus-think-budget finish=stop gen_tokens=55 ttft_ms=105 tps=67.9 cached=0 peak=17.52GB active=17.46GB pool=0.02GB queue_ms=2 batch=1.00
+2026-10-12 07:45:53,477 INFO  qwen.worker Generate id=corpus-think-on images=0 max_tokens=300 template_kwargs={"enable_thinking": true} budget=-
+2026-10-12 07:45:53,478 INFO  qwen.worker id=corpus-think-on prompt_tokens=17 (images=0)
+2026-10-12 07:45:57,987 INFO  qwen.worker id=corpus-think-on finish=length gen_tokens=300 ttft_ms=111 tps=68.2 cached=0 peak=17.51GB active=17.46GB pool=0.01GB queue_ms=2 batch=1.00
+2026-10-12 07:45:57,988 INFO  qwen.worker Generate id=corpus-stop images=0 max_tokens=256 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:57,989 INFO  qwen.worker id=corpus-stop prompt_tokens=46 (images=0)
+2026-10-12 07:45:58,342 INFO  qwen.worker id=corpus-stop finish=stop gen_tokens=13 ttft_ms=162 tps=68.5 cached=0 peak=17.56GB active=17.46GB pool=0.04GB queue_ms=2 batch=1.00
+2026-10-12 07:45:58,343 INFO  qwen.worker Generate id=corpus-min-ignore images=0 max_tokens=40 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:58,344 INFO  qwen.worker id=corpus-min-ignore prompt_tokens=15 (images=0)
+2026-10-12 07:45:58,420 INFO  qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=63.2 mean_rows=1.00 reserved=0.13/7.43GiB active=16.26GiB
+2026-10-12 07:45:59,009 INFO  qwen.worker id=corpus-min-ignore finish=length gen_tokens=40 ttft_ms=91 tps=70.0 cached=0 peak=17.50GB active=17.46GB pool=0.02GB queue_ms=2 batch=1.00
+2026-10-12 07:45:59,010 INFO  qwen.worker Generate id=corpus-bad-words images=0 max_tokens=96 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:45:59,010 INFO  qwen.worker id=corpus-bad-words prompt_tokens=38 (images=0)
+2026-10-12 07:46:00,861 INFO  qwen.worker id=corpus-bad-words finish=length gen_tokens=96 ttft_ms=134 tps=56.0 cached=0 peak=17.54GB active=17.46GB pool=0.00GB queue_ms=2 batch=1.00
+2026-10-12 07:46:00,861 INFO  qwen.worker Generate id=corpus-json images=0 max_tokens=200 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:00,867 INFO  qwen.worker id=corpus-json prompt_tokens=19 (images=0)
+2026-10-12 07:46:00,869 INFO  qwen.worker id=corpus-json constrained: response_format=json_schema tool_choice=auto
+2026-10-12 07:46:01,863 INFO  qwen.worker id=corpus-json finish=stop gen_tokens=50 ttft_ms=91 tps=55.4 cached=0 peak=17.51GB active=17.45GB pool=0.02GB queue_ms=8 batch=1.00
+2026-10-12 07:46:01,864 INFO  qwen.worker Generate id=corpus-tools-auto images=0 max_tokens=200 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:01,865 INFO  qwen.worker id=corpus-tools-auto prompt_tokens=288 (images=0)
+2026-10-12 07:46:03,060 INFO  qwen.worker id=corpus-tools-auto finish=stop gen_tokens=37 ttft_ms=642 tps=67.0 cached=0 peak=17.87GB active=17.46GB pool=0.03GB queue_ms=1 batch=1.00
+2026-10-12 07:46:03,062 INFO  qwen.worker Generate id=corpus-tools-required images=0 max_tokens=200 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:03,064 INFO  qwen.worker id=corpus-tools-required prompt_tokens=281 (images=0)
+2026-10-12 07:46:03,065 INFO  qwen.worker id=corpus-tools-required constrained: response_format=- tool_choice=required
+2026-10-12 07:46:04,174 INFO  qwen.worker id=corpus-tools-required finish=stop gen_tokens=26 ttft_ms=619 tps=53.2 cached=0 peak=17.87GB active=17.45GB pool=0.03GB queue_ms=4 batch=1.00
+2026-10-12 07:46:04,331 INFO  qwen.worker Generate id=seq-p0 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:04,332 INFO  qwen.worker id=seq-p0 prompt_tokens=46 (images=0)
+2026-10-12 07:46:06,379 INFO  qwen.worker id=seq-p0 finish=length gen_tokens=128 ttft_ms=169 tps=68.2 cached=0 peak=17.56GB active=17.46GB pool=0.04GB queue_ms=1 batch=1.00
+2026-10-12 07:46:06,379 INFO  qwen.worker Generate id=seq-p1 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:06,380 INFO  qwen.worker id=seq-p1 prompt_tokens=38 (images=0)
+2026-10-12 07:46:08,399 INFO  qwen.worker id=seq-p1 finish=length gen_tokens=128 ttft_ms=147 tps=68.5 cached=0 peak=17.54GB active=17.46GB pool=0.00GB queue_ms=2 batch=1.00
+2026-10-12 07:46:08,399 INFO  qwen.worker Generate id=seq-p2 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:08,400 INFO  qwen.worker id=seq-p2 prompt_tokens=34 (images=0)
+2026-10-12 07:46:08,508 INFO  qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=51.0 mean_rows=1.00 reserved=0.13/7.43GiB active=16.26GiB
+2026-10-12 07:46:10,405 INFO  qwen.worker id=seq-p2 finish=length gen_tokens=128 ttft_ms=138 tps=68.7 cached=0 peak=17.54GB active=17.46GB pool=0.00GB queue_ms=3 batch=1.00
+2026-10-12 07:46:10,405 INFO  qwen.worker Generate id=seq-p3 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:10,406 INFO  qwen.worker id=seq-p3 prompt_tokens=39 (images=0)
+2026-10-12 07:46:12,414 INFO  qwen.worker id=seq-p3 finish=length gen_tokens=128 ttft_ms=146 tps=68.8 cached=0 peak=17.55GB active=17.46GB pool=0.03GB queue_ms=1 batch=1.00
+2026-10-12 07:46:12,568 INFO  qwen.worker Generate id=p2-23654f images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:12,568 INFO  qwen.worker Generate id=p0-9e06d6 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:12,569 INFO  qwen.worker Generate id=p3-6717d7 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:12,569 INFO  qwen.worker Generate id=p1-018990 images=0 max_tokens=128 template_kwargs={"enable_thinking": false} budget=-
+2026-10-12 07:46:12,569 INFO  qwen.worker id=p0-9e06d6 prompt_tokens=46 (images=0)
+2026-10-12 07:46:12,569 INFO  qwen.worker id=p2-23654f prompt_tokens=34 (images=0)
+2026-10-12 07:46:12,570 INFO  qwen.worker id=p3-6717d7 prompt_tokens=39 (images=0)
+2026-10-12 07:46:12,574 INFO  qwen.worker id=p1-018990 prompt_tokens=38 (images=0)
+2026-10-12 07:46:16,745 INFO  qwen.worker id=p3-6717d7 finish=length gen_tokens=128 ttft_ms=417 tps=36.4 cached=0 peak=17.80GB active=17.70GB pool=0.03GB queue_ms=247 batch=4.00
+2026-10-12 07:46:16,746 INFO  qwen.worker id=p2-23654f finish=length gen_tokens=128 ttft_ms=525 tps=36.4 cached=0 peak=17.80GB active=17.70GB pool=0.03GB queue_ms=140 batch=4.00
+2026-10-12 07:46:16,746 INFO  qwen.worker id=p1-018990 finish=length gen_tokens=128 ttft_ms=300 tps=36.4 cached=0 peak=17.80GB active=17.70GB pool=0.03GB queue_ms=364 batch=4.00
+2026-10-12 07:46:16,746 INFO  qwen.worker id=p0-9e06d6 finish=length gen_tokens=128 ttft_ms=663 tps=36.4 cached=0 peak=17.80GB active=17.70GB pool=0.03GB queue_ms=2 batch=4.00
+2026-10-12 07:46:16,773 INFO  qwen.worker worker stopped

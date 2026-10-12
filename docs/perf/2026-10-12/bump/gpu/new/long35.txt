@@ -1,0 +1,2 @@
+long-0: prompt_tokens=56636 ttft=121.017s finish=length peak=19.62 err=None text='The provided log consists of 3,144 entries, each labeled with a timestamp starti'
+long-1: prompt_tokens=56672 ttft=130.294s finish=length peak=19.62 err=None text='The provided log consists of 3,146 entries, each labeled with a sequential ident'

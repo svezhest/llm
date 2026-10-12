@@ -1,0 +1,2 @@
+file: finish=stop prompt_tokens=213 err=None text='This image displays a smooth gradient transitioning from deep black on'
+datauri: finish=stop prompt_tokens=1047 err=None text=' gray'

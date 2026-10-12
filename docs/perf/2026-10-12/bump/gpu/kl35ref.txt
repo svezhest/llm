@@ -1,0 +1,10 @@
+mlx 0.32.3 mlx-vlm 0.7.6 qwen36-35b-a3b-mlx-ud3: 3400 tokens, 3400 scored, prefill+score 9.5 s, peak 22.3 GB -> <scratchpad>/bump/gpu/kl35ref/new_bf16.npz
+mlx 0.31.2 mlx-vlm 0.6.2 qwen36-35b-a3b-mlx-ud3: 3400 tokens, 3400 scored, prefill+score 11.6 s, peak 22.3 GB -> <scratchpad>/bump/gpu/kl35ref/old_bf16.npz
+== ref new_bf16
+new fp16: 3400 positions: top-1 agreement 96.71%, KL mean 1.29e-02 p99 1.73e-01 max 2.71e+00, |dlogp top-1| mean 4.89e-02 max 5.77e+00; prefill+score 5.9 s, peak 19.5 GB
+old fp16: 3400 positions: top-1 agreement 96.82%, KL mean 1.32e-02 p99 1.68e-01 max 2.67e+00, |dlogp top-1| mean 4.95e-02 max 5.70e+00; prefill+score 6.3 s, peak 19.5 GB
+== ref old_bf16
+new fp16: 3400 positions: top-1 agreement 96.24%, KL mean 1.39e-02 p99 2.31e-01 max 1.33e+00, |dlogp top-1| mean 5.35e-02 max 2.24e+00; prefill+score 5.9 s, peak 19.5 GB
+old fp16: 3400 positions: top-1 agreement 96.44%, KL mean 1.35e-02 p99 2.01e-01 max 2.13e+00, |dlogp top-1| mean 5.18e-02 max 3.57e+00; prefill+score 6.3 s, peak 19.5 GB
+old bf16 vs new bf16: 3400 positions: top-1 agreement 96.24%, KL mean 1.49e-02 p99 1.91e-01 max 2.07e+00, |dlogp top-1| mean 5.53e-02 max 2.70e+00; prefill+score 9.5 s, peak 19.5 GB
+KL35 DONE

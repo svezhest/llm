@@ -1,0 +1,10 @@
+cold: ttft=17.129s prompt_tokens=7405
+wall 4.0s, aggregate 112.7 tok/s, 7 requests
+  c1     finish=length tok=64 ttft=1.194s tps=22.63 queue_ms=603 batch=7.0 peak=17.23 err=None
+  c2     finish=length tok=64 ttft=1.195s tps=22.63 queue_ms=12 batch=7.0 peak=17.23 err=None
+  c3     finish=length tok=64 ttft=1.195s tps=22.64 queue_ms=155 batch=7.0 peak=17.23 err=None
+  c4     finish=length tok=64 ttft=1.194s tps=22.64 queue_ms=756 batch=7.0 peak=17.23 err=None
+  c5     finish=length tok=64 ttft=1.194s tps=22.64 queue_ms=302 batch=7.0 peak=17.23 err=None
+  c6     finish=length tok=64 ttft=1.194s tps=22.64 queue_ms=452 batch=7.0 peak=17.23 err=None
+  c7     finish=length tok=64 ttft=1.194s tps=22.64 queue_ms=857 batch=7.0 peak=17.23 err=None
+(check the worker log for 'prompt cache HIT' lines)
