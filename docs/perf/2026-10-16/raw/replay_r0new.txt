@@ -1,0 +1,70 @@
+replay r0: 8 episodes, window 15.0 min, 229 requests done in it (15.3/min), 237 total, errors 0, tasks started 14
+client latency s: mean 30.5 p50 27.9 p90 53.6 max 76.2
+prompt mean 10525 tok; cache hit rate 94.9% (cached_tokens > 0), mean reused 9668 tok
+aggregate (window): prefill 216 tok/s, decode 14.9 tok/s; completion != recorded: 0
+split (worker, joined n=237): queue_s mean 7.9 p50 5.0 p90 21.2; ttft_s mean 4.9 p50 3.4 p90 11.4; decode_s mean 17.7 p50 15.5 p90 30.0; worker_lat_s mean 30.5 p50 27.8 p90 53.6
+
+--- worker log (this run's window, ticks unfiltered) ---
+window 02:36:10–02:51:28 = 15.3 min, requests=237 (15.5/min)
+prompt tokens 2494417 (cached 2291296 = 91.9%), prefilled 203121, generated 13959
+aggregate: prefill 221 tok/s wall, decode 15.2 tok/s wall
+cache: hits 225, misses 12; events {'evict_admit': 0, 'evict_admit_entries': 0, 'evict_growth': 0, 'not_kept': 0, 'gave_up': 0, 'cut_length': 0, 'refused': 0, 'over_cap_warn': 0}
+finish reasons: {'length': 237}  peak max 25.94 GB
+prompt tokens: n=237 mean=10525 p50=9814 p90=16380 max=33247
+prefilled tokens/request: n=237 mean=857 p50=433 p90=2828 max=3512
+gen tokens/request: n=237 mean=59 p50=50 p90=99 max=150
+latency s (Generate→finish): n=237 mean=30.5 p50=27.8 p90=54.1 max=76.1
+queue s: n=237 mean=7.9 p50=5.0 p90=21.3 max=50.7
+ttft s: n=237 mean=4.9 p50=3.4 p90=11.5 max=22.1
+decode s (gen/tps): n=237 mean=17.7 p50=15.5 p90=30.0 max=53.6
+decode tok/s per request: n=237 mean=3.8 p50=3.4 p90=5.4 max=16.5
+latency share: queue 26%, ttft 16%, decode 58%
+prefill rate on requests with >=1500 new tokens: 245 tok/s (prefill/ttft, n=47)
+stores: n=237 mean 628 MB for 10524 tokens, 4.2 checkpoints; entries max 14, total max 9979 MB
+
+decode tok/s per request by prompt length:
+   0–5K: n=16 mean=2.7 p50=2.4
+   5–10K: n=104 mean=4.3 p50=3.9
+  10–15K: n=87 mean=3.5 p50=3.3
+  15–20K: n=18 mean=3.6 p50=3.4
+  20–30K: n=9 mean=3.1 p50=2.8
+  30–∞K: n=3 mean=2.7 p50=2.8
+
+scheduler (10 s ticks): steps/s by rows, with/without a prefill in progress:
+  rows= 0 prefilling=y: ticks=1 steps/s mean=0.00
+  rows= 1 prefilling=n: ticks=1 steps/s mean=7.60
+  rows= 1 prefilling=y: ticks=1 steps/s mean=0.60
+  rows= 2 prefilling=n: ticks=1 steps/s mean=2.70
+  rows= 2 prefilling=y: ticks=5 steps/s mean=3.14
+  rows= 3 prefilling=y: ticks=5 steps/s mean=1.98
+  rows= 4 prefilling=n: ticks=1 steps/s mean=4.00
+  rows= 4 prefilling=y: ticks=12 steps/s mean=3.10
+  rows= 5 prefilling=n: ticks=2 steps/s mean=2.95
+  rows= 5 prefilling=y: ticks=13 steps/s mean=3.13
+  rows= 6 prefilling=n: ticks=4 steps/s mean=4.00
+  rows= 6 prefilling=y: ticks=15 steps/s mean=3.29
+  rows= 7 prefilling=n: ticks=1 steps/s mean=3.90
+  rows= 7 prefilling=y: ticks=13 steps/s mean=2.85
+  rows= 8 prefilling=n: ticks=5 steps/s mean=4.72
+ticks with prefill in progress: 81%;  waiting>0: 74%;  mean rows 5.10; row-steps/s 15.9
+pcache GiB max 9.23, active GiB max 21.50, reserved GiB max 4.50
+
+--- memory (memsampler, per minute: last sample; rates = mean over the minute) ---
+| min | swap used GB | worker MEM GB | worker CMPRS GB | free MB | compressor GB | pageins/s | swapins/s | decompressions/s |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 5.34 | 13.0 | 0.00 | 884 | 0.3 | 233 | 130 | 251 |
+| 1 | 5.16 | 16.0 | 0.00 | 1070 | 0.4 | 95 | 433 | 214 |
+| 2 | 5.04 | 18.0 | 0.36 | 834 | 1.5 | 137 | 117 | 4104 |
+| 3 | 4.86 | 19.0 | 0.60 | 151 | 2.4 | 97 | 213 | 907 |
+| 4 | 4.82 | 17.0 | 0.62 | 2047 | 4.0 | 37 | 46 | 2557 |
+| 5 | 4.80 | 19.0 | 0.58 | 1838 | 1.6 | 59 | 20 | 769 |
+| 6 | 4.80 | 21.0 | 0.58 | 71 | 1.5 | 17 | 17 | 288 |
+| 7 | 4.75 | 20.0 | 0.57 | 552 | 1.4 | 47 | 43 | 394 |
+| 8 | 4.75 | 21.0 | 0.59 | 141 | 1.5 | 20 | 3 | 1338 |
+| 9 | 4.72 | 20.0 | 0.62 | 2031 | 2.1 | 80 | 28 | 3308 |
+| 10 | 4.70 | 20.0 | 0.62 | 1694 | 1.9 | 89 | 14 | 3437 |
+| 11 | 4.63 | 18.0 | 0.59 | 2866 | 1.9 | 168 | 74 | 3332 |
+| 12 | 4.62 | 20.0 | 0.60 | 952 | 2.0 | 244 | 9 | 5626 |
+| 13 | 5.54 | 22.0 | 0.64 | 1586 | 1.4 | 795 | 9 | 11111 |
+| 14 | 5.41 | 22.0 | 0.64 | 1152 | 1.2 | 848 | 132 | 6498 |
+| 15 | 5.36 | 19.0 | 0.67 | 4533 | 0.9 | 129 | 87 | 1881 |

@@ -1,0 +1,42 @@
+=== r0: env QWEN_PROMPT_CACHE_GB=12 episodes 8 duration 15 min (Fri Oct 16 02:35:34 MSK 2026)
+2026-10-16 02:35:39,912 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 12.0 GiB, evicted on demand)
+2026-10-16 02:35:39,928 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+62693  0 /Users/user/Projects/llm/src/worker/.venv/bin/python3 worker.py
+=== r0 done (Fri Oct 16 02:51:42 MSK 2026)
+=== r0: worker sched_timer:/tmp/scratch/w_head env QWEN_PROMPT_CACHE_GB=12 episodes 8 duration 15 min (Fri Oct 16 03:04:53 MSK 2026)
+2026-10-16 03:04:57,362 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 12.0 GiB, evicted on demand)
+2026-10-16 03:04:57,375 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+66865  0 /Users/user/Projects/llm/src/worker/.venv/bin/python3 ../../scripts/perf/agentic/sched_timer.py
+=== r0 done (Fri Oct 16 03:21:47 MSK 2026)
+=== r1: worker sched_timer:/tmp/scratch/w_wt_0322 env QWEN_PROMPT_CACHE_GB=6 QWEN_PROMPT_CACHE_CKPTS=3 QWEN_BATCH_RESERVE_TOKENS=1024 episodes 8 duration 15 min (Fri Oct 16 03:22:49 MSK 2026)
+2026-10-16 03:22:55,328 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 1024 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 6.0 GiB, evicted on demand)
+2026-10-16 03:22:55,343 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+70703  0 /Users/user/Projects/llm/src/worker/.venv/bin/python3 ../../scripts/perf/agentic/sched_timer.py
+=== r1 done (Fri Oct 16 03:39:53 MSK 2026)
+=== r2: worker /tmp/scratch/w_wt_0322 env QWEN_PROMPT_CACHE_GB=9 QWEN_PROMPT_CACHE_CKPTS=3 QWEN_BATCH_RESERVE_TOKENS=1024 episodes 16 duration 15 min (Fri Oct 16 03:50:32 MSK 2026)
+2026-10-16 03:51:45,143 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 1024 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 9.0 GiB, evicted on demand)
+2026-10-16 03:51:45,155 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+75076  5 /Users/user/Projects/llm/src/worker/.venv/bin/python3 ../../scripts/perf/agentic/sched_timer.py
+=== r2 done (Fri Oct 16 04:10:07 MSK 2026)
+=== r0p: worker /tmp/scratch/w_wt_0322 env QWEN_PROMPT_CACHE_GB=12 episodes 8 duration 15 min (Fri Oct 16 04:17:19 MSK 2026)
+2026-10-16 04:18:32,834 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 12.0 GiB, evicted on demand)
+2026-10-16 04:18:32,846 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+77516  5 /Users/user/Projects/llm/src/worker/.venv/bin/python3 ../../scripts/perf/agentic/sched_timer.py
+=== r0p done (Fri Oct 16 04:35:23 MSK 2026)
+=== r3s03: worker /tmp/scratch/w_wt_0322 env QWEN_PROMPT_CACHE_GB=6 QWEN_PROMPT_CACHE_CKPTS=3 QWEN_BATCH_RESERVE_TOKENS=1024 QWEN_BATCH_PREFILL_SHARE=0.3 episodes 8 duration 10 min (Fri Oct 16 04:35:23 MSK 2026)
+2026-10-16 04:36:50,939 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 1024 new tokens/row, prefill share 0.30, prompt cache 0.00 GiB live inside the budget (soft cap 6.0 GiB, evicted on demand)
+2026-10-16 04:36:50,950 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+78870  5 /Users/user/Projects/llm/src/worker/.venv/bin/python3 ../../scripts/perf/agentic/sched_timer.py
+=== r3s03 done (Fri Oct 16 04:48:42 MSK 2026)
+=== r3s07: worker /tmp/scratch/w_wt_0322 env QWEN_PROMPT_CACHE_GB=6 QWEN_PROMPT_CACHE_CKPTS=3 QWEN_BATCH_RESERVE_TOKENS=1024 QWEN_BATCH_PREFILL_SHARE=0.7 episodes 8 duration 10 min (Fri Oct 16 04:48:42 MSK 2026)
+2026-10-16 04:50:09,471 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 1024 new tokens/row, prefill share 0.70, prompt cache 0.00 GiB live inside the budget (soft cap 6.0 GiB, evicted on demand)
+2026-10-16 04:50:09,483 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+  PID NI COMMAND
+79782  5 /Users/user/Projects/llm/src/worker/.venv/bin/python3 ../../scripts/perf/agentic/sched_timer.py
+=== r3s07 done (Fri Oct 16 05:01:49 MSK 2026)

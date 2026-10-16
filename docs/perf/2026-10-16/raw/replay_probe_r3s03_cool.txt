@@ -1,0 +1,8 @@
+model=ornith15-9b-mlx-8bit calibration: 10351 prompt tokens for 24000 filler chars -> 2.35 chars/token, filler 18473 chars
+rep 0 c=1: 1 req, wall 21.8s, agg 5.9 tok/s, ttft mean 18.29s, errors 0, pcache hits 0/1
+
+wrote /tmp/scratch/perf/probe_r3s03_cool.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 1 | 1 | 8096 | 21.8 | 5.9 | 18.29 | 18.29 | 21.85 | 21.85 | 36.0 | - | 12.47 | 0.00 / 0 |
