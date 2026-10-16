@@ -1,0 +1,16 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+loaded; max_batch 16 sync=False consumer=handler
+B=8 all rows decoding after 163.1s; lengths [33047, 28045, 24047, 20037, 16038, 12045, 8037, 5040]; KV per step 4.80 GB = 12.0 ms at 400 GB/s
+round 0 B= 8 base: period median 106.80 ms (q1 99.1 q3 108.0, n=35) fwd_cpu 2.54 async_eval 103.78 enc 0.00 wait 0.01 sample 0.00 iterate 106.67
+round 0 B= 8 nosdpa: period median 71.00 ms (q1 63.9 q3 72.5, n=35) fwd_cpu 2.59 async_eval 67.24 enc 0.00 wait 0.01 sample 0.00 iterate 70.99
+round 0 B= 8 noattn: period median 71.92 ms (q1 64.3 q3 73.0, n=35) fwd_cpu 1.89 async_eval 69.81 enc 0.00 wait 0.01 sample 0.00 iterate 72.03
+round 0 B= 8 base/s: period median 114.25 ms (q1 111.8 q3 116.1, n=35) fwd_cpu 2.59 async_eval 111.16 enc 95.94 wait 0.00 sample 0.00 iterate 114.09
+round 0 B= 8 nosdpa/s: period median 74.79 ms (q1 73.8 q3 80.0, n=35) fwd_cpu 2.64 async_eval 71.83 enc 61.68 wait 0.00 sample 0.00 iterate 74.65
+round 0 B= 8 noattn/s: period median 72.09 ms (q1 71.3 q3 76.8, n=35) fwd_cpu 1.80 async_eval 70.48 enc 48.07 wait 0.00 sample 0.00 iterate 72.57
+B=16 all rows decoding after 4.4s; lengths [33046, 33041, 28045, 28040, 24047, 24047, 20037, 20033, 16041, 16038, 12045, 12043, 8037, 8031, 5040, 5040]; KV per step 9.59 GB = 24.0 ms at 400 GB/s
+round 0 B=16 base: period median 155.13 ms (q1 152.2 q3 158.0, n=35) fwd_cpu 3.46 async_eval 151.91 enc 0.00 wait 0.02 sample 0.00 iterate 155.62
+round 0 B=16 nosdpa: period median 108.84 ms (q1 106.5 q3 111.9, n=35) fwd_cpu 3.92 async_eval 104.21 enc 0.00 wait 0.02 sample 0.00 iterate 108.50
+round 0 B=16 noattn: period median 97.26 ms (q1 94.6 q3 98.1, n=35) fwd_cpu 2.00 async_eval 94.98 enc 0.00 wait 0.02 sample 0.00 iterate 97.22
+round 0 B=16 base/s: period median 162.01 ms (q1 158.2 q3 167.9, n=35) fwd_cpu 3.30 async_eval 158.27 enc 139.17 wait 0.01 sample 0.00 iterate 162.05
+round 0 B=16 nosdpa/s: period median 106.24 ms (q1 103.3 q3 111.0, n=35) fwd_cpu 3.42 async_eval 102.16 enc 90.00 wait 0.01 sample 0.00 iterate 105.60
+round 0 B=16 noattn/s: period median 92.74 ms (q1 91.6 q3 93.9, n=35) fwd_cpu 1.82 async_eval 90.74 enc 62.11 wait 0.01 sample 0.00 iterate 92.82

@@ -1,0 +1,97 @@
+mlx 0.32.3, device applegpu_g13s, steps 15, rounds 2
+
+== ragged8: B=8 lens(K)=[5, 8, 12, 16, 20, 24, 28, 33]; KV per step 4.78 GB = 12.0 ms at 400 GB/s
+  num flat_mlx: {'rel_rms': 0.00029308206962231574, 'max_abs': 9.875744581222534e-06}
+  num flat_rattn: {'rel_rms': 0.00020756567926725008, 'max_abs': 7.631257176399231e-06}
+  num flat_rattn_vs_mlx_max: 1.52587890625e-05
+  num peaky_mlx: {'rel_rms': 0.00028051898027061647, 'max_abs': 0.0007702112197875977}
+  num peaky_rattn: {'rel_rms': 0.00020819260129800672, 'max_abs': 0.00044918060302734375}
+  num peaky_rattn_vs_mlx_max: 0.0009765625
+  round 0 rows               21.50 ms/step  peak +4 MB
+  round 0 rattn@256:2        21.42 ms/step  peak +1 MB
+  round 0 rattn@512:4        21.30 ms/step  peak +0 MB
+  round 0 rows_k             20.50 ms/step  peak +5 MB
+  round 0 rattn_k@256:2      19.09 ms/step  peak +10 MB
+  round 0 rattn_k@512:4      18.45 ms/step  peak +5 MB
+  round 0 upd                 4.84 ms/step  peak +0 MB
+  round 0 bw                 18.13 ms/step  peak +1 MB
+  round 1 bw                 18.11 ms/step  peak +1 MB
+  round 1 upd                 4.96 ms/step  peak +0 MB
+  round 1 rattn_k@512:4      18.75 ms/step  peak +5 MB
+  round 1 rattn_k@256:2      19.17 ms/step  peak +10 MB
+  round 1 rows_k             20.58 ms/step  peak +4 MB
+  round 1 rattn@512:4        21.92 ms/step  peak +6 MB
+  round 1 rattn@256:2        22.92 ms/step  peak +11 MB
+  round 1 rows               22.67 ms/step  peak +4 MB
+  ragged8 rows               22.08 ms/step (1.000 of rows)  peak +4 MB
+  ragged8 rattn@256:2        22.17 ms/step (1.004 of rows)  peak +11 MB
+  ragged8 rattn@512:4        21.61 ms/step (0.979 of rows)  peak +6 MB
+  ragged8 rows_k             20.54 ms/step (0.930 of rows)  peak +5 MB
+  ragged8 rattn_k@256:2      19.13 ms/step (0.866 of rows)  peak +10 MB
+  ragged8 rattn_k@512:4      18.60 ms/step (0.842 of rows)  peak +5 MB
+  ragged8 upd                 4.90 ms/step (0.222 of rows)  peak +0 MB
+  ragged8 bw                 18.12 ms/step (0.820 of rows)  peak +1 MB
+
+== u12: B=8 lens(K)=[12, 12, 12, 12, 12, 12, 12, 12]; KV per step 3.15 GB = 7.9 ms at 400 GB/s
+  num flat_mlx: {'rel_rms': 0.00029453130028149764, 'max_abs': 8.843839168548584e-06}
+  num flat_rattn: {'rel_rms': 0.0002086153184769581, 'max_abs': 7.640570402145386e-06}
+  num flat_rattn_vs_mlx_max: 1.52587890625e-05
+  num peaky_mlx: {'rel_rms': 0.0002912303660841876, 'max_abs': 0.0006864070892333984}
+  num peaky_rattn: {'rel_rms': 0.00020902342978590358, 'max_abs': 0.0004456043243408203}
+  num peaky_rattn_vs_mlx_max: 0.0009765625
+  round 0 rows               17.50 ms/step  peak +4 MB
+  round 0 rattn@256:2        16.03 ms/step  peak +7 MB
+  round 0 rattn@512:4        17.72 ms/step  peak +33 MB
+  round 0 rows_k             16.39 ms/step  peak +4 MB
+  round 0 rattn_k@256:2      13.47 ms/step  peak +7 MB
+  round 0 rattn_k@512:4      13.43 ms/step  peak +4 MB
+  round 0 upd                 4.31 ms/step  peak +66 MB
+  round 0 bw                 13.97 ms/step  peak +1 MB
+  round 1 bw                 13.45 ms/step  peak +1 MB
+  round 1 upd                 4.56 ms/step  peak +0 MB
+  round 1 rattn_k@512:4      13.37 ms/step  peak +4 MB
+  round 1 rattn_k@256:2      13.06 ms/step  peak +7 MB
+  round 1 rows_k             16.33 ms/step  peak +4 MB
+  round 1 rattn@512:4        15.00 ms/step  peak +1 MB
+  round 1 rattn@256:2        16.00 ms/step  peak +0 MB
+  round 1 rows               17.89 ms/step  peak +103 MB
+  u12 rows               17.69 ms/step (1.000 of rows)  peak +103 MB
+  u12 rattn@256:2        16.01 ms/step (0.905 of rows)  peak +7 MB
+  u12 rattn@512:4        16.36 ms/step (0.925 of rows)  peak +33 MB
+  u12 rows_k             16.36 ms/step (0.925 of rows)  peak +4 MB
+  u12 rattn_k@256:2      13.26 ms/step (0.750 of rows)  peak +7 MB
+  u12 rattn_k@512:4      13.40 ms/step (0.757 of rows)  peak +4 MB
+  u12 upd                 4.43 ms/step (0.251 of rows)  peak +66 MB
+  u12 bw                 13.71 ms/step (0.775 of rows)  peak +1 MB
+
+== ragged16: B=16 lens(K)=[5, 8, 12, 16, 20, 24, 28, 33, 5, 8, 12, 16, 20, 24, 28, 33]; KV per step 9.57 GB = 23.9 ms at 400 GB/s
+  num flat_mlx: {'rel_rms': 0.00029322705299866754, 'max_abs': 1.1624768376350403e-05}
+  num flat_rattn: {'rel_rms': 0.00020772582430304322, 'max_abs': 7.640570402145386e-06}
+  num flat_rattn_vs_mlx_max: 1.52587890625e-05
+  num peaky_mlx: {'rel_rms': 0.00028869131117193695, 'max_abs': 0.0007802248001098633}
+  num peaky_rattn: {'rel_rms': 0.00020848627598845612, 'max_abs': 0.0004845857620239258}
+  num peaky_rattn_vs_mlx_max: 0.0009765625
+  round 0 rows               42.18 ms/step  peak +9 MB
+  round 0 rattn@256:2        39.62 ms/step  peak +1 MB
+  round 0 rattn@512:4        38.86 ms/step  peak +1 MB
+  round 0 rows_k             39.85 ms/step  peak +9 MB
+  round 0 rattn_k@256:2      34.36 ms/step  peak +1 MB
+  round 0 rattn_k@512:4      34.24 ms/step  peak +16 MB
+  round 0 upd                 8.39 ms/step  peak +0 MB
+  round 0 bw                 33.60 ms/step  peak +2 MB
+  round 1 bw                 33.53 ms/step  peak +2 MB
+  round 1 upd                 8.44 ms/step  peak +0 MB
+  round 1 rattn_k@512:4      34.28 ms/step  peak +16 MB
+  round 1 rattn_k@256:2      34.46 ms/step  peak +1 MB
+  round 1 rows_k             40.69 ms/step  peak +9 MB
+  round 1 rattn@512:4        39.77 ms/step  peak +1 MB
+  round 1 rattn@256:2        41.27 ms/step  peak +1 MB
+  round 1 rows               44.64 ms/step  peak +9 MB
+  ragged16 rows               43.41 ms/step (1.000 of rows)  peak +9 MB
+  ragged16 rattn@256:2        40.44 ms/step (0.932 of rows)  peak +1 MB
+  ragged16 rattn@512:4        39.31 ms/step (0.906 of rows)  peak +1 MB
+  ragged16 rows_k             40.27 ms/step (0.928 of rows)  peak +9 MB
+  ragged16 rattn_k@256:2      34.41 ms/step (0.793 of rows)  peak +1 MB
+  ragged16 rattn_k@512:4      34.26 ms/step (0.789 of rows)  peak +16 MB
+  ragged16 upd                 8.42 ms/step (0.194 of rows)  peak +0 MB
+  ragged16 bw                 33.56 ms/step (0.773 of rows)  peak +2 MB

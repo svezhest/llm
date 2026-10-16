@@ -15,6 +15,19 @@ tick also a B-row decode tick. Prints medians per section (ms per step).
   cd src/worker && QWEN_MODEL=../../weights/ornith15-9b-mlx-8bit QWEN_KV_BITS=0 \
     QWEN_BATCH_PREFILL_SHARE=1 PYTHONPATH=. .venv/bin/python $SP/prof/step_prof.py \
     --B 1,4,8,16 --ctx 1k --gen 300 [--consumer handler|bare] [--sync] [--dot] [--json out]
+
+Long / ragged contexts (2026-10-16): --ctx 12k (every row ~12K prompt tokens) or
+--ctx ragged:5k,8k,...,33k (row i gets length i mod the list; rows sorted longest
+first). --common builds every system prompt from ONE filler text (row i = a prefix
+of it + its own task), so with QWEN_PROMPT_CACHE=1 only the longest row prefills
+cold and the others resume from its checkpoints (each row still owns its KV
+buffers); set QWEN_CASCADE=0 then, else the rows form a cascade group.
+--stagger submits the first (longest) row alone and the rest once it decodes.
+Attention variants for --ab (alternated with --ab-steps): base (the worker's
+step), nosdpa (per-row update_and_fetch kept, SDPA skipped), noattn (both
+skipped), rattn (per-row update_and_fetch + one src/worker/rattn.py launch,
+PROF_RATTN=chunk:ns); a "/s" suffix runs that variant with a sync after every step (GPU
+time), e.g. --ab base,nosdpa,noattn,base/s,nosdpa/s,noattn/s.
 """
 import argparse, collections, json, os, statistics, sys, threading, time
 sys.path.insert(0, os.getcwd())
@@ -24,7 +37,9 @@ import worker_pb2 as pb
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--B", default="1,4,8,16")
-ap.add_argument("--ctx", default="1k")          # 1k (~600-token prompts) or 8k (~8K)
+ap.add_argument("--ctx", default="1k")          # 1k (~600-token prompts), 8k (~8K), Nk, ragged:Ak,Bk,...
+ap.add_argument("--common", action="store_true", help="one shared filler text (prompt-cache friendly)")
+ap.add_argument("--stagger", action="store_true", help="submit the longest row first, the rest once it decodes")
 ap.add_argument("--gen", type=int, default=300)
 ap.add_argument("--consumer", default="handler")
 ap.add_argument("--sync", action="store_true", help="eval each step at once (GPU time)")
@@ -72,7 +87,38 @@ def filler(n_chars, seed):
     return "\n".join(out)
 
 
-NCH = {"1k": 1500, "8k": 28000}[a.ctx]
+def _ktok(x):
+    x = x.strip().lower()
+    return int(float(x[:-1]) * 1000) if x.endswith("k") else int(x)
+
+
+if a.ctx in ("1k", "8k"):
+    NCH = {"1k": 1500, "8k": 28000}[a.ctx]
+    LENS = None                  # chars, as before
+elif a.ctx.startswith("ragged:"):
+    LENS = sorted((_ktok(x) for x in a.ctx[7:].split(",")), reverse=True)
+else:
+    LENS = [_ktok(a.ctx)]
+SYSHEAD = "You are a meticulous senior engineer. Reference notes follow.\n"
+_SYS = {}                        # target tokens -> system text (exact token count via the tokenizer)
+
+
+def _sys_for(n_tok, seed):
+    """A system message of ~n_tok tokens of `seed`'s filler: binary search on
+    the number of filler lines (the user message adds ~40 tokens)."""
+    key = (n_tok, seed)
+    if key in _SYS:
+        return _SYS[key]
+    lines = filler(int(n_tok * 4.5) + 4000, seed).split("\n")
+    lo, hi = 1, len(lines)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(tok.encode(SYSHEAD + "\n".join(lines[:mid]))) <= n_tok:
+            lo = mid
+        else:
+            hi = mid - 1
+    _SYS[key] = SYSHEAD + "\n".join(lines[:lo])
+    return _SYS[key]
 
 
 SAMPLINGS = {
@@ -86,7 +132,10 @@ SAMP = ["greedy"]
 
 
 def request(i, rid):
-    sysmsg = "You are a meticulous senior engineer. Reference notes follow.\n" + filler(NCH, f"s{i}")
+    if LENS is None:
+        sysmsg = SYSHEAD + filler(NCH, "common" if a.common else f"s{i}")
+    else:
+        sysmsg = _sys_for(LENS[i % len(LENS)], "common" if a.common else f"s{i}")
     user = TASKS[i % len(TASKS)] + ". Answer in great detail, at least 2000 words, with many code examples."
     p = pb.Params(max_tokens=a.gen, ignore_eos=a.ignore_eos, seed=1234 + i, **SAMPLINGS[SAMP[0]],
                   chat_template_kwargs_json=json.dumps({"enable_thinking": False}))
@@ -219,6 +268,46 @@ def _oldall(self):
 
 
 IMPL["oldall"] = _oldall
+MODE = {"attn": "base", "sync": False}
+RATTN_CFG = tuple(int(x) for x in os.environ.get("PROF_RATTN", "512:4").split(":"))     # attention variant + per-step sync of the current variant
+for _v in ("base", "nosdpa", "noattn", "rattn"):
+    IMPL[_v] = _iter
+
+
+def run_variant(self, v):
+    name, _, flag = v.partition("/")
+    MODE["sync"] = flag == "s"
+    MODE["attn"] = name if name in ("nosdpa", "noattn", "rattn") else "base"
+    return IMPL[name](self)
+
+
+def attn_variant(self, x, mask=None, cache=None, position_ids=None, position_embeddings=None, **kw):
+    """Qwen3_5Attention.__call__ for the attention variants: base = the worker's
+    _rows_attention; on a RowsKV step without groups, nosdpa keeps the per-row
+    update_and_fetch (made a dependency of the output, else MLX would never run
+    it) and skips the SDPA, noattn skips both (queries stand in for the output)."""
+    mode = MODE["attn"]
+    if mode == "base" or not isinstance(cache, W.RowsKV) or cache.plan is not None:
+        return W._rows_attention(self, x, mask=mask, cache=cache, position_ids=position_ids,
+                                 position_embeddings=position_embeddings, **kw)
+    B, L, _ = x.shape
+    queries, keys, values, gate, _ = self._prepare_projected_qkv(
+        self.q_proj(x), self.k_proj(x), self.v_proj(x), None, position_ids, position_embeddings, None)
+    out = queries
+    if mode == "rattn":                 # per-row append, then ONE ragged launch (src/worker/rattn.py)
+        import rattn
+        for i, c in enumerate(cache.caches):
+            c.update_and_fetch(keys[i:i + 1], values[i:i + 1])
+        out = rattn.attention(queries, [c.keys for c in cache.caches], [c.values for c in cache.caches],
+                              [c.offset for c in cache.caches], self.scale, chunk=RATTN_CFG[0], ns=RATTN_CFG[1])
+    elif mode == "nosdpa":
+        dep = []
+        for i, c in enumerate(cache.caches):
+            k, v = c.update_and_fetch(keys[i:i + 1], values[i:i + 1])
+            dep.append((k[:, :, -1:, :] + v[:, :, -1:, :]).sum(axis=1, keepdims=True))
+        out = queries + 0 * mx.concatenate(dep, axis=0)
+    out = out.transpose(0, 2, 1, 3).reshape(B, L, -1)
+    return self.o_proj(out * mx.sigmoid(gate))
 for _ms in (1, 2, 4, 6, 8, 12):
     IMPL[f"s{_ms}"] = _sleepy(_ms)
 last_end = [None]
@@ -248,7 +337,7 @@ def iterate(self):
             cur["sw"] = self.steps % a.ab_steps < 2       # first steps after a switch
     t = time.perf_counter()
     try:
-        return IMPL[CURV[0]](self)
+        return run_variant(self, CURV[0])
     finally:
         flags["iter"] = False
         if cur is not None:
@@ -288,7 +377,7 @@ def async_eval(*arrs):
             mx.export_to_dot(path, *arrs)
             DOT["done"] = open(path).read()
         t, c = time.perf_counter(), time.thread_time()
-        if a.sync:
+        if a.sync or MODE["sync"]:
             _async_eval(*arrs)
             cur["enc_cpu"] = cur.get("enc_cpu", 0.0) + time.thread_time() - c
             cur["enc"] = cur.get("enc", 0.0) + time.perf_counter() - t
@@ -334,6 +423,7 @@ eng = W.Engine(model_path)
 eng.load()
 LM = type(eng.model.language_model)
 LM.__call__ = timed("fwd", LM.__call__)
+W._Q35.Qwen3_5Attention.__call__ = attn_variant
 eng.sched.quantize = timed("quantize", eng.sched.quantize)
 tok = getattr(eng.processor, "tokenizer", eng.processor)
 print(f"loaded; max_batch {eng.max_batch} sync={a.sync} consumer={a.consumer}", flush=True)
@@ -459,10 +549,20 @@ for rnd in range(a.rounds):
         if str(B) == a.cprofile:
             import cProfile
             pr = cProfile.Profile()
+        reqs = [request(i, f"prof-{rnd}-{sm}-{B}-{i}") for i in range(B)]
         for i in range(B):
-            th = threading.Thread(target=fn, args=(request(i, f"prof-{rnd}-{B}-{i}"), outs))
+            th = threading.Thread(target=fn, args=(reqs[i], outs))
             th.start()
             ths.append(th)
+            if a.stagger and i == 0:
+                while not eng.sched.rows:
+                    time.sleep(0.05)
+        while not (len(eng.sched.rows) == B and eng.sched.task is None) and any(t.is_alive() for t in ths):
+            time.sleep(0.05)
+        lens = sorted((r.pos for r in eng.sched.rows), reverse=True)
+        kv = 32768 * sum(lens)          # fp16 KV read per step: 8 FA layers x 4 heads x 256 x 2 B x (K+V)
+        print(f"B={B} all rows decoding after {time.time() - t0:.1f}s; lengths {lens}; "
+              f"KV per step {kv / 1e9:.2f} GB = {kv / 400e9 * 1e3:.1f} ms at 400 GB/s", flush=True)
         if a.dot or pr is not None:
             # once all rows run: grab one step's graph / profile the scheduler thread
             while not (len(eng.sched.rows) == B and eng.sched.task is None):
@@ -498,12 +598,18 @@ for rnd in range(a.rounds):
                     if (r.get("v") == vv and not r.get("sw") and r.get("Bstep") == B and r["B0"] == B
                             and not r["task"] and recs[i + 1].get("v") == vv):
                         sel.append(1e3 * (recs[i + 1]["t0"] - r["t0"]))
-                if sel:
+                if len(sel) >= 2:
                     q = statistics.quantiles(sel, n=4)
                     results.setdefault(f"{B}_{vv}", []).append(statistics.median(sel))
+                    rv = [r for r in recs if r.get("v") == vv and not r.get("sw") and r.get("Bstep") == B
+                          and r["B0"] == B and not r["task"]]
+                    sec = {k: 1e3 * statistics.median([r.get(k, 0.0) for r in rv])
+                           for k in ("fwd_cpu", "async_eval", "enc", "wait", "sample", "iterate")}
+                    results.setdefault(f"{B}_{vv}_sec", []).append(sec)
                     print(f"round {rnd} B={B:2d} {vv}: period median {statistics.median(sel):.2f} ms "
-                          f"(q1 {q[0]:.1f} q3 {q[2]:.1f}, n={len(sel)}) wait "
-                          f"{1e3 * statistics.median([r.get('wait', 0) for r in recs if r.get('v') == vv]):.2f}", flush=True)
+                          f"(q1 {q[0]:.1f} q3 {q[2]:.1f}, n={len(sel)}) " +
+                          " ".join(f"{k} {x:.2f}" for k, x in sec.items()), flush=True)
+            results.setdefault(f"{B}_lens", lens)
             continue
         m = summarize(B, list(rec))
         results[f"{rnd}_{sm}_{v}_{B}"] = m

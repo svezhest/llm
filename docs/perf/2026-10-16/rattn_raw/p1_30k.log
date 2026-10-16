@@ -1,0 +1,9 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+loaded; max_batch 16 sync=False consumer=handler
+B=8 all rows decoding after 83.7s; lengths [30056, 30052, 30051, 30050, 30048, 30048, 30047, 30046]; KV per step 7.88 GB = 19.7 ms at 400 GB/s
+round 0 B= 8 base: period median 85.38 ms (q1 76.5 q3 94.1, n=27) fwd_cpu 3.30 async_eval 80.70 enc 0.00 wait 0.02 sample 0.00 iterate 84.10
+round 0 B= 8 nosdpa: period median 53.14 ms (q1 46.7 q3 75.0, n=28) fwd_cpu 2.77 async_eval 49.12 enc 0.00 wait 0.01 sample 0.00 iterate 53.12
+round 0 B= 8 noattn: period median 47.19 ms (q1 44.3 q3 67.0, n=28) fwd_cpu 2.29 async_eval 43.68 enc 0.00 wait 0.02 sample 0.00 iterate 47.27
+round 0 B= 8 base/s: period median 95.21 ms (q1 81.3 q3 98.4, n=28) fwd_cpu 2.70 async_eval 90.21 enc 79.65 wait 0.00 sample 0.00 iterate 95.57
+round 0 B= 8 nosdpa/s: period median 60.20 ms (q1 54.8 q3 80.9, n=28) fwd_cpu 2.54 async_eval 57.23 enc 50.33 wait 0.00 sample 0.00 iterate 60.18
+round 0 B= 8 noattn/s: period median 53.57 ms (q1 49.3 q3 70.4, n=28) fwd_cpu 2.02 async_eval 51.18 enc 35.09 wait 0.00 sample 0.00 iterate 54.42
