@@ -1,0 +1,40 @@
+window 01:39:31–02:04:48 = 25.3 min, requests=427 (16.9/min)
+prompt tokens 5122057 (cached 4826089 = 94.2%), prefilled 295968, generated 25118
+aggregate: prefill 195 tok/s wall, decode 16.6 tok/s wall
+cache: hits 414, misses 13
+finish reasons: {'stop': 427}  peak max 27.50 GB
+prompt tokens: n=427 mean=11995 p50=10871 p90=20482 max=33247
+prefilled tokens/request: n=427 mean=693 p50=379 p90=2762 max=4655
+gen tokens/request: n=427 mean=59 p50=50 p90=97 max=167
+latency s (Generate→finish): n=427 mean=27.7 p50=25.7 p90=44.9 max=84.0
+queue s: n=427 mean=5.5 p50=2.5 p90=14.4 max=71.1
+ttft s: n=427 mean=4.2 p50=2.7 p90=11.9 max=20.5
+decode s (gen/tps): n=427 mean=18.0 p50=16.1 p90=30.0 max=56.1
+decode tok/s per request: n=427 mean=3.6 p50=3.5 p90=5.3 max=9.2
+latency share: queue 20%, ttft 15%, decode 65%  (ttft may include queue)
+prefill rate on requests with >=1500 new tokens: 212 tok/s (prefill/ttft, n=59)
+
+decode tok/s per request by prompt length:
+   0–5K: n=23 mean=2.8 p50=2.3
+   5–10K: n=161 mean=3.9 p50=3.9
+  10–15K: n=125 mean=3.8 p50=3.7
+  15–20K: n=73 mean=3.4 p50=3.2
+  20–30K: n=38 mean=3.0 p50=3.0
+  30–∞K: n=7 mean=3.9 p50=3.2
+
+scheduler (10 s ticks): steps/s by rows, with/without a prefill in progress:
+  rows= 1 prefilling=n: ticks=1 steps/s mean=0.20
+  rows= 1 prefilling=y: ticks=2 steps/s mean=1.50
+  rows= 2 prefilling=y: ticks=6 steps/s mean=1.92
+  rows= 3 prefilling=y: ticks=9 steps/s mean=2.71
+  rows= 4 prefilling=n: ticks=1 steps/s mean=4.60
+  rows= 4 prefilling=y: ticks=12 steps/s mean=2.84
+  rows= 5 prefilling=n: ticks=3 steps/s mean=4.10
+  rows= 5 prefilling=y: ticks=19 steps/s mean=2.74
+  rows= 6 prefilling=n: ticks=3 steps/s mean=4.17
+  rows= 6 prefilling=y: ticks=33 steps/s mean=2.88
+  rows= 7 prefilling=n: ticks=8 steps/s mean=3.45
+  rows= 7 prefilling=y: ticks=23 steps/s mean=3.16
+  rows= 8 prefilling=n: ticks=17 steps/s mean=3.81
+ticks with prefill in progress: 76%;  waiting>0: 66%;  mean rows 5.64
+pcache GiB max 11.99, active GiB max 23.08

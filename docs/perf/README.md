@@ -27,6 +27,16 @@ distilled version; these are the evidence.
   `segments_partA.md`, `cascade_b1.md`, `cascade_b2b3.md`, `cascade_b2b3_fixes.md`; design:
   `design/prompt_cache_opt.md`, `prompt_cache_opt_2.md`, `cascade_plan.md`.
 
+- `2026-10-16/` — the AppWorld agentic load (8 processes, 5–33K contexts, 94 % cache hits):
+  `HANDOFF-appworld.md` (the user's handoff + the diagnosis and the night's summary),
+  `replay_bench.md` (replay of the recorded traces: memory knobs, 16 episodes, prefill share;
+  prefill is 76–80 % of the scheduler, the GPU throttles ×1.5–1.85 under sustained load; raw
+  `raw/replay_*`), `rattn_microbench.md` (decode profile at 12–30K and the ragged multi-row
+  attention kernel `src/worker/rattn.py`, not integrated; raw `rattn_raw/`), `chain_evict_gpu.md`
+  (hit == cold gate for the chain checkpoints + eviction order, 34/34; raw `raw/chain_evict_gpu_*`),
+  `design/packed_prefill.md` (varlen/packed prefill feasibility: no-go), sims `evict_sim.py`,
+  `chain_ckpts_sim.py`; reviews `reviews/chain_evict.md`, `chain_evict_fixes.md`, `rattn.md`.
+
 Tools live in `scripts/perf/` (`prof/` in-process profilers and A/B scripts run from
 `src/worker` with its venv, `microbench/` kernel-level microbenchmarks and the batching
 prototype, `final/` the end-to-end driver + table builders). Scripts that write files use
