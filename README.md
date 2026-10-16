@@ -247,9 +247,25 @@ newer one: the only resume point below `quantized_kv_start`). Its end state move
 over only where it is a slab end of the new prompt, so an exact repeat of the
 older prompt resumes at its deepest checkpoint instead. At most
 `QWEN_PROMPT_CACHE_CKPTS` (12) checkpoints per entry: the end of the system block
-and the last three message starts are never thinned. `QWEN_PROMPT_CACHE_GB` (3) is
-a soft cap: past it the least recently used entries go at store (the newest stays,
-alone if need be). Entries **share their KV**: an entry is a chain of immutable
+and the last three message starts are never thinned. An entry that absorbed an older
+one (a **chain**: a conversation or an agent episode continuing turn by turn) keeps
+fewer: the end of the system block, the last `QWEN_PROMPT_CACHE_CHAIN_MARKS` (3)
+message starts, the stride checkpoints within its last `QWEN_PROMPT_CACHE_CHAIN_TAIL`
+(4096) tokens (regenerate / an edited last turn), those inside the first user message
+(found by its role token, system message or not; a shared document: another
+conversation over it can diverge anywhere inside, and
+then resumes near the divergence instead of re-prefilling the document; thinned by
+the cap) and its end state; the next turn resumes at those, so the strides and
+boundaries deeper in the history were dead weight (AppWorld agent, 9B: an 11K-token
+entry carried ~10 states of 49 MB beside 355 MB of KV, 932 MB in all; with the chain
+policy ~4–5 states: ~670 MB at 11K, ~1.65 GB at 41K instead of 2.0 GB, simulated
+through the scheduler). The document strides cost nothing for AppWorld (its first
+user message is ~300 tokens) and 2–4 more states (100–200 MB) per entry when the first
+message is an 8K document. Repeating an older turn still hits, at its last message
+start for the previous turn, else at the end of the system block (or a stride of the
+first user message); fresh entries keep the cap-12 policy; `QWEN_PROMPT_CACHE_CHAIN_MARKS=-1`
+turns the chain policy off. `QWEN_PROMPT_CACHE_GB` (3) is a soft cap: past it entries
+go at store (the newest stays, alone if need be) in the **eviction order** below. Entries **share their KV**: an entry is a chain of immutable
 segments, a store copies only the tokens past its resume point out of the request's
 cache and reuses the older entry's segments for the rest, so 16 conversations over
 one 8K system prompt hold it once (~1.4 GB for all 16 on the 9B by the design
@@ -257,18 +273,35 @@ estimate, not yet measured; every entry used to carry its own copy: 6 fit in 3.2
 measured); a hit concatenates the pieces once
 into the buffer its prefill would have built anyway (bit-identical). The cache's
 live bytes (every buffer once) count against the batch memory budget: a store
-evicts LRU entries down to what the running rows leave; a new entry that does not
+evicts entries down to what the running rows leave; a new entry that does not
 fit there even alone is not kept, and then the cache stays as it was (nothing
 absorbed, evicted or copied; counted as an eviction). An admission or a growing row
-evicts LRU entries when only the cache is in the way (an admission spares the entry
+evicts entries when only the cache is in the way (an admission spares the entry
 it would resume from at least one slab deep, and evicts nothing when that would not
 get it in; a growing row never evicts the entry a running prefill resumed from).
 When that entry alone keeps the next request out, the request waits for a running
 row to end only if the hit saves at least `QWEN_PROMPT_CACHE_KEEP_TOKENS` (8192)
 tokens of prefill, and at most `QWEN_PROMPT_CACHE_KEEP_WAIT_S` (10 s); then (or at
-once for a shallower hit) the entry is evicted and the request starts cold. A
+once for a shallower hit) the entry is evicted and the request starts cold.
+Eviction order (every eviction above): entries a waiting request would resume from
+(a slab deep or more; the next `QWEN_MAX_BATCH` in line and an admitted request whose
+prefill has not started yet) go last; when a request gives up its hit, that entry goes
+first; stale entries go first, least recently used first: not used within the last
+round (more than twice as many text-request lookups + stores since they were stored or
+hit as there are entries: a finished conversation or episode; vision requests do not
+count, they would age live episodes) or, unless a waiting request would resume from
+it, idle for `QWEN_PROMPT_CACHE_STALE_S` (300 s: an idle cache); when every entry was used within the
+round (N conversations / agent episodes taking turns), the most recently used goes,
+since its next turn is the furthest away. Plain LRU evicts exactly the episode whose
+turn is next, and its full re-prefill stores an entry that evicts the next one in line:
+8 episodes round-robin in a cap that holds 7 missed 28 of 32 turns with LRU and 5 with
+this order (CPU test); an event simulation of the AppWorld load (8 episodes, 5–8 GB of
+cache) served 13–60 % more requests than LRU at 5–8 GB (equal at 10 GB), and evicting
+the largest entry instead of the most recent one (also tried) 3–10 % fewer than this
+order. A
 failed store only logs; the request goes on. mlx-vlm's own trim is never used
-(broken for quantized KV tuples). Vision requests never touch the cache.
+(broken for quantized KV tuples). Vision requests never touch the cache (nor tick its
+round clock).
 
 Measured on Ornith-1.5 9B (fp16 KV, 7.5K-token system prompt, temperature 0),
 TTFT cold → cached, output byte-identical to the cold run in all five:
@@ -286,8 +319,8 @@ a cold prefill (±noise over 3 A/B runs). Through the gateway, 4.3K prompt: 9.4 
 past 5K): cold, `QWEN_PROMPT_CACHE=0`, exact repeat, next turn, same system
 prompt only. Logs: `prompt cache HIT n/m tokens reused (common
 prefix k)` / `MISS` / `store: n tokens, c checkpoints, MB (e entries, X MB total)
-reused=r gap=g absorbed=a pieces=p` (gap: common-prefix tokens it could not resume
-from; pieces: segments in its KV chain).
+reused=r gap=g absorbed=a pieces=p states=S MB` (gap: common-prefix tokens it could not resume
+from; pieces: segments in its KV chain; states: its recurrent-state checkpoints + end state).
 Responses carry `usage.prompt_tokens_details.cached_tokens` (vLLM's field);
 the gateway counts `qwen_gateway_cached_tokens_total`; the worker's Health reports
 entries, live bytes, hits, misses and evictions (a new entry not kept at store counts
@@ -493,7 +526,9 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_FREQUENCY_PENALTY` / `QWEN_REPETITION_PENALTY` | worker | `0` / `1.0` |
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — cap on a whitespace run in a `response_format` answer |
 | `QWEN_PROMPT_CACHE` | worker | `0` (set `1`: multi-slot prefix cache with recurrent-state checkpoints) |
-| `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (LRU at store, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
+| `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (evicted at store in the round-aware order, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
+| `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — an entry unused this long (and wanted by no waiting request) is stale: evicted first, LRU, even within the round of turns; `0` = off (the tick rule only) |
+| `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the end of the system block, this many last message starts, the strides in this many last tokens and inside the first user message, and its end state (`-1` marks: off, the `_CKPTS` policy everywhere) |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — a request kept out only by the cache entry it would resume from waits for a running row to end only for a hit this deep, and only this long; else the entry is evicted and the request starts cold (8K tokens ≈ 14 s of 9B prefill, more than the wait) |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (see *Cascade attention*); only with `QWEN_KV_BITS=0` + `QWEN_PROMPT_CACHE=1` + max_batch ≥ 3, else off; `0` = the per-row path bit for bit |
 | `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` — rows sharing a prefix before a group forms, its minimum length in tokens, bitwise prefix check per join |

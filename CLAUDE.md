@@ -360,20 +360,62 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   to `QWEN_PROMPT_CACHE_CKPTS` (`_thin`) never drops the end of the system block
   (`starts[1]`) or the last three `<|im_start|>` (mapped to slab ends, inherited
   ones too); strides and older turns' boundaries go first, closest pair's left.
-  `QWEN_PROMPT_CACHE_GB` (3) is a soft cap (LRU at store, the newest stays, alone
-  if over with a warning); the cache's live bytes (`_PrefixCache.bytes`: every
+  **Chain policy** (2026-10-16, AppWorld handoff: an 11K agentic entry was 932 MB,
+  ~60 % GDN states): an entry that absorbs an older one (`covered`) keeps only
+  `chain[0]` = the end of the system block + the last `QWEN_PROMPT_CACHE_CHAIN_MARKS`
+  (3) message starts + the stride checkpoints ≥ end − `QWEN_PROMPT_CACHE_CHAIN_TAIL`
+  (4096) + the strides inside the first user message (the first `<|im_start|>user` block,
+  by `Engine._im_user`; unknown role → `starts[1]..starts[2]`; a shared
+  document: a sibling conversation diverging inside it resumes near the divergence, not
+  at the system block), thinned with `chain[1]` (the marks) protected; + its end state.
+  Trade-off (review 2026-10-16 #6, `chain_ckpts_sim.py` with `SIM_USER0`): free for
+  AppWorld (300-token first message: 11.4K entry 669 MB either way), +2–4 states
+  (+100–200 MB) per entry for an 8K first message (13.5K 687 → 785 MB, 34K 1415 → 1562);
+  the alternative (chain filter only from the 2nd absorption) was rejected: it keeps
+  nothing of the document past turn 3. The quantized floor is applied by `store` (the
+  chain is not pre-filtered). Computed in
+  `_prompt_cache` (`chain`), applied in `store`; fresh entries keep the cap-12
+  policy; `CHAIN_MARKS=-1` = off. Byte-identical (a subset of valid checkpoints).
+  Simulated through the scheduler (CPU, production knobs, AppWorld-shaped turns,
+  9B bytes, `docs/perf/2026-10-16/chain_ckpts_sim.py`): 11.4K 1012 → 669 MB (12 → 5
+  states), 41K 1995 → 1652 MB, resume
+  positions unchanged; an older turn repeated resumes at its last message start
+  (previous turn) or the system block. Store log `states=` = checkpoints + end MB.
+  `QWEN_PROMPT_CACHE_GB` (3) is a soft cap (at store, the newest stays, alone
+  if over with a warning); **eviction order** (`_PrefixCache.victim`, every eviction:
+  store, `_fits`, `_regrow`): entries a waiting request would resume from ≥ a slab
+  deep (`_Scheduler._wanted`: the admitted request whose prefill has not started + the
+  first `max_batch` waiting, the queue copied under `cv`; peeks memoized per request in
+  `req.peeked`: `pc.version` bumps once per kept store (publish / rollback), an eviction
+  invalidates only the memos that pointed at it; weakref)
+  last; stale ones (`_PrefixCache.stale`: `pc.seq − e.seq > 2 × len(entries)`, the clock
+  ticking at every text lookup and store — no hit / store of it within a round of turns;
+  vision does not tick: 2 ticks per vision request made live episodes stale, 28/32
+  misses with one image per text turn, review round 2 — or, unless wanted, unused for
+  `QWEN_PROMPT_CACHE_STALE_S` (300 s): an idle cache) first, LRU; all live → MRU (round-robin episodes: the latest
+  one's next turn is the furthest; LRU evicted the next in line, and its re-prefill
+  the one after: 28/32 misses vs 5 in `test_round_robin_episodes_keep_hitting`;
+  event sim of the AppWorld load +13–60 % requests served at 5–8 GB, "largest
+  first" 3–10 % worse than MRU: `docs/perf/2026-10-16/evict_sim.py`; `evict_sim.py clock`:
+  the lookup+store clock gives identical results, and so does + 300 s / 120 s wall-clock
+  age when wanted entries are exempt — without the exemption 300 s cost 6–12 % of the
+  requests served at 4–6 GB, where queue waits pass 300 s); the cache's live bytes (`_PrefixCache.bytes`: every
   buffer once) count against the batch budget: a store first sizes the new entry
   (its segment from the row's shapes, `_Seg.estimate`, exact) and, if it alone is
   over budget + prefill reserve − reserved, drops it before anything changes —
   nothing absorbed, evicted or copied, logged "not kept", counted in `evictions`;
-  else it absorbs, evicts LRU entries down to that headroom, then copies `[at, len)`;
+  else it absorbs, evicts entries (victim order) down to that headroom, then copies `[at, len)`
+  (`wanted` is asked before anything changes and only when an eviction is coming; its
+  failure is logged and costs the order only; anything raising between the publish and
+  the segment rolls back: the new entry out, the absorbed ones back — never a
+  half-built entry, whose hits would restore a too-short KV);
   `_fits` evicts on demand but spares the entry `peek` says the request would resume
-  from when that is ≥ `QWEN_PREFILL_STEP` deep (memoized `req.bounds`), and evicts
+  from when that is ≥ `QWEN_PREFILL_STEP` deep (memoized `req.bounds`, `req.peeked`), and evicts
   nothing when even that would not admit it (budget or live check). When that entry
   alone keeps the head out, the head waits for a row to end only for a hit ≥
   `QWEN_PROMPT_CACHE_KEEP_TOKENS` (8192) and at most `QWEN_PROMPT_CACHE_KEEP_WAIT_S`
   (10 s, from its first refusal: `req.keep_since`); then, or at once for a shallower
-  hit, the entry goes too (logged "gives up its N-token hit"). `_regrow` never evicts
+  hit, the entry goes too, first (logged "gives up its N-token hit"). `_regrow` never evicts
   the running prefill's parent (`row.parent`; the snapshot closure holds an
   `_Inherit`, not the entry, and drops it and the checkpoint dict right after its
   store — a DFlash run keeps the closure for its whole decode). Quantized entries keep
@@ -381,7 +423,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   restore holds copies, so eviction frees memory at once, except the pieces an
   in-flight prefill resumed from (its `_Inherit`, released at its store). A failed store is
   logged, the request goes on. Store log: `… MB (n entries, X MB total) reused=r
-  gap=split−reused absorbed=k pieces=c`; `Usage.cached_tokens` = reused; Health has
+  gap=split−reused absorbed=k pieces=c states=S MB`; `Usage.cached_tokens` = reused; Health has
   entries / bytes / hits / misses / evictions. Never trim with the library; never share mx.array
   *objects* between cache copies (`a[i] = v` rebinds the Python object in place
   — slice to get a new one, buffers are copy-on-write). On a hit set
@@ -420,7 +462,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     the reservation is allowed and holds back new admissions; past budget +
     prefill reserve the growing row ends with `length` while other rows run — a
     lone row is never cut); the prompt cache's live bytes count beside the
-    reservations and give way first (LRU evicted on demand); live check `active +
+    reservations and give way first (evicted on demand, `victim` order); live check `active +
     reserve + prefill reserve ≤ cap`. Cap in `_batch_cap`, budget in `_batch_budget`.
   - Time share: every prefill slab, the last one too (a cache hit's only slab),
     sets `resume` (`_slab_done`), so decode steps run between short prefills
@@ -629,7 +671,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PRESENCE_PENALTY` / `QWEN_FREQUENCY_PENALTY` / `QWEN_REPETITION_PENALTY` | worker | `1.5` / `0` / `1.0` — **benchmarks/reasoning: presence `0`** + card sampler (see README) |
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — whitespace-run cap in response_format answers |
 | `GATEWAY_OPENAI_DEFAULTS` / `GATEWAY_THINKING` / `GATEWAY_SERVED_MODEL_NAMES` / `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | unset / unset (`on`/`off` forces) / unset / `0` (= rest of context) — see README |
-| `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: LRU at store; counted live in the batch budget, evicted on demand) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
+| `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: evicted at store; counted live in the batch budget, evicted on demand; order: wanted by the queue last, stale LRU first, else MRU) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
+| `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — unused this long and wanted by no waiting request = stale (evicted first, LRU) even within the round; `0` = off |
+| `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the system-block end, the last N message starts, strides in the last N tokens and in the first user message + its end state; `-1` marks = off |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (fp16 KV + prompt cache + max_batch ≥ 3 only, else off; unset/empty = `1`, anything but `1` off); `0` = today's per-row path bit for bit |

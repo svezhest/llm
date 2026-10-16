@@ -15,7 +15,8 @@ import pytest
 from numpy.lib.array_utils import byte_bounds
 
 import worker
-from conftest import Cold, IM_START, check_cold, positions, prompts, request, run, same, scheduler
+from conftest import (Cold, IM_START, check_cold, positions, prompts, request, run, same,
+                      scheduler, vision_ids, vision_inputs)
 from test_prompt_cache import GEN, cold, conversation, fill, small  # noqa: F401
 
 
@@ -661,3 +662,398 @@ def test_queue_ms_counts_until_the_prefill_starts(dense, monkeypatch):
     assert b.t0 - admitted["b"] > 0.3                         # decode ran in between
     assert b.queue_ms == int((b.t0 - b.t_arrival) * 1000)
     assert a.t0 == admitted["a"]                               # an empty batch starts at once
+
+
+# --- agentic eviction order (QWEN_PROMPT_CACHE, victim) ---------------------------
+def stub(n, seq, used):
+    e = types.SimpleNamespace(ids=[0] * n, seq=seq, used=used, arrays=[], nbytes=0)
+    return e
+
+
+def test_victim_order(monkeypatch):
+    """Wanted entries last; stale ones (not used within the last round:
+    more clock ticks than 2 x entries since; a turn = a lookup + a store)
+    first, LRU among them; when every entry is live, the most recently used
+    (its next turn is the furthest away)."""
+    monkeypatch.setattr(worker, "time", types.SimpleNamespace(time=lambda: 110.0))  # none idle
+    pc = worker._PrefixCache()
+    a, b, c, d = stub(1, 20, 100.0), stub(1, 22, 101.0), stub(1, 24, 102.0), stub(1, 26, 103.0)
+    pc.entries = [a, b, c, d]
+    pc.seq = 28                                     # a round = 4 turns = 8 ticks: all live
+    assert pc.victim(pc.entries) is d               # MRU
+    assert pc.victim(pc.entries, wanted=[d]) is c
+    assert pc.victim(pc.entries, wanted=[a, b, c, d]) is d
+    pc.seq = 29                                     # a: 9 ticks old > 8: stale
+    assert pc.victim(pc.entries) is a
+    pc.seq = 31                                     # a, b stale: LRU among them
+    assert pc.victim(pc.entries) is a and pc.victim([b, c, d]) is b
+    assert pc.victim(pc.entries, wanted=[a]) is b   # a stale entry wanted: kept
+    assert pc.victim([c, d], wanted=[c, d]) is d
+
+
+def test_admission_spares_entries_the_queue_would_resume_from(dense, small):
+    """Admission evicting for the head of the queue spares the entry the
+    head would resume from (as before) and, now, the ones of the requests
+    behind it, though the most recently used one is wanted by the second
+    in line; it evicts the next most recent instead. The memoized peek
+    follows every change of the cache."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    ws = fill(sched, n=4)
+    head = request(ws[0][:30] + prompts([6], 300)[0], 4, "h")
+    second = request(ws[3][:30] + prompts([6], 301)[0], 4, "s")
+    third = request(prompts([12], 302)[0], 4, "t")                 # resumes from nothing
+    for r in (head, second, third):
+        sched.submit(r)
+    e0, e1, e2, e3 = pc.entries
+    assert sched._wanted() == [e0, e3]
+    v, memo = pc.version, second.peeked
+    assert sched._peek(second)[0] is e3 and second.peeked is memo  # memoized: no change
+    assert memo[0] == v and memo[2] >= worker.PREFILL_STEP
+    assert pc.victim([e1, e2, e3]) is e3                           # e3: the MRU, would go first
+    sched.reserved = 1 << 20
+    sched.budget = sched.reserved + sched._reserve(head) + pc.bytes - 1
+    assert sched._fits(head, 1)
+    assert pc.entries == [e0, e1, e3] and pc.evictions == 1        # e2, not e3 nor e0
+    assert sched._peek(second)[0] is e3 and second.peeked[0] == pc.version
+    assert pc.evict(keep=[e0, e1]) and pc.entries == [e0, e1]    # its entry goes: peek again
+    assert sched._peek(second) == pc.peek(second.ids, sched._ends(second)) and \
+        sched._peek(second)[0] is not e3
+    sched.waiting.clear()
+    sched.reserved = 0
+
+
+def test_round_robin_episodes_keep_hitting(dense, small, monkeypatch):
+    """8 agent episodes taking turns round-robin under a cache cap that holds
+    7 of their entries: LRU evicts exactly the episode whose turn is next,
+    and its re-prefill evicts the next one in line (every turn a miss after
+    the first round); the round-aware order evicts the most recent one:
+    about one miss a round. Outputs equal either way (and to cold runs)."""
+    now = [1000.0]
+
+    def clock():
+        now[0] += 0.01
+        return now[0]
+    monkeypatch.setattr(worker, "time", types.SimpleNamespace(time=clock))
+    monkeypatch.setattr(worker, "PROMPT_CACHE_CHAIN_TAIL", 0)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_CKPTS", 4)    # fresh entries as big as chained ones
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", 3.0)
+    eps = [conversation(5, 400 + 10 * k, system=6, user=lambda i: 6, answer=lambda i: 9)
+           for k in range(8)]
+    order = [(k, t) for t in range(5) for k in range(8)]
+
+    def go():
+        sched = scheduler(dense)
+        pc = sched.eng._pcache
+        outs, misses = {}, []
+        for k, t in order:
+            r = request(eps[k][t], 3, f"e{k}t{t}")
+            if pc.entries:   # the cap: 7 entries of today's largest size, not 8
+                worker.PROMPT_CACHE_GB = 7.5 * max(e.nbytes for e in pc.entries) / worker.GIB
+            outs.update(run(sched, [r]))
+            misses.append(r.reused == 0)
+        assert len(pc.entries) == 7 and pc.evictions >= 4
+        return outs, sum(misses[8:])
+
+    with monkeypatch.context() as m:
+        m.setattr(worker._PrefixCache, "victim",
+                  lambda self, left, wanted=(): min(left, key=lambda e: e.used))
+        lru, lru_misses = go()
+    new, new_misses = go()
+    assert new == lru
+    for k, t in order[-8:]:
+        rid = f"e{k}t{t}"
+        assert new[rid] == cold(dense, eps[k][t], 3, rid)
+    # measured: LRU 28 of 32 (every turn from the second round on: 24), the
+    # round-aware order 5 (2 in the round where the entries outgrow the cap,
+    # then one a round)
+    assert lru_misses >= 24
+    assert new_misses <= 5
+
+
+# --- review of the chain / eviction patch (docs/perf/2026-10-16/reviews/chain_evict.md) ---
+def queue_entries(sched, ws, n, seed=500):
+    """n waiting requests, the i-th resuming from the i-th entry a slab deep."""
+    reqs = [request(ws[i][:30] + prompts([6], seed + i)[0], 2, f"w{i}") for i in range(n)]
+    for r in reqs:
+        sched.submit(r)
+    return reqs
+
+
+def test_wanted_copies_the_queue_under_the_lock(dense, small):
+    """Finding 1: handlers append to `waiting` while _wanted peeks (each peek
+    may take milliseconds): it iterates a copy taken under the lock, so a
+    submit in between cannot raise "deque mutated during iteration" (which
+    failed every running row). Finding 4: only the first max_batch waiting
+    requests count. Finding 7: the admitted request whose prefill has not
+    started yet counts too, first."""
+    import threading
+    sched = scheduler(dense, max_batch=2)
+    pc = sched.eng._pcache
+    ws = fill(sched, n=3)
+    e0, e1, e2 = pc.entries
+    queue_entries(sched, ws, 3)
+    real = sched._peek
+
+    def peek(req):
+        sched.submit(request(prompts([12], 600)[0], 2, "late"))     # a handler meanwhile
+        return real(req)
+    sched._peek = peek
+    assert sched._wanted() == [e0, e1]                 # the third is past max_batch
+    del sched._peek
+    with sched.cv:                                     # the copy is taken under the lock
+        t = threading.Thread(target=sched._wanted)
+        t.start()
+        t.join(0.2)
+        assert t.is_alive()
+    t.join()
+    row = types.SimpleNamespace(req=request(ws[2][:30] + prompts([6], 610)[0], 2, "adm"),
+                                started=False)
+    sched.task_row = row
+    assert sched._wanted() == [e2, e0, e1]
+    row.started = True                                 # its lookup ran: row.parent is kept
+    assert sched._wanted() == [e0, e1]
+    sched.task_row = None
+    sched.waiting.clear()
+
+
+def test_wanted_needs_a_slab_deep_hit(dense, small):
+    """An entry a waiting request would resume from less than a slab deep is
+    not spared (as _fits keeps the head's only from a slab on)."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    a = [IM_START] + prompts([5], 620)[0] + [IM_START] + prompts([30], 621)[0] + GEN
+    run(sched, [request(a, 2, "a")])
+    (e,) = pc.entries
+    shallow = request(a[:7] + prompts([20], 622)[0] + GEN, 2, "s")
+    deep = request(a[:30] + prompts([6], 623)[0] + GEN, 2, "d")
+    assert sched._peek(shallow)[0] is e and 0 < sched._peek(shallow)[1] < worker.PREFILL_STEP
+    assert sched._peek(deep)[0] is e and sched._peek(deep)[1] >= worker.PREFILL_STEP
+    sched.submit(shallow)
+    assert sched._wanted() == []
+    sched.submit(deep)
+    assert sched._wanted() == [e]
+    sched.waiting.clear()
+
+
+def test_peek_memo_follows_an_added_entry(dense, small):
+    """A waiting request's memoized peek (no hit) is redone after a store
+    adds an entry it would resume from (pc.version bumps once per kept
+    store: at publish, not again for its segment)."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    fill(sched, n=2)
+    x = prompts([30], 630)[0]
+    waiting = request(x + prompts([6], 631)[0], 2, "w")
+    assert sched._peek(waiting) == (None, 0)
+    v = pc.version
+    run(sched, [request(x + prompts([6], 632)[0], 2, "other")])
+    assert pc.version == v + 1
+    new = pc.entries[-1]
+    e, depth = sched._peek(waiting)
+    assert e is new and depth >= worker.PREFILL_STEP
+    sched.submit(waiting)
+    assert sched._wanted() == [new]
+    sched.waiting.clear()
+
+
+def half(pc, ids):
+    """The KV the entry for `ids` (prompt[:-1]) covers, in tokens."""
+    (e,) = [e for e in pc.entries if e.ids == ids[:-1]]
+    return max(hi for _, _, hi in e.chain)
+
+
+@pytest.mark.parametrize("parent", [False, True], ids=["fresh", "resumed"])
+def test_store_survives_a_failing_wanted(dense, small, monkeypatch, parent):
+    """Finding 2: the queue peek raising during a store that evicts costs
+    only the order: it is asked before anything changes, the entry is fully
+    built (KV over all its tokens; it was published without its segment
+    before) and every hit answers as cold — a fresh entry (before: IndexError
+    on its next hit) and one resumed from a parent (before: silently wrong
+    output)."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    fill(sched, n=3)
+    t1, t2 = conversation(2, 91, system=30, user=lambda i: 30)
+    if parent:
+        run(sched, [request(t1, 2, "t1")])
+        ids = t2
+    else:
+        ids = [IM_START] + prompts([40], 777)[0] + GEN
+
+    def boom():
+        raise RuntimeError("deque mutated during iteration")
+    sched._wanted = boom
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", (pc.bytes * 0.9) / worker.GIB)
+    ev = pc.evictions
+    r = request(ids, 3, "a")
+    assert run(sched, [r])["a"] == cold(dense, ids, 3, "a")
+    assert pc.evictions > ev and (r.reused > 0) == parent
+    assert half(pc, ids) == len(ids) - 1
+    del sched._wanted
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", 3.0)
+    again = request(ids, 6, "regen")
+    assert run(sched, [again])["regen"] == cold(dense, ids, 6, "regen")
+    assert again.reused == len(ids) - 1
+    assert check_cold(pc, Cold(dense))
+
+
+def test_store_failing_while_evicting_rolls_back(dense, small, monkeypatch):
+    """Finding 2: anything raising between the entry's publish and its
+    segment (here the eviction order) leaves no half-built entry: the new
+    one goes, the turn it absorbed comes back, the cache restores cold bits
+    and a regenerate answers as cold."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    fill(sched, n=2)
+    t1, t2 = conversation(2, 92, system=30, user=lambda i: 30)
+    run(sched, [request(t1, 2, "t1")])
+    before = list(pc.entries)
+    v = pc.version
+
+    def boom(left, wanted=()):
+        raise RuntimeError("victim failed")
+    pc.victim = boom
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", (pc.bytes * 0.9) / worker.GIB)
+    r = request(t2, 3, "t2")
+    assert run(sched, [r])["t2"] == cold(dense, t2, 3, "t2") and r.reused > 0
+    assert set(map(id, pc.entries)) == set(map(id, before))
+    assert all(e.ids != t2[:-1] for e in pc.entries)
+    assert pc.bytes == pc.bytes_of(pc.entries) and pc.version > v
+    del pc.victim
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", 3.0)
+    again = request(t2, 6, "regen")
+    assert run(sched, [again])["regen"] == cold(dense, t2, 6, "regen")
+    assert check_cold(pc, Cold(dense))
+
+
+def test_give_up_evicts_the_heads_entry_first(dense, small, monkeypatch):
+    """Finding 3: when the head gives up the hit that alone keeps it out,
+    that entry goes first; another waiting request's entry (the most recent
+    one) stays when evicting the head's alone admits it."""
+    monkeypatch.setattr(worker, "PROMPT_CACHE_KEEP_TOKENS", 1 << 30)   # give up at once
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    h_ids = [IM_START] + prompts([120], 801)[0] + GEN
+    s_ids = [IM_START] + prompts([20], 802)[0] + GEN
+    run(sched, [request(h_ids, 1, "H")])
+    run(sched, [request(s_ids, 1, "S")])
+    H, S = pc.entries
+    head = request(h_ids[:100] + prompts([6], 803)[0], 2, "head")
+    second = request(s_ids[:18] + prompts([6], 804)[0], 2, "second")
+    sched.submit(head)
+    sched.submit(second)
+    assert sched._wanted() == [H, S]
+    sched.reserved = 1 << 20
+    need = sched._reserve(head)
+    sched.budget = sched.reserved + need + (S.nbytes + H.nbytes) // 2   # H alone over
+    assert S.nbytes < H.nbytes // 2
+    assert sched._fits(head, 1)
+    assert pc.entries == [S] and pc.evictions == 1
+    sched.waiting.clear()
+    sched.reserved = 0
+
+
+def test_lookups_advance_the_round_clock(dense, small):
+    """Finding 5: the staleness clock ticks at every lookup too (a turn = a
+    lookup + a store: rule > 2 x entries). An entry hit again and again
+    while another is never used: the unused one turns stale and goes first
+    (with a store-only clock both stayed live and the hit one, the most
+    recent, went)."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    ws = fill(sched, n=2)
+    A, B = pc.entries
+    assert (pc.seq, A.seq, B.seq) == (4, 2, 4)
+    q = request(ws[0][:30] + prompts([6], 640)[0], 2, "q")
+    for _ in range(5):
+        hit, _, _ = pc.lookup(q.ids, sched._ends(q))
+        assert hit is A
+    assert pc.seq == 9 and A.seq == 9
+    assert pc.victim(pc.entries) is B
+    pc.lookup(q.ids, sched._ends(q))
+    assert pc.seq - B.seq > 2 * len(pc.entries)
+
+
+# --- round 2 of the review ---------------------------------------------------------
+def fake_clock(monkeypatch, step=0.01, start=1000.0):
+    now = [start]
+
+    def clock():
+        now[0] += step
+        return now[0]
+    monkeypatch.setattr(worker, "time", types.SimpleNamespace(time=clock))
+    return now
+
+
+def test_round_robin_with_vision_traffic_keeps_hitting(dense, small, monkeypatch):
+    """R2-1: the round-robin episodes of test_round_robin_episodes_keep_hitting
+    with a vision request after every text turn. Vision traffic touches no
+    entry and does not tick the round clock (ticking it made every live
+    episode stale: 28 of 32 misses, LRU again); the misses stay at the
+    text-only level."""
+    fake_clock(monkeypatch)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_CHAIN_TAIL", 0)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_CKPTS", 4)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", 3.0)
+    eps = [conversation(5, 400 + 10 * k, system=6, user=lambda i: 6, answer=lambda i: 9)
+           for k in range(8)]
+    order = [(k, t) for t in range(5) for k in range(8)]
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    misses = []
+    for k, t in order:
+        r = request(eps[k][t], 3, f"e{k}t{t}")
+        if pc.entries:   # the cap: 7 entries of today's largest size, not 8
+            worker.PROMPT_CACHE_GB = 7.5 * max(e.nbytes for e in pc.entries) / worker.GIB
+        run(sched, [r])
+        misses.append(r.reused == 0)
+        ids = vision_ids(700 + len(misses))
+        v = request(ids, 2, f"v{len(misses)}")
+        v.images, v.vision = ["img.png"], vision_inputs(ids)
+        assert run(sched, [v])[v.id][2][0] == "done"
+    assert len(pc.entries) == 7 and pc.evictions >= 4
+    assert sum(misses[8:]) <= 5            # text only: 5 (LRU / ticking vision: 28)
+
+
+def test_idle_entries_go_first(dense, small, monkeypatch):
+    """R2-1: an entry untouched for more than QWEN_PROMPT_CACHE_STALE_S is
+    stale even within the round of ticks: it goes before the live MRU one
+    (0 = off: the MRU goes). A waiting request's entry is never idle."""
+    now = fake_clock(monkeypatch)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_STALE_S", 300.0)
+    for stale_s, gone in ((300.0, 0), (0.0, 2)):
+        monkeypatch.setattr(worker, "PROMPT_CACHE_STALE_S", stale_s)
+        sched = scheduler(dense)
+        pc = sched.eng._pcache
+        ws = prompts([40] * 4, 650)
+        run(sched, [request(ws[0], 2, "a")])
+        now[0] += 400.0                                        # a: idle 400 s
+        for i in (1, 2):
+            run(sched, [request(ws[i], 2, "bc"[i - 1])])
+        entries = list(pc.entries)
+        a = entries[0]
+        assert pc.seq - a.seq <= 2 * len(entries)              # live by the tick rule
+        assert pc.stale(a, worker.time.time()) == (stale_s > 0)
+        assert not pc.stale(a, worker.time.time(), wanted=True)
+        assert pc.victim(entries, wanted=entries) is entries[2]  # all wanted: MRU
+        monkeypatch.setattr(worker, "PROMPT_CACHE_GB", (pc.bytes * 1.2) / worker.GIB)
+        run(sched, [request(ws[3], 2, "d")])                    # the store evicts one
+        assert pc.evictions == 1
+        assert entries[gone] not in pc.entries and len(pc.entries) == 3
+        monkeypatch.setattr(worker, "PROMPT_CACHE_GB", 3.0)
+
+
+def test_evict_survives_a_failing_wanted(dense, small, caplog):
+    """R2-3: _fits / _regrow pass the queue peek to evict as a callable; its
+    failure is logged and costs only the order (it used to leave tick() and
+    fail every running row)."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    fill(sched, n=3)
+
+    def boom():
+        raise RuntimeError("peek failed")
+    with caplog.at_level(logging.ERROR, logger="qwen.worker"):
+        assert pc.evict(wanted=boom)
+    assert len(pc.entries) == 2 and "entries are unknown" in caplog.text
