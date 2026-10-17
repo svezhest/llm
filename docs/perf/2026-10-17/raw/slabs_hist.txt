@@ -1,0 +1,64 @@
+requests with all slabs logged: 447 (hits 423, misses 24); slabs 1055 = 2.36/request (hits 1.82, misses 11.92)
+sum of slab time 1041.3 s; tokens 382524
+
+slabs per request:
+
+| slabs | hits | misses |
+|---|---|---|
+| 1 | 97 | 0 |
+| 2 | 310 | 0 |
+| 3 | 14 | 0 |
+| 5 | 2 | 0 |
+| 7 | 0 | 18 |
+| 15 | 0 | 1 |
+| 26 | 0 | 2 |
+| 27 | 0 | 1 |
+| 29 | 0 | 1 |
+| 37 | 0 | 1 |
+
+tokens per slab (all requests; t = the whole _advance, incl. the decode step queued ahead of it):
+
+| tokens | slabs | % of slabs | of which in hits | ends: m / s / end | median t ms | ms per token | % of slab time |
+|---|---|---|---|---|---|---|---|
+| 1–8 | 336 | 32 | 333 | 94 / 0 / 242 | 114 | 21.61 | 3.4 |
+| 9–32 | 19 | 2 | 18 | 1 / 0 / 18 | 138 | 6.12 | 0.3 |
+| 33–128 | 99 | 9 | 80 | 16 / 0 / 83 | 285 | 3.55 | 2.9 |
+| 129–255 | 168 | 16 | 168 | 69 / 0 / 99 | 595 | 3.04 | 9.9 |
+| 256–511 | 187 | 18 | 29 | 182 / 0 / 5 | 857 | 2.56 | 15.9 |
+| 512–1023 | 144 | 14 | 84 | 144 / 0 / 0 | 2317 | 2.73 | 30.9 |
+| 1024–2047 | 87 | 8 | 49 | 82 / 5 / 0 | 3489 | 2.43 | 29.1 |
+| 2048–2048 | 15 | 1 | 8 | 0 / 15 / 0 | 5441 | 2.60 | 7.7 |
+
+hit requests, slab shapes (tokens, binned: tail ≤ 16, short ≤ 128, else the rounded size):
+    67  800 + t
+    52  s
+    47  200 + t
+    43  200
+    36  t + 300
+    28  1500 + t
+    27  t + s
+    20  100 + t
+    17  s + t
+    16  t + 100
+    15  500 + t
+    15  300 + t
+     6  t + 200
+     6  400 + t
+     6  t + 1500 + t
+hit requests whose last slab is ≤ 16 tokens: 239/423; their last slab: median 6 tokens, 121 ms
+hit requests in one slab: 97
+slab position in its request: first 350, middle 258, last 350, only 97
+
+policies (cost model: slab_cost.py (isolated, synced), 64-row tiles: 141 ms/tile at 10240, 158 ms/tile at 24576); the 'today' re-cut is checked against the logged slabs:
+
+| policy | requests | slabs | slabs/request (hits / misses) | modelled prefill s | saved s vs today | saved % of the window's busy time |
+|---|---|---|---|---|---|---|
+| today | 447 | 1055 | 2.36 (1.82 / 11.92) | 930.7 | 0.0 | 0.0 |
+| tail | 447 | 813 | 1.82 (1.25 / 11.79) | 913.3 | 17.5 | 1.5 |
+| head | 447 | 961 | 2.15 (1.60 / 11.92) | 924.0 | 6.7 | 0.6 |
+| min | 447 | 719 | 1.61 (1.03 / 11.79) | 906.2 | 24.5 | 2.1 |
+| policy | 447 | 908 | 2.03 (1.82 / 5.79) | 919.9 | 10.8 | 0.9 |
+| both | 447 | 666 | 1.49 (1.25 / 5.67) | 902.6 | 28.1 | 2.4 |
+| policy+min | 447 | 572 | 1.28 (1.03 / 5.67) | 895.6 | 35.2 | 3.1 |
+
+'today' re-cut == logged slab sizes for 447/447 requests; window 1200 s

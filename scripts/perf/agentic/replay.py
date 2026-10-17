@@ -22,8 +22,9 @@ KV (QWEN_PROMPT_CACHE_REPLY) serves. Recorded replies diverge from the model's o
 greedy near-tie flips, and an ignore_eos reply holds EOS tokens its text does not.
 
 Per request: wall latency, prompt / completion / cached tokens (usage), episode / task / call
-index. With --worker-log the worker's lines are joined by request id (queue_ms, ttft_ms, tps,
-hit / reused / prefilled, store MB, peak) and the worker-side analysis (worker_log.py) of the
+index, reply_sha (sha1 of the answer's content + tool calls: run-to-run identity). With
+--worker-log the worker's lines are joined by request id (queue_ms, ttft_ms, tps, hit / reused /
+prefilled, store MB, peak) and the worker-side analysis (worker_log.py) of the
 run's window is printed; with --mem-log the memsampler.py series of the window is summarized.
 
     python3 scripts/perf/agentic/replay.py --episodes 8 --duration-min 15 \
@@ -34,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import http.client
 import io
 import json
@@ -172,12 +174,16 @@ def run(a) -> dict:
                 if a.own_replies:                     # the next call's history holds it here
                     own[len(call["messages"])] = (d.get("choices") or [{}])[0].get("message") or {}
                 us = d.get("usage") or {}
+                msg = (d.get("choices") or [{}])[0].get("message") or {}
+                reply_sha = hashlib.sha1(json.dumps([msg.get("content"), msg.get("tool_calls")],
+                                                    sort_keys=True).encode()).hexdigest()[:16]
                 rec = {"rid": rid, "resp_id": d.get("id"), "episode": ep, "task_seq": k, "task": task["task"],
                        "call": ci, "t_start": t0, "t_end": t1, "latency_s": t1 - t0,
                        "prompt_tokens": us.get("prompt_tokens"), "completion_tokens": us.get("completion_tokens"),
                        "cached_tokens": (us.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
                        "rec_completion_tokens": call["completion_tokens"], "rec_prompt_tokens": call["rec_prompt_tokens"],
-                       "finish_reason": (d.get("choices") or [{}])[0].get("finish_reason"), "attempts": attempt + 1}
+                       "finish_reason": (d.get("choices") or [{}])[0].get("finish_reason"), "attempts": attempt + 1,
+                       "reply_sha": reply_sha}
                 with lock:
                     recs.append(rec)
                 if a.verbose:

@@ -1,0 +1,67 @@
+replay b16a: 8 episodes, window 10.0 min, 214 requests done in it (21.4/min), 222 total, errors 0, tasks started 9
+client latency s: mean 21.9 p50 15.7 p90 38.0 max 128.0
+prompt mean 10611 tok; cache hit rate 94.6% (cached_tokens > 0), mean reused 9779 tok
+aggregate (window): prefill 290 tok/s, decode 19.0 tok/s; completion != recorded: 20
+split (worker, joined n=222): queue_s mean 7.9 p50 1.4 p90 19.9; ttft_s mean 3.3 p50 1.4 p90 6.9; decode_s mean 10.7 p50 8.9 p90 19.1; worker_lat_s mean 21.9 p50 15.7 p90 37.9
+
+--- worker log (this run's window, ticks unfiltered) ---
+window 06:19:15–06:29:29 = 10.2 min, requests=222 (21.7/min)
+prompt tokens 2355596 (cached 2171030 = 92.2%), prefilled 184566, generated 11839
+aggregate: prefill 301 tok/s wall, decode 19.3 tok/s wall
+cache: hits 210, misses 12; events {'evict_admit': 0, 'evict_admit_entries': 0, 'evict_growth': 0, 'not_kept': 0, 'gave_up': 0, 'cut_length': 0, 'refused': 0, 'over_cap_warn': 0, 'reply_kept': 220, 'reply_not_kept': 0, 'reply_entry_gone': 2, 'reply_reasoning': 0, 'reply_grouped': 0}
+finish reasons: {'length': 202, 'stop': 20}  peak max 22.05 GB
+prompt tokens: n=222 mean=10611 p50=9952 p90=16719 max=28094
+prefilled tokens/request: n=222 mean=831 p50=232 p90=1529 max=23709
+gen tokens/request: n=222 mean=53 p50=44 p90=102 max=119
+latency s (Generate→finish): n=222 mean=21.9 p50=15.7 p90=38.0 max=127.9
+queue s: n=222 mean=7.9 p50=1.5 p90=20.0 max=110.2
+ttft s: n=222 mean=3.3 p50=1.4 p90=6.9 max=67.4
+decode s (gen/tps): n=222 mean=10.7 p50=8.9 p90=19.1 max=46.1
+decode tok/s per request: n=222 mean=5.9 p50=5.0 p90=10.1 max=20.4
+latency share: queue 36%, ttft 15%, decode 49%
+prefill rate on requests with >=1500 new tokens: 305 tok/s (prefill/ttft, n=33)
+stores: n=222 mean 616 MB for 10610 tokens, 4.2 checkpoints; entries max 9, total max 6403 MB
+
+decode tok/s per request by prompt length:
+   0–5K: n=14 mean=4.3 p50=3.5
+   5–10K: n=98 mean=7.0 p50=5.8
+  10–15K: n=78 mean=4.9 p50=4.8
+  15–20K: n=17 mean=6.6 p50=4.7
+  20–30K: n=15 mean=4.8 p50=4.5
+prefill busy (union of HIT/MISS→store intervals): 567 s = 92% of the window, 326 tok/s inside it
+scheduler thread time (sched_timer, 636 s): prefill (_advance) 79%, decode (_iterate) 16%, admit 0.0%, idle 5%; 510 slabs (987 ms each), 2225 steps (46 ms each)
+  decode step ms by rows: 1: 28 ms (n=66), 2: 36 ms (n=182), 3: 40 ms (n=238), 4: 41 ms (n=263), 5: 45 ms (n=327), 6: 49 ms (n=386), 7: 53 ms (n=349), 8: 53 ms (n=414)
+decode steps 2061 (mean 5.29 rows/step) in 560 s of ticks: 0 ms/step outside prefill (upper bound: idle counted)
+
+scheduler (10 s ticks): steps/s by rows, with/without a prefill in progress:
+  rows= 0 prefilling=y: ticks=5 steps/s mean=0.18
+  rows= 1 prefilling=y: ticks=4 steps/s mean=1.65
+  rows= 2 prefilling=n: ticks=1 steps/s mean=0.20
+  rows= 2 prefilling=y: ticks=6 steps/s mean=2.55
+  rows= 3 prefilling=y: ticks=6 steps/s mean=3.35
+  rows= 4 prefilling=y: ticks=4 steps/s mean=3.20
+  rows= 5 prefilling=n: ticks=1 steps/s mean=1.50
+  rows= 5 prefilling=y: ticks=7 steps/s mean=4.21
+  rows= 6 prefilling=n: ticks=1 steps/s mean=8.70
+  rows= 6 prefilling=y: ticks=8 steps/s mean=4.15
+  rows= 7 prefilling=n: ticks=3 steps/s mean=4.50
+  rows= 7 prefilling=y: ticks=5 steps/s mean=4.48
+  rows= 8 prefilling=n: ticks=5 steps/s mean=8.28
+ticks with prefill in progress: 80%;  waiting>0: 80%;  mean rows 4.32; row-steps/s 21.4
+pcache GiB max 5.97, active GiB max 18.83, reserved GiB max 5.05
+
+--- per minute: memory (memsampler: last sample; rates = mean over the minute) + scheduler (sched_timer: prefill share of the scheduler thread, decode ms/step, mean rows; worker ticks: pcache) ---
+| min | swap used GB | worker MEM GB | worker CMPRS GB | free MB | compressor GB | pageins/s | swapins/s | decompressions/s | prefill % | step ms | rows/step | pcache GiB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 3.84 | 14.0 | 0.00 | 65 | 1.5 | 101 | 0 | 5 | 60 | 30 | 2.0 | 2.4 |
+| 1 | 3.84 | 16.0 | 0.00 | 956 | 1.5 | 37 | 0 | 32 | 74 | 41 | 6.3 | 3.4 |
+| 2 | 3.83 | 17.0 | 0.07 | 1890 | 1.5 | 20 | 1 | 39 | 78 | 43 | 5.9 | 4.0 |
+| 3 | 3.83 | 19.0 | 0.18 | 390 | 1.6 | 19 | 0 | 7 | 81 | 44 | 4.8 | 4.6 |
+| 4 | 3.83 | 18.0 | 0.27 | 1934 | 1.9 | 21 | 1 | 24 | 78 | 51 | 5.9 | 5.0 |
+| 5 | 3.83 | 19.0 | 0.57 | 1235 | 2.7 | 33 | 0 | 1597 | 75 | 53 | 6.0 | 5.7 |
+| 6 | 3.83 | 20.0 | 0.57 | 380 | 2.7 | 45 | 0 | 2998 | 80 | 54 | 5.5 | 5.9 |
+| 7 | 3.83 | 18.0 | 0.59 | 3059 | 2.8 | 182 | 0 | 1378 | 81 | 51 | 5.4 | 6.0 |
+| 8 | 3.83 | 17.0 | 0.58 | 3898 | 2.6 | 58 | 1 | 666 | 96 | 39 | 2.3 | 5.5 |
+| 9 | 3.83 | 19.0 | 0.59 | 2138 | 2.8 | 53 | 0 | 581 | 93 | 47 | 4.0 | 5.7 |
+| 10 | 3.83 | 17.0 | 0.59 | 2577 | 2.8 | 7 | 1 | 388 | 91 | 39 | 2.0 | 5.4 |
+

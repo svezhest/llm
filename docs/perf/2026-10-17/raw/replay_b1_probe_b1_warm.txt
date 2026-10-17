@@ -1,0 +1,8 @@
+model=ornith15-9b-mlx-8bit calibration: 10647 prompt tokens for 24000 filler chars -> 2.28 chars/token, filler 17953 chars
+rep 0 c=1: 1 req, wall 23.1s, agg 5.5 tok/s, ttft mean 19.36s, errors 0, pcache hits 0/1
+
+wrote /tmp/scratch/b1/probe_b1_warm.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 1 | 1 | 8045 | 23.1 | 5.5 | 19.36 | 19.36 | 23.10 | 23.10 | 34.3 | - | 18.00 | 0.00 / 0 |

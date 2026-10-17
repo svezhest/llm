@@ -1,0 +1,44 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+bg 0: task df61dc5_1 ~10003 tokens
+bg 1: task 530b157_3 ~9996 tokens
+bg 2: task 6171bbc_1 ~10023 tokens
+bg 3: task 50e1ac9_2 ~10025 tokens
+bg 4: task b119b1f_1 ~9975 tokens
+bg 5: task 50e1ac9_3 ~9972 tokens
+bg 6: task 6c2c621_2 ~9971 tokens
+base 10240: task 6c2c621_1, 10243 tokens, length 
+background rows decoding
+r0 base 10240 1        prompt 11066 cached 10236 slabs 1 [2263] adv 2263 wait 0 steps 0 (0 ms) ttft 2263 rows 8 phases [{"eval": [18, 0, 2197, 18], "restore": [18], "store": [21], "join": [2]}]
+r0 base 10240 2tail    prompt 11067 cached 10236 slabs 2 [1884, 118] adv 2002 wait 0 steps 11 (527 ms) ttft 2529 rows 7 phases [{"eval": [12, 0, 1855], "restore": [12]}, {"eval": [99, 3], "store": [10], "join": [3]}]
+r0 base 10240 2msg     prompt 11075 cached 10236 slabs 2 [293, 2137] adv 2431 wait 0 steps 2 (91 ms) ttft 2522 rows 7 phases [{"eval": [10, 0, 267], "restore": [10]}, {"eval": [2092, 17], "store": [24], "join": [2]}]
+r0 base 10240 3        prompt 11068 cached 10236 slabs 3 [270, 1781, 123] adv 2174 wait 0 steps 13 (637 ms) ttft 2811 rows 7 phases [{"eval": [10, 0, 244], "restore": [10]}, {"eval": [1773]}, {"eval": [102, 4], "store": [11], "join": [3]}]
+r1 base 10240 2tail    prompt 11072 cached 10236 slabs 2 [2213, 115] adv 2327 wait 0 steps 13 (627 ms) ttft 2955 rows 7 phases [{"eval": [12, 0, 2178], "restore": [12]}, {"eval": [96, 3], "store": [10], "join": [3]}]
+r1 base 10240 2msg     prompt 11086 cached 10236 slabs 2 [284, 2107] adv 2392 wait 0 steps 2 (90 ms) ttft 2482 rows 7 phases [{"eval": [10, 0, 256], "restore": [10]}, {"eval": [2082, 12], "store": [16], "join": [2]}]
+r1 base 10240 3        prompt 11082 cached 10236 slabs 3 [300, 1891, 119] adv 2309 wait 0 steps 13 (644 ms) ttft 2954 rows 7 phases [{"eval": [10, 0, 269], "restore": [10]}, {"eval": [1878]}, {"eval": [98, 5], "store": [12], "join": [2]}]
+r1 base 10240 1        prompt 11070 cached 10236 slabs 1 [2381] adv 2381 wait 0 steps 0 (0 ms) ttft 2381 rows 8 phases [{"eval": [12, 0, 2318, 18], "restore": [12], "store": [22], "join": [2]}]
+r2 base 10240 2msg     prompt 11067 cached 10236 slabs 2 [296, 1908] adv 2204 wait 0 steps 2 (96 ms) ttft 2300 rows 7 phases [{"eval": [10, 0, 263], "restore": [10]}, {"eval": [1883, 11], "store": [15], "join": [1]}]
+r2 base 10240 3        prompt 11081 cached 10236 slabs 3 [301, 1984, 126] adv 2411 wait 0 steps 13 (654 ms) ttft 3066 rows 7 phases [{"eval": [10, 0, 268], "restore": [10]}, {"eval": [1977]}, {"eval": [104, 3], "store": [13], "join": [2]}]
+r2 base 10240 1        prompt 11075 cached 10236 slabs 1 [2362] adv 2362 wait 0 steps 0 (0 ms) ttft 2362 rows 8 phases [{"eval": [12, 0, 2306, 12], "restore": [12], "store": [16], "join": [2]}]
+r2 base 10240 2tail    prompt 11079 cached 10236 slabs 2 [2255, 118] adv 2373 wait 0 steps 13 (647 ms) ttft 3019 rows 7 phases [{"eval": [12, 0, 2216], "restore": [12]}, {"eval": [101, 2], "store": [9], "join": [2]}]
+r3 base 10240 3        prompt 11085 cached 10236 slabs 3 [314, 2299, 123] adv 2736 wait 0 steps 15 (758 ms) ttft 3495 rows 7 phases [{"eval": [10, 0, 273], "restore": [11]}, {"eval": [2292]}, {"eval": [99, 3], "store": [14], "join": [3]}]
+r3 base 10240 1        prompt 11080 cached 10236 slabs 1 [2435] adv 2435 wait 0 steps 0 (0 ms) ttft 2435 rows 8 phases [{"eval": [11, 0, 2365, 9], "restore": [12], "store": [19], "join": [3]}]
+r3 base 10240 2tail    prompt 11079 cached 10236 slabs 2 [2281, 128] adv 2409 wait 0 steps 13 (661 ms) ttft 3071 rows 7 phases [{"eval": [12, 0, 2236], "restore": [12]}, {"eval": [104, 4], "store": [14], "join": [3]}]
+r3 base 10240 2msg     prompt 11077 cached 10236 slabs 2 [331, 2238] adv 2570 wait 0 steps 2 (105 ms) ttft 2675 rows 7 phases [{"eval": [10, 0, 286], "restore": [10]}, {"eval": [2182, 28], "store": [37], "join": [2]}]
+r4 base 10240 1        prompt 11079 cached 10236 slabs 1 [2256] adv 2256 wait 0 steps 0 (0 ms) ttft 2256 rows 8 phases [{"eval": [12, 0, 2191, 12], "restore": [12], "store": [18], "join": [2]}]
+r4 base 10240 2tail    prompt 11084 cached 10236 slabs 2 [2437, 114] adv 2552 wait 0 steps 14 (709 ms) ttft 3261 rows 7 phases [{"eval": [11, 0, 2388], "restore": [12]}, {"eval": [101, 2], "store": [8], "join": [2]}]
+r4 base 10240 2msg     prompt 11080 cached 10236 slabs 2 [323, 2422] adv 2745 wait 0 steps 2 (97 ms) ttft 2842 rows 7 phases [{"eval": [10, 0, 278], "restore": [10]}, {"eval": [2396, 11], "store": [17], "join": [2]}]
+r4 base 10240 3        prompt 11078 cached 10236 slabs 3 [312, 1987, 142] adv 2441 wait 0 steps 13 (686 ms) ttft 3127 rows 7 phases [{"eval": [10, 0, 267], "restore": [10]}, {"eval": [1981]}, {"eval": [114, 4], "store": [16], "join": [2]}]
+r5 base 10240 2tail    prompt 11080 cached 10236 slabs 2 [2556, 114] adv 2670 wait 0 steps 14 (710 ms) ttft 3380 rows 7 phases [{"eval": [11, 0, 2500], "restore": [12]}, {"eval": [101, 2], "store": [8], "join": [2]}]
+r5 base 10240 2msg     prompt 11080 cached 10236 slabs 2 [323, 2516] adv 2839 wait 0 steps 2 (97 ms) ttft 2936 rows 7 phases [{"eval": [10, 0, 273], "restore": [10]}, {"eval": [2487, 12], "store": [19], "join": [2]}]
+r5 base 10240 3        prompt 11080 cached 10236 slabs 3 [336, 2066, 141] adv 2544 wait 0 steps 13 (678 ms) ttft 3222 rows 7 phases [{"eval": [10, 0, 284], "restore": [10]}, {"eval": [2060]}, {"eval": [108, 6], "store": [21], "join": [2]}]
+r5 base 10240 1        prompt 11084 cached 10236 slabs 1 [2611] adv 2611 wait 0 steps 0 (0 ms) ttft 2611 rows 8 phases [{"eval": [11, 0, 2530, 11], "restore": [12], "store": [19], "join": [2]}]
+
+steady decode step (7 rows): 48.3 ms (n=807); first step after a slab: 37.4 ms (n=170)
+
+| base | variant | n | slabs | slab ms (median each) | sum _advance ms | wait ms | decode steps in TTFT | TTFT ms |
+|---|---|---|---|---|---|---|---|---|
+| 10240 | 1 | 6 | 1 | 2371 | 2371 | 0 | 0 | 2371 |
+| 10240 | 2tail | 6 | 2 | 2268 + 116 | 2391 | 0 | 13 | 3045 |
+| 10240 | 2msg | 6 | 2 | 310 + 2188 | 2500 | 0 | 2 | 2599 |
+| 10240 | 3 | 6 | 3 | 306 + 1985 + 125 | 2426 | 0 | 13 | 3097 |

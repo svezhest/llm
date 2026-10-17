@@ -1,0 +1,75 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+bg 0: task df61dc5_1 ~10003 tokens
+bg 1: task 530b157_3 ~9996 tokens
+bg 2: task 6171bbc_1 ~10023 tokens
+bg 3: task 50e1ac9_2 ~10025 tokens
+bg 4: task b119b1f_1 ~9975 tokens
+bg 5: task 50e1ac9_3 ~9972 tokens
+bg 6: task 6c2c621_2 ~9971 tokens
+base 10240: task 6c2c621_1, 10243 tokens, length 
+background rows decoding
+r0 base 10240 1        prompt 11066 cached 10236 slabs 1 [2380] adv 2380 wait 0 steps 0 (0 ms) ttft 2380 rows 8
+r0 base 10240 2tail    prompt 11067 cached 10236 slabs 2 [2096, 136] adv 2232 wait 0 steps 11 (608 ms) ttft 2841 rows 7
+r0 base 10240 2msg     prompt 11075 cached 10236 slabs 2 [326, 2349] adv 2675 wait 0 steps 2 (102 ms) ttft 2777 rows 7
+r0 base 10240 3        prompt 11068 cached 10236 slabs 3 [290, 2051, 138] adv 2480 wait 0 steps 13 (702 ms) ttft 3182 rows 7
+r0 base 10240 1/s      prompt 11072 cached 10236 slabs 1 [2522] adv 2522 wait 10 steps 0 (0 ms) ttft 2522 rows 8
+r0 base 10240 2tail/s  prompt 11086 cached 10236 slabs 2 [2330, 129] adv 2459 wait 18 steps 13 (691 ms) ttft 3160 rows 7
+r0 base 10240 2msg/s   prompt 11082 cached 10236 slabs 2 [327, 2302] adv 2629 wait 19 steps 2 (102 ms) ttft 2740 rows 7
+r0 base 10240 3/s      prompt 11070 cached 10236 slabs 3 [294, 2022, 128] adv 2443 wait 27 steps 13 (697 ms) ttft 3158 rows 7
+r1 base 10240 2tail    prompt 11067 cached 10236 slabs 2 [2372, 126] adv 2498 wait 0 steps 13 (683 ms) ttft 3181 rows 7
+r1 base 10240 2msg     prompt 11081 cached 10236 slabs 2 [319, 2502] adv 2821 wait 0 steps 2 (101 ms) ttft 2923 rows 7
+r1 base 10240 3        prompt 11075 cached 10236 slabs 3 [303, 2069, 125] adv 2497 wait 0 steps 13 (692 ms) ttft 3192 rows 7
+r1 base 10240 1/s      prompt 11079 cached 10236 slabs 1 [2578] adv 2578 wait 9 steps 0 (0 ms) ttft 2578 rows 8
+r1 base 10240 2tail/s  prompt 11085 cached 10236 slabs 2 [2425, 127] adv 2553 wait 18 steps 13 (674 ms) ttft 3236 rows 7
+r1 base 10240 2msg/s   prompt 11080 cached 10236 slabs 2 [324, 2449] adv 2773 wait 18 steps 2 (101 ms) ttft 2884 rows 7
+r1 base 10240 3/s      prompt 11079 cached 10236 slabs 3 [309, 2047, 131] adv 2487 wait 27 steps 13 (699 ms) ttft 3204 rows 7
+r1 base 10240 1        prompt 11077 cached 10236 slabs 1 [2596] adv 2596 wait 0 steps 0 (0 ms) ttft 2596 rows 8
+r2 base 10240 2msg     prompt 11079 cached 10236 slabs 2 [315, 2281] adv 2596 wait 0 steps 2 (96 ms) ttft 2691 rows 7
+r2 base 10240 3        prompt 11084 cached 10236 slabs 3 [331, 2312, 120] adv 2763 wait 0 steps 15 (775 ms) ttft 3538 rows 7
+r2 base 10240 1/s      prompt 11080 cached 10236 slabs 1 [2777] adv 2777 wait 9 steps 0 (0 ms) ttft 2777 rows 8
+r2 base 10240 2tail/s  prompt 11078 cached 10236 slabs 2 [2425, 132] adv 2558 wait 19 steps 13 (680 ms) ttft 3249 rows 7
+r2 base 10240 2msg/s   prompt 11080 cached 10236 slabs 2 [341, 2536] adv 2876 wait 19 steps 2 (101 ms) ttft 2987 rows 7
+r2 base 10240 3/s      prompt 11080 cached 10236 slabs 3 [333, 2123, 141] adv 2597 wait 28 steps 13 (693 ms) ttft 3309 rows 7
+r2 base 10240 1        prompt 11080 cached 10236 slabs 1 [2610] adv 2610 wait 0 steps 0 (0 ms) ttft 2610 rows 8
+r2 base 10240 2tail    prompt 11084 cached 10236 slabs 2 [2403, 143] adv 2546 wait 0 steps 13 (700 ms) ttft 3246 rows 7
+r3 base 10240 3        prompt 11082 cached 10236 slabs 3 [356, 2300, 142] adv 2798 wait 0 steps 14 (750 ms) ttft 3548 rows 7
+r3 base 10240 1/s      prompt 11074 cached 10236 slabs 1 [2582] adv 2582 wait 9 steps 0 (0 ms) ttft 2582 rows 8
+r3 base 10240 2tail/s  prompt 11080 cached 10236 slabs 2 [2415, 121] adv 2536 wait 19 steps 13 (700 ms) ttft 3246 rows 7
+r3 base 10240 2msg/s   prompt 11082 cached 10236 slabs 2 [371, 2508] adv 2879 wait 20 steps 2 (105 ms) ttft 2994 rows 7
+r3 base 10240 3/s      prompt 11078 cached 10236 slabs 3 [338, 2123, 131] adv 2592 wait 28 steps 13 (705 ms) ttft 3316 rows 7
+r3 base 10240 1        prompt 11080 cached 10236 slabs 1 [2604] adv 2604 wait 0 steps 0 (0 ms) ttft 2604 rows 8
+r3 base 10240 2tail    prompt 11082 cached 10236 slabs 2 [2392, 148] adv 2540 wait 0 steps 13 (691 ms) ttft 3231 rows 7
+r3 base 10240 2msg     prompt 11076 cached 10236 slabs 2 [360, 2314] adv 2674 wait 0 steps 2 (101 ms) ttft 2776 rows 7
+r4 base 10240 1/s      prompt 11084 cached 10236 slabs 1 [2382] adv 2382 wait 9 steps 0 (0 ms) ttft 2382 rows 8
+r4 base 10240 2tail/s  prompt 11079 cached 10236 slabs 2 [2486, 131] adv 2617 wait 19 steps 13 (687 ms) ttft 3314 rows 7
+r4 base 10240 2msg/s   prompt 11082 cached 10236 slabs 2 [356, 2471] adv 2827 wait 19 steps 2 (99 ms) ttft 2936 rows 7
+r4 base 10240 3/s      prompt 11080 cached 10236 slabs 3 [355, 2089, 127] adv 2570 wait 28 steps 13 (687 ms) ttft 3277 rows 7
+r4 base 10240 1        prompt 11073 cached 10236 slabs 1 [2625] adv 2625 wait 0 steps 0 (0 ms) ttft 2625 rows 8
+r4 base 10240 2tail    prompt 11083 cached 10236 slabs 2 [2379, 151] adv 2530 wait 0 steps 13 (694 ms) ttft 3224 rows 7
+r4 base 10240 2msg     prompt 11081 cached 10236 slabs 2 [373, 2526] adv 2899 wait 0 steps 2 (107 ms) ttft 3006 rows 7
+r4 base 10240 3        prompt 11082 cached 10236 slabs 3 [363, 2092, 140] adv 2595 wait 0 steps 13 (690 ms) ttft 3284 rows 7
+r5 base 10240 2tail/s  prompt 11080 cached 10236 slabs 2 [2567, 119] adv 2686 wait 18 steps 14 (748 ms) ttft 3444 rows 7
+r5 base 10240 2msg/s   prompt 11079 cached 10236 slabs 2 [366, 2456] adv 2823 wait 19 steps 2 (98 ms) ttft 2930 rows 7
+r5 base 10240 3/s      prompt 11080 cached 10236 slabs 3 [352, 2004, 146] adv 2503 wait 28 steps 13 (698 ms) ttft 3219 rows 7
+r5 base 10240 1        prompt 11073 cached 10236 slabs 1 [2611] adv 2611 wait 0 steps 0 (0 ms) ttft 2611 rows 8
+r5 base 10240 2tail    prompt 11075 cached 10236 slabs 2 [2205, 137] adv 2342 wait 0 steps 11 (604 ms) ttft 2949 rows 7
+r5 base 10240 2msg     prompt 11081 cached 10236 slabs 2 [387, 2410] adv 2797 wait 0 steps 2 (103 ms) ttft 2901 rows 7
+r5 base 10240 3        prompt 11084 cached 10236 slabs 3 [355, 2196, 136] adv 2687 wait 0 steps 14 (766 ms) ttft 3453 rows 7
+r5 base 10240 1/s      prompt 11081 cached 10236 slabs 1 [2613] adv 2613 wait 10 steps 0 (0 ms) ttft 2613 rows 8
+r6 base 10240 2msg/s   prompt 11080 cached 10236 slabs 2 [356, 2199] adv 2555 wait 19 steps 2 (97 ms) ttft 2662 rows 7
+r6 base 10240 3/s      prompt 11084 cached 10236 slabs 3 [368, 2243, 121] adv 2733 wait 29 steps 14 (740 ms) ttft 3493 rows 7
+r6 base 10240 1        prompt 11081 cached 10236 slabs 1 [2626] adv 2626 wait 0 steps 0 (0 ms) ttft 2626 rows 8
+r6 base 10240 2tail    prompt 11082 cached 10236 slabs 2 [2381, 153] adv 2534 wait 0 steps 13 (694 ms) ttft 3228 rows 7
+r6 base 10240 2msg     prompt 11084 cached 10236 slabs 2 [384, 2445] adv 2829 wait 0 steps 2 (105 ms) ttft 2933 rows 7
+r6 base 10240 3        prompt 11082 cached 10236 slabs 3 [354, 2005, 157] adv 2516 wait 0 steps 13 (707 ms) ttft 3224 rows 7
+r6 base 10240 1/s      prompt 11082 cached 10236 slabs 1 [2656] adv 2656 wait 10 steps 0 (0 ms) ttft 2656 rows 8
+r6 base 10240 2tail/s  prompt 11079 cached 10236 slabs 2 [2438, 138] adv 2576 wait 19 steps 13 (710 ms) ttft 3296 rows 7
+r7 base 10240 3/s      prompt 11077 cached 10236 slabs 3 [384, 2225, 131] adv 2740 wait 29 steps 14 (741 ms) ttft 3501 rows 7
+r7 base 10240 1        prompt 11081 cached 10236 slabs 1 [2545] adv 2545 wait 0 steps 0 (0 ms) ttft 2545 rows 8
+r7 base 10240 2tail    prompt 11080 cached 10236 slabs 2 [2378, 149] adv 2528 wait 0 steps 13 (684 ms) ttft 3212 rows 7
+r7 base 10240 2msg     prompt 11078 cached 10236 slabs 2 [368, 2403] adv 2770 wait 0 steps 2 (99 ms) ttft 2869 rows 7
+r7 base 10240 3        prompt 11078 cached 10236 slabs 3 [350, 1974, 153] adv 2477 wait 0 steps 12 (647 ms) ttft 3124 rows 7
+r7 base 10240 1/s      prompt 11078 cached 10236 slabs 1 [2599] adv 2599 wait 10 steps 0 (0 ms) ttft 2599 rows 8
+r7 base 10240 2tail/s  prompt 11077 cached 10236 slabs 2 [2414, 125] adv 2539 wait 19 steps 13 (681 ms) ttft 3230 rows 7
+r7 base 10240 2msg/s   prompt 11082 cached 10236 slabs 2 [370, 2394] adv 2764 wait 19 steps 2 (101 ms) ttft 2875 rows 7
