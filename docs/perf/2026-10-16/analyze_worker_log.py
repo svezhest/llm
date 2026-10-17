@@ -4,12 +4,15 @@ path, since = sys.argv[1], sys.argv[2]  # since = "2026-10-16 01:39:21"
 T = lambda s: datetime.strptime(s, "%Y-%m-%d %H:%M:%S,%f")
 t_since = datetime.strptime(since, "%Y-%m-%d %H:%M:%S")
 R, B = {}, []
+REPLY = {"kept": 0, "not kept (headroom)": 0, "entry gone": 0, "reasoning": 0}   # QWEN_PROMPT_CACHE_REPLY
 for line in open(path, errors="replace"):
     m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+) INFO  qwen\.worker (.*)", line)
     if not m: continue
     ts = T(m[1])
     if ts < t_since: continue
     msg = m[2]
+    if msg.startswith("prompt cache reply not kept: over the batch's headroom"):
+        REPLY["not kept (headroom)"] += 1; continue
     if msg.startswith("Generate id="):
         rid = msg.split()[1][3:]; R.setdefault(rid, {})["t0"] = ts; continue
     if msg.startswith("batch: rows="):
@@ -20,6 +23,9 @@ for line in open(path, errors="replace"):
     mm = re.match(r"id=(\S+) (.*)", msg)
     if not mm: continue
     rid, rest = mm[1], mm[2]; r = R.setdefault(rid, {})
+    if rest.startswith("prompt cache reply kept:"): REPLY["kept"] += 1; continue
+    if rest.startswith("prompt cache reply not kept: its prompt entry is gone"): REPLY["entry gone"] += 1; continue
+    if rest.startswith("prompt cache reply not kept: reasoning"): REPLY["reasoning"] += 1; continue
     if rest.startswith("prompt_tokens="): r["prompt"] = int(re.match(r"prompt_tokens=(\d+)", rest)[1])
     elif "prompt cache HIT" in rest:
         x = re.search(r"HIT: (\d+)/(\d+).*prefilling (\d+)", rest); r["reused"], r["prefill"] = int(x[1]), int(x[3]); r["hit"] = True; r["t_hit"] = ts
@@ -43,6 +49,7 @@ print(f"window {t_first:%H:%M:%S}–{t_last:%H:%M:%S} = {wall/60:.1f} min, reque
 print(f"prompt tokens {P} (cached {C} = {100*C/P:.1f}%), prefilled {PF}, generated {G}")
 print(f"aggregate: prefill {PF/wall:.0f} tok/s wall, decode {G/wall:.1f} tok/s wall")
 print(f"cache: hits {sum(1 for r in done if r.get('hit'))}, misses {sum(1 for r in done if r.get('hit') is False)}")
+if any(REPLY.values()): print(f"reply KV: {REPLY}")
 print(f"finish reasons: { {k: sum(1 for r in done if r['finish']==k) for k in set(r['finish'] for r in done)} }  peak max {max(r['peak'] for r in done):.2f} GB")
 summ("prompt tokens", [r["prompt"] for r in done], "{:.0f}")
 summ("prefilled tokens/request", [r["prefill"] for r in done], "{:.0f}")

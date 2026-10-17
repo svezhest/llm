@@ -36,7 +36,10 @@ def parse(path: str, since: datetime, until: datetime | None = None, prefix: str
     `prefix` when given (ticks and events are not filtered)."""
     P_sched = []
     R, B, E = {}, [], {"evict_admit": 0, "evict_admit_entries": 0, "evict_growth": 0, "not_kept": 0,
-                      "gave_up": 0, "cut_length": 0, "refused": 0, "over_cap_warn": 0}
+                      "gave_up": 0, "cut_length": 0, "refused": 0, "over_cap_warn": 0,
+                      # QWEN_PROMPT_CACHE_REPLY: extensions kept / over the headroom / the
+                      # prompt entry gone / skipped for reasoning
+                      "reply_kept": 0, "reply_not_kept": 0, "reply_entry_gone": 0, "reply_reasoning": 0}
     for line in open(path, errors="replace"):
         m = RX_LINE.match(line)
         if not m:
@@ -61,6 +64,9 @@ def parse(path: str, since: datetime, until: datetime | None = None, prefix: str
                 n, sec = v.split("/")
                 st_["by_rows"][int(k)] = (int(n), float(sec))
             P_sched.append(st_)
+            continue
+        if msg.startswith("prompt cache reply not kept: over the batch's headroom"):
+            E["reply_not_kept"] += 1                  # (no id: logged by the store itself)
             continue
         if msg.startswith("prompt cache:"):
             if "evicted to admit" in msg:
@@ -90,6 +96,12 @@ def parse(path: str, since: datetime, until: datetime | None = None, prefix: str
         rid, rest = mm[1], mm[2]
         if "ended at" in rest and "headroom" in rest:
             E["cut_length"] += 1
+        if rest.startswith("prompt cache reply kept:"):
+            E["reply_kept"] += 1
+        elif rest.startswith("prompt cache reply not kept: its prompt entry is gone"):
+            E["reply_entry_gone"] += 1
+        elif rest.startswith("prompt cache reply not kept: reasoning"):
+            E["reply_reasoning"] += 1
         if prefix and not rid.startswith(prefix):
             continue
         r = R.setdefault(rid, {"id": rid})

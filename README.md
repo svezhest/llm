@@ -326,6 +326,56 @@ the gateway counts `qwen_gateway_cached_tokens_total`; the worker's Health repor
 entries, live bytes, hits, misses and evictions (a new entry not kept at store counts
 as one; gateway debug log on change).
 
+**Reply KV (`QWEN_PROMPT_CACHE_REPLY=1`, default off).** When a text request ends with
+`stop` or `length`, its entry is extended by the tokens the model consumed while it
+decoded and by the recurrent state after them, which becomes the new end state:
+
+* the consumed tokens are the prompt's last token and every generated token fed back,
+  including the EOS the step-ahead already fed (a grammar / sync row never feeds it);
+* the next turn (prompt + reply + a new message: chats, agent loops) then resumes
+  *after* the reply, not at the last message start;
+* only the reply's KV is copied (the prompt part is the prompt entry's segments), and
+  the copy goes through the same budget checks as any store;
+* the copies are queued without waiting, between two decode steps;
+* the extended entry keeps its prompt entry's recency in the eviction order (a
+  conversation that just finished is not "most recently used").
+
+On the AppWorld traces the template re-renders every reply to the ids the model
+generated (1344/1344 pairs). That saves 20.8 % of the prefilled tokens, 148 per call:
+the reply, the assistant header, and after a short tool output the stretch back to the
+previous slab end (`docs/perf/2026-10-17/design/reply_kv.md`).
+
+Nothing extra is stored for:
+
+* cancelled requests and errors. Stop strings usually end the row as a cancel, but the
+  handler's cancel can arrive after the row already finished with `stop`/`length`. That
+  reply is then stored with the tokens past the string; the next turn falls back, which
+  is harmless;
+* replies with reasoning (thinking on, or `<think>`/`</think>` in the generated tokens).
+  Clients rarely send the reasoning back, so the copy would be wasted, and the
+  prompt-end state (a regenerate's full hit) would be lost;
+* DFlash and vision rows;
+* rows still in a cascade group;
+* rows whose prompt entry was evicted while they decoded.
+
+Other effects:
+
+* A regenerate of the same prompt resumes at the last message start (~10 tokens of
+  prefill), since the prompt-end state goes with the extension.
+* A reply the next prompt re-tokenizes differently falls back to that point too, and
+  its entry is absorbed.
+* Log: `id=… prompt cache reply kept: n tokens (+g generated) …`.
+* `id=… prompt cache reply not kept: its prompt entry is gone …` / `…: reasoning …`.
+* `prompt cache reply not kept: over the batch's headroom …`.
+* `scripts/perf/agentic/worker_log.py` counts the lines above apart from prefill stores.
+
+**Numerics.** The reply's KV comes from decode kernels (qmv at B ≤ 2, mrqmm at 3–16
+rows, cascade-released rows), and the next turn's first slab starts at the reply end.
+A hit through a reply is therefore *not* bit-identical to a cold prefill of the same
+tokens. It is in the batched-decode numerics class: on the CPU a T-token slab and T
+one-token steps already differ in the GDN recurrence from layer 0 on. With the knob on,
+a greedy answer can depend on what the cache holds. `0` restores today's bits.
+
 ### Cascade attention (`QWEN_CASCADE`, default on with fp16 KV)
 
 Rows that share a long prompt prefix (one system prompt, the prompt cache on) can
@@ -529,6 +579,7 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (evicted at store in the round-aware order, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
 | `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — an entry unused this long (and wanted by no waiting request) is stale: evicted first, LRU, even within the round of turns; `0` = off (the tick rule only) |
 | `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the end of the system block, this many last message starts, the strides in this many last tokens and inside the first user message, and its end state (`-1` marks: off, the `_CKPTS` policy everywhere) |
+| `QWEN_PROMPT_CACHE_REPLY` | worker | `0` — `1`: a finished request's entry is extended by its decoded tokens' KV + end state, so the next turn resumes after the reply (agentic loads: −21 % prefill tokens on AppWorld); a hit through a reply is not bit-identical to a cold prefill (decode numerics, see *Prompt cache*) |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — a request kept out only by the cache entry it would resume from waits for a running row to end only for a hit this deep, and only this long; else the entry is evicted and the request starts cold (8K tokens ≈ 14 s of 9B prefill, more than the wait) |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (see *Cascade attention*); only with `QWEN_KV_BITS=0` + `QWEN_PROMPT_CACHE=1` + max_batch ≥ 3, else off; `0` = the per-row path bit for bit |
 | `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` — rows sharing a prefix before a group forms, its minimum length in tokens, bitwise prefix check per join |

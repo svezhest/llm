@@ -15,6 +15,12 @@ calls are exhausted the episode takes the next task not yet started (a global ro
 the tasks); --rounds R stops after every task ran R times, --duration-min M stops starting new
 requests after M minutes (in-flight ones finish).
 
+--own-replies (needs --ignore-eos off): the assistant messages of the history are the model's
+own answers of this replay, not the recorded ones (the user / tool turns stay recorded), so
+every next prompt continues exactly what the model generated: the load that the worker's reply
+KV (QWEN_PROMPT_CACHE_REPLY) serves. Recorded replies diverge from the model's own wherever a
+greedy near-tie flips, and an ignore_eos reply holds EOS tokens its text does not.
+
 Per request: wall latency, prompt / completion / cached tokens (usage), episode / task / call
 index. With --worker-log the worker's lines are joined by request id (queue_ms, ttft_ms, tps,
 hit / reused / prefilled, store MB, peak) and the worker-side analysis (worker_log.py) of the
@@ -77,6 +83,16 @@ def pct(xs, p):
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def mine(recorded, msg):
+    """--own-replies: the recorded assistant message with our answer in it: its content and
+    its tool calls (the recorded ones dropped when we made none)."""
+    m = {k: v for k, v in recorded.items() if k != "tool_calls"}
+    m["content"] = msg.get("content") or ""
+    if msg.get("tool_calls"):
+        m["tool_calls"] = msg["tool_calls"]
+    return m
+
+
 def post(host, port, body, timeout):
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
@@ -118,6 +134,7 @@ def run(a) -> dict:
             k, task = next_task()
             if task is None:
                 return
+            own = {}                                  # --own-replies: message index -> our answer
             for ci, call in enumerate(task["calls"]):
                 gap = call["gap_before"] if a.gap == "recorded" else float(a.gap)
                 gap = min(gap, a.gap_cap)
@@ -127,7 +144,11 @@ def run(a) -> dict:
                     return
                 seq += 1
                 rid = f"replay-{tag}-e{ep}-{seq}"
-                body = {"model": a.model or call["model"], "messages": call["messages"], "stream": False,
+                msgs = call["messages"]
+                if own:
+                    msgs = [mine(m, own[i]) if i in own and m.get("role") == "assistant" else m
+                            for i, m in enumerate(msgs)]
+                body = {"model": a.model or call["model"], "messages": msgs, "stream": False,
                         "max_tokens": call["completion_tokens"], "temperature": 0, "seed": 100, "request_id": rid}
                 if a.ignore_eos == "on":
                     body["ignore_eos"] = True
@@ -148,6 +169,8 @@ def run(a) -> dict:
                     stop.set()
                     return
                 d = json.loads(data)
+                if a.own_replies:                     # the next call's history holds it here
+                    own[len(call["messages"])] = (d.get("choices") or [{}])[0].get("message") or {}
                 us = d.get("usage") or {}
                 rec = {"rid": rid, "resp_id": d.get("id"), "episode": ep, "task_seq": k, "task": task["task"],
                        "call": ci, "t_start": t0, "t_end": t1, "latency_s": t1 - t0,
@@ -292,6 +315,8 @@ def main() -> int:
     ap.add_argument("--gap-cap", type=float, default=10.0)
     ap.add_argument("--model", default=None, help="override the recorded model name")
     ap.add_argument("--ignore-eos", choices=["on", "off"], default="on")
+    ap.add_argument("--own-replies", action="store_true",
+                    help="history holds the model's own answers (reply KV load); needs --ignore-eos off")
     ap.add_argument("--timeout", type=float, default=1800)
     ap.add_argument("--tag", default=None)
     ap.add_argument("--worker-log", default=None)
@@ -311,6 +336,8 @@ def main() -> int:
         ml = a.mem_log or res["config"].get("mem_log")
         res["summary"] = summarize(res, wl, ml)
         return 0
+    if a.own_replies and a.ignore_eos == "on":
+        ap.error("--own-replies needs --ignore-eos off (an ignored EOS is fed but not in the text)")
     if not a.duration_min and not a.rounds:
         a.rounds = 1
     res = run(a)

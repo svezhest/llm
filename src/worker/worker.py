@@ -657,6 +657,28 @@ PROMPT_CACHE_CHAIN_TAIL = int(os.environ.get("QWEN_PROMPT_CACHE_CHAIN_TAIL", "40
 PROMPT_CACHE_STALE_S = float(os.environ.get("QWEN_PROMPT_CACHE_STALE_S", "300"))  # 0: off
 PROMPT_CACHE_KEEP_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_KEEP_TOKENS", "8192"))
 PROMPT_CACHE_KEEP_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_KEEP_WAIT_S", "10"))
+# Reply KV (QWEN_PROMPT_CACHE_REPLY=1, default off): when a text request ends
+# (stop / length; not cancel, stop strings or errors), its entry is extended
+# by the KV of the tokens the model consumed while answering (the prompt's
+# last token + the generated ones it fed back: the step-ahead feeds the EOS
+# it stops on, a sync row does not) and the recurrent state after them as the
+# new end state, so the next turn (prompt + reply + a new message: chats,
+# agent loops) resumes after the reply instead of at the last message start.
+# AppWorld traces: the template re-renders the reply to the same ids on 100 %
+# of 1344 calls; 20.8 % of the prefilled tokens saved (148 / call;
+# docs/perf/2026-10-17/design/reply_kv.md). Numerics: the reply's KV comes
+# from decode kernels (qmv; mrqmm at B >= 3; cascade-released rows) and the
+# next turn's first slab starts at the reply end, so a hit through a reply
+# is not bit-identical to a cold prefill (the batched-decode numerics class);
+# with it on, a greedy answer can depend on what the cache holds. Skipped:
+# DFlash rows, vision, rows still in a cascade group, rows whose prefill entry
+# was evicted / absorbed meanwhile, replies with reasoning (thinking on:
+# clients rarely send it back). A stop string usually ends the row as a
+# cancel (nothing stored), but its cancel can come after the row already
+# finished with stop / length: then the reply is stored with the tokens past
+# the string and the next turn falls back (harmless). A regenerate of the same prompt resumes at
+# the last message start (the prompt-end state is dropped with the extension).
+PROMPT_CACHE_REPLY = os.environ.get("QWEN_PROMPT_CACHE_REPLY", "0") == "1"
 
 # Compute dtype (QWEN_FP16=1): cast every bfloat16 parameter (quant scales/
 # biases, norms, embeddings, A_log...) to float16 after load. M1/M2-class GPUs
@@ -823,12 +845,16 @@ class _Seg:
         self.nbytes = sum(x.nbytes for x in self.arrays)
 
     @classmethod
-    def copy_from(cls, cache, a, b):
+    def copy_from(cls, cache, a, b, sync=True):
+        """`sync` False: the copies stay lazy (a reply store between two
+        decode steps: the caller queues them with mx.async_eval, the host
+        never waits)."""
         def own(x):
             return tuple(_own_slice(y, a, b) for y in x) if isinstance(x, (tuple, list)) \
                 else _own_slice(x, a, b)
         seg = cls(a, b, [(own(c.keys), own(c.values)) for c in cache if not hasattr(c, "cache")])
-        mx.eval(seg.arrays)
+        if sync:
+            mx.eval(seg.arrays)
         return seg
 
     @staticmethod
@@ -872,9 +898,12 @@ class _Entry:
     a chain of pieces (seg, lo, hi) (absolute positions, [lo, hi) within
     [seg.a, seg.b), contiguous from 0 to len(ids)), recurrent-state
     checkpoints and the end state. Pieces and checkpoints are shared objects
-    between entries."""
+    between entries. `reply` (QWEN_PROMPT_CACHE_REPLY): the entry was
+    extended past its prompt by a request's decoded tokens; `reply` is where
+    they start (the prompt entry's length) and the end is resumable although
+    it is no slab end of the next prompt."""
 
-    def __init__(self, ids, chain, ckpts, end, layout, quantized, low=0):
+    def __init__(self, ids, chain, ckpts, end, layout, quantized, low=0, reply=None):
         self.ids = ids
         self.chain = chain
         self.ckpts = ckpts                            # pos -> recurrent states, pos < len(ids)
@@ -882,6 +911,7 @@ class _Entry:
         self.layout = layout
         self.quantized = quantized
         self.low = low                                # resumable from here on (quantized KV)
+        self.reply = reply                            # decoded tokens from here on (reply KV)
         self.used = time.time()
         self.seq = 0                                  # _PrefixCache.seq when stored / last hit
         self.index()
@@ -913,10 +943,15 @@ class _Entry:
         always left to feed). Only a slab end of the new prompt (`ends`) will
         do: resuming anywhere else would cut the rest of the prefill
         differently from a cold run. A quantized KV cut below the
-        quantization start would not match a cold run either."""
+        quantization start would not match a cold run either. The end of a
+        reply entry is the exception: its KV came from decode anyway (not a
+        cold run's bits whatever the cut), and the next turn's prefill runs
+        from it to the new prompt's next slab end."""
         common = min(_lcp(self.ids, ids), len(ids) - 1)
-        tops = (*self.ckpts, len(self.ids)) if self.end is not None else tuple(self.ckpts)
-        pos = [p for p in tops if self.low <= p <= common and p in ends]
+        L = len(self.ids)
+        tops = (*self.ckpts, L) if self.end is not None else tuple(self.ckpts)
+        pos = [p for p in tops if self.low <= p <= common
+               and (p in ends or (p == L and self.reply is not None))]
         return max(pos, default=0), common
 
 
@@ -1078,10 +1113,22 @@ class _PrefixCache:
         return True
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
-              kv_start=None, chain=None, wanted=()):
+              kv_start=None, chain=None, wanted=(), reply=None, tick=True, sync=True, spare=(),
+              clock=None):
         """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
-        and checkpoints -> (entry or None when it was not kept, number of
-        older entries it absorbed). `inherit`: the parent's part when the
+        and checkpoints -> (entry or None when it was not kept, the older
+        entries it absorbed). A reply store (_Scheduler._store_reply)
+        passes the ids the row consumed, its cache after the last step,
+        `reply` = where the decoded part starts, `tick` False (a turn stays
+        two clock ticks: lookup + store), `sync` False (the copies are left
+        lazy: the caller queues every finishing row's copies in one
+        async_eval) and `spare` (never evicted here: the entry a running
+        prefill resumed from, as _Scheduler._regrow spares it; the new entry
+        must fit beside it, else it is not kept) and `clock` = the prompt
+        entry's (used, seq): a reply continues the same turn, so it keeps the
+        recency of its prefill (else a conversation that just finished, its
+        next lookup imminent, would be the most recently used entry: evicted
+        first, before the ones still decoding). `inherit`: the parent's part when the
         prefill resumed at `at`; `ends`: the prompt's slab ends; `protect`:
         the checkpoint positions thinning keeps (see _thin); `chain`: (the
         only checkpoint positions an entry that absorbs an older one keeps,
@@ -1109,7 +1156,8 @@ class _PrefixCache:
         at its deepest checkpoint instead)."""
         if kv_start is None:
             kv_start = KV_KWARGS["quantized_kv_start"]
-        self.seq += 1
+        if tick:
+            self.seq += 1
         quantized = _quantized(cache)
         L = len(ids)
         ckpts = dict(ckpts)
@@ -1119,7 +1167,9 @@ class _PrefixCache:
                 pieces, lo = list(inherit.pieces), at
             for p, s in inherit.ckpts.items():
                 ckpts.setdefault(p, s)
-            if inherit.end is not None and at < L:
+            # (a resume point is always a slab end, except the end of a
+            # reply entry: no checkpoint there, no prompt is ever cut there)
+            if inherit.end is not None and at < L and at in ends:
                 ckpts[at] = inherit.end
         # The new segment is sized before anything changes: an entry that
         # does not fit the batch's headroom alone is neither copied nor
@@ -1129,14 +1179,21 @@ class _PrefixCache:
         # this conversation, an exact repeat) is covered by it: its
         # checkpoints move over and it goes. Not an unquantized entry for a
         # quantized new one: its checkpoints below quantized_kv_start are only
-        # resumable from fp16 KV, it is the one resume point there.
+        # resumable from fp16 KV, it is the one resume point there. A reply
+        # entry whose prompt part (ids[:reply]) the new ids cover goes too:
+        # the conversation went on without that reply (re-tokenized
+        # differently, regenerated), only its checkpoints are of use.
+        def prefix(e):
+            return len(e.ids) <= L and ids[: len(e.ids)] == e.ids
         covered = [e for e in self.entries
-                   if len(e.ids) <= L and ids[: len(e.ids)] == e.ids
+                   if (prefix(e) or (e.reply is not None and e.reply <= L
+                                     and ids[: e.reply] == e.ids[: e.reply]))
                    and not (quantized and not e.quantized)]
         for e in covered:
             for p, s in e.ckpts.items():
-                ckpts.setdefault(p, s)
-            if e.end is not None and len(e.ids) in ends and len(e.ids) < L:
+                if p < L:                             # (a prompt-part cover may hold deeper ones)
+                    ckpts.setdefault(p, s)
+            if e.end is not None and len(e.ids) in ends and len(e.ids) < L and prefix(e):
                 ckpts.setdefault(len(e.ids), e.end)
         if covered and chain is not None:
             # a chain (this conversation's previous turn absorbed): its next
@@ -1150,16 +1207,28 @@ class _PrefixCache:
         _thin(ckpts, PROMPT_CACHE_CKPTS, protect)
         # the chain without its own segment yet: nbytes + extra = its size
         new = _Entry(ids, pieces, ckpts, _recurrent_states(cache), _layout(cache), quantized,
-                     kv_start if quantized else 0)
+                     kv_start if quantized else 0, reply)
         new.seq = self.seq
-        if limit is not None and new.nbytes + extra > limit:
+        if clock is not None:                         # before any eviction can see it
+            new.used, new.seq = clock
+        # what can never be evicted for it: the spared entries it does not absorb
+        stays = [s for s in spare if any(s is e for e in self.entries)
+                 and not any(s is c for c in covered)]
+        if limit is not None and self.bytes_of([new, *stays]) + extra > limit:
             # beside the batch (the rows' reservations + the cache within the
             # budget + the idle prefill reserve) it does not fit even alone
+            # (beside the running prefill's entry, which stays)
             self.evictions += 1
-            log.info("prompt cache: entry of %d tokens (%.2f GiB) not kept: over the "
-                     "batch's headroom (%.2f GiB); counted as an eviction, the cache is "
-                     "unchanged", L, (new.nbytes + extra) / GIB, max(limit, 0) / GIB)
-            return None, 0
+            where = " beside the running prefill's entry" if stays else ""
+            if reply is not None:                     # its own prefix (log parsers count it apart)
+                log.info("prompt cache reply not kept: over the batch's headroom (%.2f GiB)%s: "
+                         "entry of %d tokens (%.2f GiB); counted as an eviction, the cache is "
+                         "unchanged", max(limit, 0) / GIB, where, L, (new.nbytes + extra) / GIB)
+            else:
+                log.info("prompt cache: entry of %d tokens (%.2f GiB) not kept: over the "
+                         "batch's headroom (%.2f GiB)%s; counted as an eviction, the cache is "
+                         "unchanged", L, (new.nbytes + extra) / GIB, max(limit, 0) / GIB, where)
+            return None, []
         rest = [e for e in self.entries if not any(e is c for c in covered)]
         budget = PROMPT_CACHE_GB * GIB
         if callable(wanted):
@@ -1175,15 +1244,18 @@ class _PrefixCache:
         self.entries = rest + [new]
         try:
             self._recount()
-            while len(self.entries) > 1 and self.bytes + extra > budget:
-                self.evict(keep=(new,), wanted=wanted)
+            while len(self.entries) > 1 and self.bytes + extra > budget and \
+                    self.evict(keep=(new, *spare), wanted=wanted):
+                pass
             if limit is not None:
                 # it fits alone: others go (victim order) until it fits beside the batch
                 while len(self.entries) > 1 and self.bytes + extra > limit and \
-                        self.evict(keep=(new,), wanted=wanted):
+                        self.evict(keep=(new, *spare), wanted=wanted):
                     pass
             if L > lo:                                # copied once room is made
-                new.chain = pieces + [(_Seg.copy_from(cache, lo, L), lo, L)]
+                seg = (_Seg.copy_from(cache, lo, L) if sync
+                       else _Seg.copy_from(cache, lo, L, sync=False))
+                new.chain = pieces + [(seg, lo, L)]
                 new.index()
         except BaseException:
             # no half-built entry (published without its segment): the
@@ -1194,10 +1266,12 @@ class _PrefixCache:
             raise
         self._recount(added=False)                    # its own segment: nothing new to peek
         if self.bytes > budget:
-            log.warning("prompt cache: the newest entry alone (%d tokens, %.2f GiB) is over "
-                        "QWEN_PROMPT_CACHE_GB=%.1f; kept, evicted on demand", L,
-                        self.bytes / GIB, PROMPT_CACHE_GB)
-        return new, len(covered)
+            log.warning("prompt cache: the newest entry %s(%d tokens, %.2f GiB) is over "
+                        "QWEN_PROMPT_CACHE_GB=%.1f; kept, evicted on demand",
+                        "alone " if len(self.entries) == 1 else
+                        "beside the running prefill's entry ", L, self.bytes / GIB,
+                        PROMPT_CACHE_GB)
+        return new, covered
 
 
 _FIXED_SLAB = None    # frozen at load (Engine.load); None = derived from the knobs (tests)
@@ -2246,6 +2320,11 @@ class _Row:
         self.cached = False                         # resumed from the prompt cache or stored an entry
         self.spec = False                           # ran DFlash (_spec): never grouped
         self.group = None                           # its _PrefixGroup (QWEN_CASCADE)
+        # reply KV (QWEN_PROMPT_CACHE_REPLY; _Scheduler._store_reply)
+        self.fed = None                             # generated tokens as read, in order (list)
+        self.entry = None                           # weakref to the entry its prefill stored
+        self.plan = None                            # (the prompt's slab ends, protected ckpts)
+        self.why = None                             # finish reason (_finish)
 
     @property
     def sync(self):
@@ -2790,6 +2869,8 @@ class _Scheduler:
                 keep = {b for b in keep if b >= start}
                 protect = {b for b in protect if b >= start}
                 # (chain: store drops its positions below the start itself)
+            if PROMPT_CACHE_REPLY and not req.images:
+                row.fed, row.plan = [], (set(bounds), protect)
 
         def checkpoint(pos, cache):
             if pos in keep:
@@ -2822,6 +2903,8 @@ class _Scheduler:
             if e is None:
                 return
             row.cached = True
+            if row.fed is not None:
+                row.entry = weakref.ref(e)
             # MB: the entry's buffers (shared ones included); "MB total": live
             # bytes, every buffer once; gap: tokens the cache held but could
             # not resume from (no checkpoint there); pieces: its KV chain;
@@ -2829,7 +2912,7 @@ class _Scheduler:
             log.info("id=%s prompt cache store: %d tokens, %d checkpoints, %.1f MB "
                      "(%d entries, %.1f MB total) reused=%d gap=%d absorbed=%d pieces=%d "
                      "states=%.1f MB", req.id, len(e.ids), len(e.ckpts), e.nbytes / 1e6,
-                     len(pc.entries), pc.bytes / 1e6, reused, split - reused, covered,
+                     len(pc.entries), pc.bytes / 1e6, reused, split - reused, len(covered),
                      len(e.chain), e.state_bytes() / 1e6)
 
         return input_ids, cache, reused, set(bounds), checkpoint, snapshot
@@ -3127,6 +3210,10 @@ class _Scheduler:
     def _drop_done(self):
         keep = [i for i, r in enumerate(self.rows) if not r.done]
         if len(keep) != len(self.rows):
+            # reply KV: the finished rows' caches, taken before the batch's
+            # stacked state is cut (lazy; _store_reply queues the copies)
+            replies = [(r, self._reply_cache(r, i)) for i, r in enumerate(self.rows)
+                       if r.done and r.fed is not None]
             if self.gdn is not None:
                 if len(keep) == 1:              # back to the plain library call
                     _gdn_split(self.gdn, keep[0], self.rows[keep[0]].cache)
@@ -3134,6 +3221,134 @@ class _Scheduler:
                 else:
                     self.gdn = _gdn_take(self.gdn, keep) if keep else None
             self.rows = [self.rows[i] for i in keep]
+            kept, absorbed = [], []
+            for r, cache in replies:
+                try:
+                    e, covered = self._store_reply(r, cache)
+                except Exception:  # noqa: BLE001 — the request already ended: never the batch's failure
+                    log.exception("id=%s prompt cache reply store failed", r.req.id)
+                    e, covered = None, []
+                if e is not None:
+                    kept.append(e)
+                    absorbed += covered
+            if kept:
+                # every finishing row's copies + end states in ONE async_eval
+                # (one command buffer between step k and k+1, not two per row;
+                # never waited for: step-ahead)
+                pc = self.eng._pcache
+                try:
+                    mx.async_eval([a for e in kept for a in e.arrays])
+                except Exception:  # noqa: BLE001 — no entry with lazy arrays that cannot run
+                    # as a failed store: the reply entries go, the prompt
+                    # entries they absorbed come back (the evicted ones are gone)
+                    back = [c for c in absorbed if not any(c is k for k in kept)]
+                    pc.entries = [x for x in pc.entries if not any(x is e for e in kept)]
+                    pc.entries += [c for c in back if not any(c is x for x in pc.entries)]
+                    pc.evictions += len(kept)
+                    pc._recount()
+                    log.exception("prompt cache reply not kept: queueing the copies failed; %d "
+                                  "reply entries dropped, %d prompt entries restored (counted "
+                                  "as evictions)", len(kept), len(back))
+
+    # --- reply KV (QWEN_PROMPT_CACHE_REPLY) -------------------------------------
+    def _reply_cache(self, row, i):
+        """The cache list a finished row `i` of the batch ends with (its KV
+        objects, its recurrent state in ArraysCaches of its own) -> None when
+        it is not stored: ended otherwise than stop / length, still in a
+        cascade group (its KV is in the group's stack), DFlash, vision.
+        Builds lazy arrays only. Its state is always a gather into a buffer
+        of its own, never a view: at B >= 2 out of the stacked state (a
+        slice would keep the batch's whole stack alive in the entry), at
+        B = 1 too (right after the batch shrank to it, its arrays are still
+        _gdn_split's views of the old stack)."""
+        try:
+            if (row.why not in ("stop", "length") or row.spec or row.req.images
+                    or row.group is not None
+                    or any(not hasattr(row.cache[j], "keys") for j in self.fa_layers)):
+                return None
+            from mlx_vlm.models.cache import ArraysCache
+            stacked = self.gdn is not None
+            idx = mx.array([i if stacked else 0], dtype=mx.int32)
+            out = []
+            for j, c in enumerate(row.cache):
+                if hasattr(c, "cache"):
+                    n = ArraysCache(size=len(c.cache))
+                    n.cache = [a[idx] if a is not None else None
+                               for a in (self.gdn[j].cache if stacked else c.cache)]
+                    out.append(n)
+                else:
+                    out.append(c)
+            return out
+        except Exception:  # noqa: BLE001 — the request already ended: costs the extension only
+            log.exception("id=%s prompt cache reply: state not taken", row.req.id)
+            return None
+
+    def _store_reply(self, row, cache):
+        """Extend the entry the row's prefill stored by the tokens the model
+        consumed while it decoded (prompt + generated[:k]: the step-ahead fed
+        the EOS a row stops on, a sync row did not, a "length" row never fed
+        its pending token; row.pos says how many) and its state after them,
+        through the same store as a prefill (budget checks, absorb, victim
+        order) -> (the new entry or None, the entries it absorbed). Its
+        copies are still lazy: _drop_done queues every finishing row's in one
+        async_eval (between two decode steps the host must not wait for the
+        step in flight) and, should that fail, puts the absorbed ones back.
+        The entry keeps its prompt entry's recency (`clock`). Never evicts
+        the entry the running prefill resumed from (task_row.parent: its
+        pieces stay allocated until that prefill stores, as in _regrow).
+        Nothing when the entry is gone (evicted / absorbed while it decoded:
+        the victim order had decided its next turn is the furthest away),
+        nor for a reply with reasoning (thinking on: clients rarely send it
+        back, so the next prompt diverges at the reply start; the copy and
+        the prompt-end state, a regenerate's full hit, would be lost)."""
+        fed, row.fed = row.fed, None
+        req = row.req
+        if cache is None:
+            return None, []
+        pc = self.eng._pcache
+        e = row.entry() if row.entry is not None else None
+        row.entry = None
+        n = row.pos - len(req.ids)
+        if e is None or not any(e is x for x in pc.entries):
+            log.info("id=%s prompt cache reply not kept: its prompt entry is gone (evicted, "
+                     "absorbed or never kept)", req.id)
+            return None, []
+        if n < 1 or len(fed) < n:
+            return None, []                     # nothing decoded, or a fed token never read
+        think = getattr(self.eng, "_think", None)
+        if think:
+            tags = [t for t in req.ids if t in think]
+            inside = bool(tags) and tags[-1] == think[0]      # generation starts in reasoning
+            if inside or any(t in think for t in fed[:n]):
+                log.info("id=%s prompt cache reply not kept: reasoning in the reply "
+                         "(thinking on)", req.id)
+                return None, []
+        ids = req.ids + fed[:n]
+        L = len(e.ids)
+        if e.ids != ids[:L] or any(row.cache[j].offset != row.pos for j in self.fa_layers):
+            log.warning("id=%s prompt cache reply not kept: the row's cache does not match "
+                        "its entry", req.id)
+            return None, []
+        ends, protect = row.plan
+        task = self.task_row
+        spare = (task.parent,) if task is not None and task.parent is not None else ()
+        try:
+            new, covered = pc.store(ids, cache, {}, _Inherit(e.chain, {}, None, e.quantized), L,
+                                    ends, protect,
+                                    limit=self.budget + self.prefill_reserve - self.reserved,
+                                    kv_start=self.kv["quantized_kv_start"], wanted=self._wanted,
+                                    reply=L, tick=False, sync=False, spare=spare,
+                                    clock=(e.used, e.seq))
+        except Exception:  # noqa: BLE001 — the request already ended
+            log.exception("id=%s prompt cache reply store failed", req.id)
+            return None, []
+        if new is None:
+            return None, []
+        log.info("id=%s prompt cache reply kept: %d tokens (+%d generated), %d checkpoints, "
+                 "%.1f MB (%d entries, %.1f MB total) absorbed=%d pieces=%d", req.id,
+                 len(new.ids), n, len(new.ckpts), new.nbytes / 1e6,
+                 len(pc.entries), pc.bytes / 1e6, len(covered), len(new.chain))
+        return new, covered
 
     def _compact(self):
         self._drop_done()
@@ -3599,6 +3814,7 @@ class _Scheduler:
 
     def _finish(self, row, why):
         if not row.done:
+            row.why = why
             self._end(row, ("done", why))
 
     def _fail(self, row, e):
@@ -3726,6 +3942,8 @@ class _Scheduler:
         toks = [r.y.item() for r in live]
         for r, tok in zip(live, toks):
             req = r.req
+            if r.fed is not None:                   # in feed order (the EOS too: _store_reply)
+                r.fed.append(tok)
             try:
                 if req.thinking is not None:
                     req.thinking(tok)
