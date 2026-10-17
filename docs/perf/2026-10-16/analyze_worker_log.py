@@ -4,7 +4,7 @@ path, since = sys.argv[1], sys.argv[2]  # since = "2026-10-16 01:39:21"
 T = lambda s: datetime.strptime(s, "%Y-%m-%d %H:%M:%S,%f")
 t_since = datetime.strptime(since, "%Y-%m-%d %H:%M:%S")
 R, B = {}, []
-REPLY = {"kept": 0, "not kept (headroom)": 0, "entry gone": 0, "reasoning": 0}   # QWEN_PROMPT_CACHE_REPLY
+REPLY = {"kept": 0, "not kept (headroom)": 0, "entry gone": 0, "reasoning": 0, "grouped": 0}   # QWEN_PROMPT_CACHE_REPLY
 for line in open(path, errors="replace"):
     m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+) INFO  qwen\.worker (.*)", line)
     if not m: continue
@@ -26,6 +26,7 @@ for line in open(path, errors="replace"):
     if rest.startswith("prompt cache reply kept:"): REPLY["kept"] += 1; continue
     if rest.startswith("prompt cache reply not kept: its prompt entry is gone"): REPLY["entry gone"] += 1; continue
     if rest.startswith("prompt cache reply not kept: reasoning"): REPLY["reasoning"] += 1; continue
+    if rest.startswith("prompt cache reply skipped: in a cascade group"): REPLY["grouped"] += 1; continue
     if rest.startswith("prompt_tokens="): r["prompt"] = int(re.match(r"prompt_tokens=(\d+)", rest)[1])
     elif "prompt cache HIT" in rest:
         x = re.search(r"HIT: (\d+)/(\d+).*prefilling (\d+)", rest); r["reused"], r["prefill"] = int(x[1]), int(x[3]); r["hit"] = True; r["t_hit"] = ts

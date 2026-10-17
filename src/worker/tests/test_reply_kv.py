@@ -193,6 +193,45 @@ def test_thinking_off_replies_are_stored(dense, small):
     assert e.ids == p + toks and e.reply == len(p) - 1
 
 
+def test_thinking_on_reply_without_think_ids_is_not_stored(dense, small, caplog):
+    """Thinking on (the prompt pre-opens <think>), no budget, no think id in
+    what the model generated: the whole reply is reasoning as _GenState
+    splits it (no </think> yet), so it is skipped all the same."""
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    p = [IM_START] + prompts([20], 42)[0] + [IM_START, A, NL, TH]
+    sched = scheduler(dense)
+    sched.eng._think = [TH, THC]
+    toks = run(sched, [request(p, 6, "a")])["a"][0]
+    assert TH not in toks and THC not in toks, toks
+    (e,) = sched.eng._pcache.entries
+    assert e.ids == p[:-1] and e.reply is None and e.end is not None
+    msg = [m for m in caplog.messages if "id=a prompt cache reply not kept: reasoning" in m]
+    assert len(msg) == 1 and "6 of 6 generated tokens" in msg[0], msg
+
+
+def test_think_id_in_the_content_with_thinking_off_is_stored(dense, small, monkeypatch):
+    """Thinking off (the generation prompt closes </think>), and the model
+    emits the <think> id inside its content (an answer that mentions the
+    literal `<think>`): content, not a reasoning section (_GenState: plain
+    text), so the reply is stored and the next turn resumes after it. The
+    worker's <think> id is set to a token the greedy reply holds (the tiny
+    model never emits a chosen id on its own)."""
+    p = first(47)
+    probe = off_run(monkeypatch, dense, p, 8, "probe")[0][0]
+    x = next(t for t in probe[1:] if t not in (THC, NN, IM_END, TH))
+    sched = scheduler(dense)
+    sched.eng._think = [x, THC]
+    assert not worker._GenState.for_prompt(p, sched.eng._think).in_thinking
+    toks = run(sched, [request(p, 8, "a")])["a"][0]
+    assert toks == probe and x in toks
+    (e,) = sched.eng._pcache.entries
+    assert e.ids == p + toks and e.reply == len(p) - 1
+    q = nxt(p, toks, 48)
+    r2 = request(q, 6, "b")
+    assert run(sched, [r2])["b"] == off_run(monkeypatch, dense, q, 6, "b")[0]
+    assert r2.reused == len(p) + len(toks)                         # after the reply
+
+
 def test_reply_retokenized_differently_falls_back(dense, small, monkeypatch):
     """The next prompt holds other ids than the reply (re-tokenized): the hit
     stops at the last slab end before the reply, as with the knob off, and
@@ -633,8 +672,11 @@ def test_quantized_kv(dense, small, monkeypatch):
                  tol=1e-3)
 
 
-def test_reply_cache_gates():
-    """What _reply_cache refuses (it builds nothing then)."""
+def test_reply_cache_gates(caplog):
+    """What _reply_cache refuses (it builds nothing then); a row still in a
+    cascade group is the one refusal it logs (the others are no store
+    candidates at all, or logged by _store_reply)."""
+    caplog.set_level(logging.INFO, logger="qwen.worker")
     s = worker._Scheduler.__new__(worker._Scheduler)
     s.fa_layers, s.gdn = [], None
 
@@ -649,6 +691,17 @@ def test_reply_cache_gates():
     r.req = type("Q", (), {"images": ["img"], "id": "x"})()
     assert s._reply_cache(r, 0) is None
     assert s._reply_cache(Row(), 0) == []
+    skipped = [m for m in caplog.messages if "prompt cache reply skipped" in m]
+    assert skipped == [m for m in skipped if m.startswith("id=x prompt cache reply skipped: "
+                                                          "in a cascade group (P=?)")]
+    assert len(skipped) == 1
+    r = Row()
+    r.why, r.group = "cancelled", type("G", (), {"P": 4096})()   # cancelled: no candidate, no line
+    assert s._reply_cache(r, 0) is None
+    r = Row()
+    r.group = type("G", (), {"P": 4096})()
+    assert s._reply_cache(r, 0) is None
+    assert sum("reply skipped: in a cascade group (P=4096)" in m for m in caplog.messages) == 1
 
 
 def test_knob_off_keeps_the_prompt_entry(dense, small, monkeypatch):

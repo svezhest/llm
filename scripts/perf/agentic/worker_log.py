@@ -38,8 +38,9 @@ def parse(path: str, since: datetime, until: datetime | None = None, prefix: str
     R, B, E = {}, [], {"evict_admit": 0, "evict_admit_entries": 0, "evict_growth": 0, "not_kept": 0,
                       "gave_up": 0, "cut_length": 0, "refused": 0, "over_cap_warn": 0,
                       # QWEN_PROMPT_CACHE_REPLY: extensions kept / over the headroom / the
-                      # prompt entry gone / skipped for reasoning
-                      "reply_kept": 0, "reply_not_kept": 0, "reply_entry_gone": 0, "reply_reasoning": 0}
+                      # prompt entry gone / skipped for reasoning / skipped in a cascade group
+                      "reply_kept": 0, "reply_not_kept": 0, "reply_entry_gone": 0, "reply_reasoning": 0,
+                      "reply_grouped": 0}
     for line in open(path, errors="replace"):
         m = RX_LINE.match(line)
         if not m:
@@ -102,6 +103,8 @@ def parse(path: str, since: datetime, until: datetime | None = None, prefix: str
             E["reply_entry_gone"] += 1
         elif rest.startswith("prompt cache reply not kept: reasoning"):
             E["reply_reasoning"] += 1
+        elif rest.startswith("prompt cache reply skipped: in a cascade group"):
+            E["reply_grouped"] += 1
         if prefix and not rid.startswith(prefix):
             continue
         r = R.setdefault(rid, {"id": rid})

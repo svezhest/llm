@@ -393,8 +393,10 @@ def test_long_fresh_entry_keeps_the_divergence_point(dense, small, monkeypatch):
 @pytest.fixture
 def prod(monkeypatch):
     """The production knobs (slab 2048, min 256, stride 2048, cap 12, chain
-    3 marks / 4096 tail, fresh threshold 16384)."""
+    3 marks / 4096 tail, fresh threshold 16384); the reply KV off, as in
+    test_prompt_cache's `small` (these tests count prefill stores)."""
     monkeypatch.setattr(worker, "PROMPT_CACHE", True)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_REPLY", False)
     for k, v in dict(PREFILL_STEP=2048, PREFILL_MIN_STEP=256, PROMPT_CACHE_STRIDE=2048,
                      PROMPT_CACHE_CKPTS=12, PROMPT_CACHE_CHAIN_MARKS=3,
                      PROMPT_CACHE_CHAIN_TAIL=4096, PROMPT_CACHE_CHAIN_FRESH_TOKENS=16384,

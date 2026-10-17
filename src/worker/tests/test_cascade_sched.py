@@ -50,8 +50,9 @@ def casc(monkeypatch):
     The memory rule is off (any 3 rows win): the tiny model's 2 FA layers and
     16-token stack steps make a 150-token prefix lose to its rows' caches at
     3 rows (the 9B's 4K prefix wins there); the rule's own tests put
-    REAL_WINS back."""
-    for k, v in dict(PROMPT_CACHE=True, PREFILL_STEP=8, PREFILL_MIN_STEP=4,
+    REAL_WINS back. The reply KV off (on by default): these tests check the
+    prompt entries the rows' prefills stored."""
+    for k, v in dict(PROMPT_CACHE=True, PROMPT_CACHE_REPLY=False, PREFILL_STEP=8, PREFILL_MIN_STEP=4,
                      PROMPT_CACHE_STRIDE=16, PROMPT_CACHE_CKPTS=12, PROMPT_CACHE_KEEP_TOKENS=8,
                      PROMPT_CACHE_KEEP_WAIT_S=float("inf"), CASCADE=True, CASCADE_MIN_ROWS=3,
                      CASCADE_MIN_PREFIX=16, CASCADE_CHUNK=16, CASCADE_STEP=16,
@@ -741,6 +742,27 @@ def test_dissolves_at_two_rows(model, request, casc, monkeypatch, caplog):
 
 
 worker_req = request                      # `request` is pytest's fixture inside parametrized tests
+
+
+def test_reply_kv_skips_grouped_rows_with_a_log_line(dense, casc, monkeypatch, caplog):
+    """QWEN_PROMPT_CACHE_REPLY on, the dissolve wave above: r0 / r1 end while
+    still in the group (their KV is in the group's stack), so their replies
+    are skipped, each with one `reply skipped: in a cascade group` line; r2 /
+    r3, released at the dissolve, end as plain rows and store theirs."""
+    monkeypatch.setattr(worker, "PROMPT_CACHE_REPLY", True)
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    ids = chats(4)
+    lens = [6, 8, 30, 30]
+    sched = scheduler(dense, max_batch=8)
+    run(sched, [request(p, n, f"r{i}") for i, (p, n) in enumerate(zip(ids, lens))])
+    assert any("dissolved (2 members)" in m for m in caplog.messages)
+    skipped = [m for m in caplog.messages if "prompt cache reply skipped" in m]
+    assert sorted(m.split()[0] for m in skipped) == ["id=r0", "id=r1"], skipped
+    assert all("in a cascade group (P=" in m for m in skipped)
+    kept = {m.split()[0] for m in caplog.messages if "prompt cache reply kept" in m}
+    assert kept == {"id=r2", "id=r3"}
+    by_end = {len(e.ids): e for e in sched.eng._pcache.entries if e.reply is not None}
+    assert sorted(by_end) == sorted(len(ids[i]) + 30 for i in (2, 3))
 
 
 def test_long_suffix_leaves(dense, casc, monkeypatch, caplog):

@@ -446,13 +446,18 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   vision: nothing. Retry resumes at pos, bit-identical to cold. A store exception there
   is logged (`_store_prefix`), never changes the outcome. `docs/perf/2026-10-17/
   design/partial_store.md`, `tests/test_partial_store.py`.
-  **Reply KV (`QWEN_PROMPT_CACHE_REPLY=1`, default off, 2026-10-17)**: at a row's end
+  **Reply KV (`QWEN_PROMPT_CACHE_REPLY`, default 1 since the 2026-10-17 GPU gate;
+  `0` = off)**: at a row's end
   (`stop`/`length`; not cancel (stop strings usually; a late cancel after stop/length
-  stores, harmlessly), errors, DFlash, vision, rows still in a cascade group, replies
-  with reasoning — think ids in the fed tokens or the prompt open in `<think>`) `_drop_done` → `_reply_cache` + `_store_reply` extend the row's prompt
+  stores, harmlessly), errors, DFlash, vision, rows still in a cascade group (logged
+  `id=… prompt cache reply skipped: in a cascade group …`), replies that generated a
+  reasoning section — `_GenState.for_prompt(ids, _think)`: the prompt open in `<think>`,
+  the handler's own split; a think id inside the content with thinking off is content,
+  stored) `_drop_done` → `_reply_cache` + `_store_reply` extend the row's prompt
   entry (`row.entry`, weakref; gone = nothing) to ids = prompt + `row.fed[:pos − len]`
   (tokens as `_iterate` read them; the step-ahead fed the EOS it stops on, a sync row
-  did not, `length` never fed the pending token) through `pc.store` (`inherit` = its
+  did not, a `length` row fed its last generated token too: entry = prompt +
+  completion) through `pc.store` (`inherit` = its
   whole chain, so only `[len−1, pos)` is copied; budget checks as any store; `reply=` →
   `_Entry.reply`, whose end `best()` accepts though it is no slab end; `tick=False`:
   a turn stays 2 clock ticks; `sync=False`: copies left lazy, `_drop_done` queues every
@@ -470,8 +475,12 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   of 1344 replies re-render to the same ids, −20.8 % prefill tokens.
   **Numerics**: reply KV from decode kernels + the next slab starting at the reply end
   → a hit through a reply ≠ cold prefill bitwise (CPU: GDN recurrence of a T-slab vs T
-  steps differs from layer 0); greedy answers can depend on cache contents. Tests
-  `tests/test_reply_kv.py`; design `docs/perf/2026-10-17/design/reply_kv.md`.
+  steps differs from layer 0): the batched-decode numerics class — GPU gate (9B, hit
+  through a reply vs cold, teacher-forced 862 positions) top-1 99.88 %, KL 5.8e-5;
+  greedy answers can depend on cache contents. `QWEN_PROMPT_CACHE_REPLY=0` is the way
+  back (bit-exact, `_bounds` determinism). Gate: −21 % prefill tokens / +6.5 % req/min
+  on the AppWorld replay, no visible decode cost. Tests `tests/test_reply_kv.py`; design
+  `docs/perf/2026-10-17/design/reply_kv.md`, gate `docs/perf/2026-10-17/reply_kv_gpu.md`.
 - **Continuous batching (`_Scheduler`, worker.py)**. Invariants:
   - MLX graphs are built and evaluated only on the scheduler thread after load
     (MLX ops on two threads at once crashed in tests). Handlers render, tokenize,
@@ -494,7 +503,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     with stock MLX: 9B teacher-forced 100% top-1 at B=8 (KL 9e-6), 99.8% at 16;
     with mrqmm 100% at B=3/4/8 (KL 8e-6), 99.7% at 16 (KL 1e-5) — so
     under load a greedy answer can differ run to run; `QWEN_MAX_BATCH=1` restores
-    determinism. Cascade groups (default on with fp16 KV + the prompt cache: ≥ 8
+    determinism (+ `QWEN_PROMPT_CACHE_REPLY=0`: a hit through a reply differs from
+    cold even at B = 1). Cascade groups (default on with fp16 KV + the prompt cache: ≥ 8
     rows sharing ≥ 4096 prompt tokens, below) change only the grouped rows'
     attention, in the same numerics class as mrqmm (top-1 ≥ 99.71 %); B ≤ 2 stays
     bit-exact and `QWEN_CASCADE=0` restores this per-row path bit for bit.
@@ -569,7 +579,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     exact copy); `QWEN_CASCADE=0` restores today's per-row path bit for bit. A released
     row's `[0, P)` are the cold bits; its suffix holds what it decoded while grouped — so
     B ≥ 3 greedy answers also depend on cache contents / arrival order (determinism:
-    `QWEN_CASCADE=0` or `QWEN_MAX_BATCH=1`). Accounting: a group is charged once
+    `QWEN_CASCADE=0` or `QWEN_MAX_BATCH=1`, with `QWEN_PROMPT_CACHE_REPLY=0`). Accounting: a group is charged once
     (`_group_bytes`: fp32 prefix padded to chunks + stack at the longest reservation ×1.05
     + max(score transients + one layer's old+new stack, the 2-row dissolve floor)),
     members keep `_member_bytes` (GDN). A failed step drops every group (`_fail_rows`).
@@ -717,7 +727,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — unused this long and wanted by no waiting request = stale (evicted first, LRU) even within the round; `0` = off |
 | `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the system-block end, the last N message starts, strides in the last N tokens and in the first user message + its end state; `-1` marks = off |
 | `QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS` | worker | `16384` — fresh entries this long take the chain policy (+ the divergence point); shorter: the cap policy; `0` = never |
-| `QWEN_PROMPT_CACHE_REPLY` | worker | `0` — `1`: a finished request's entry is extended by its decoded tokens' KV + end state; the next turn resumes after the reply (AppWorld: −21 % prefill tokens); not bit-identical to a cold prefill (decode numerics) |
+| `QWEN_PROMPT_CACHE_REPLY` | worker | `1` — a finished request's entry is extended by its decoded tokens' KV + end state; the next turn resumes after the reply (AppWorld: −21 % prefill tokens); not bit-identical to a cold prefill (batched-decode class: top-1 99.88 %, KL 5.8e-5 on the gate); `0` = off, bit-exact |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (fp16 KV + prompt cache + max_batch ≥ 3 only, else off; unset/empty = `1`, anything but `1` off); `0` = today's per-row path bit for bit |

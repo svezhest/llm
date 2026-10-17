@@ -112,11 +112,14 @@ A row qualifies when all of the following hold:
 
 * the knob is on, and so is `QWEN_PROMPT_CACHE`;
 * it is a text row, not a DFlash row (`row.spec`, also after demotion);
-* it was not in a cascade group when it ended (its suffix KV lives in the group's stack: `_GroupRef` caches);
+* it was not in a cascade group when it ended (its suffix KV lives in the group's stack: `_GroupRef` caches;
+  logged `id=… prompt cache reply skipped: in a cascade group …` since the GPU gate, F1);
 * it finished with `stop` or `length` (`row.why`; cancel, usually including stop strings, and errors store
   nothing);
-* its reply holds no reasoning: no `<think>`/`</think>` id in the fed tokens, and the prompt does not end
-  inside an open `<think>`;
+* it generated no reasoning section: the prompt does not end inside an open `<think>` (thinking on), the same
+  split the handler's `_GenState` makes (`_GenState.for_prompt`). Until the GPU gate (F2) any `<think>` /
+  `</think>` id in the fed tokens skipped it too; with thinking off such an id is content (`_GenState`: a
+  `<think>` is plain text) and the reply is stored;
 * its prefill stored an entry that is still in the cache (`row.entry`, a weak reference). If it was evicted
   or absorbed meanwhile, nothing is stored. The eviction order had decided this conversation's next turn is
   the furthest away, and copying the whole `[0, len)` out of the row would undo that decision.
@@ -133,7 +136,7 @@ So the ids are exactly what went through the model, whatever the mode:
 |---|---|
 | step-ahead, stop | the EOS (`len(fed)` = `pos - len(prompt)`) |
 | sync row, stop | not the EOS (one fewer) |
-| `length` | every sent token; the pending one was never fed |
+| `length` | every generated token, the last one too: the step-ahead fed it (the entry = prompt + completion, "+N generated" = `completion_tokens`); only the token sampled from it, never sent, is not in the cache (corrected after the GPU gate, F3) |
 
 A row cut by `_regrow` (memory) fed one token it never read. That row stores nothing.
 
@@ -218,7 +221,8 @@ batched decode: B ≤ 2 rows are bitwise solo decodes, and mrqmm is top-1 ≥ 99
   on. A greedy answer can differ between a warm and a cold worker, as it already can under batching.
 * An entry may also hold KV and GDN states that come from different, numerically equivalent computations of
   the same tokens: absorbed checkpoints over a reply region.
-* `QWEN_PROMPT_CACHE_REPLY=0` (the default) restores today's behaviour bit for bit.
+* `QWEN_PROMPT_CACHE_REPLY=0` restores today's behaviour bit for bit. (It was the default until the GPU gate,
+  `../reply_kv_gpu.md`: top-1 99.88 %, KL 5.8e-5 vs cold; the default is `1` since.)
 
 ## Results (CPU only; not measured on the GPU yet)
 
@@ -333,3 +337,12 @@ CPU suite after the fixes (`--ignore tests/test_mrqmm.py --ignore tests/test_pfq
 | R2-3 | LOW: with `spare`, a reply could be published over the headroom without a log; the soft-cap warning said "alone" | The "not kept" check is `bytes_of([new, *spared entries it does not absorb]) + extra > limit` (`:1217`), up front, with nothing changed; the log says `… beside the running prefill's entry`. The soft-cap warning says "beside the running prefill's entry" when entries other than the new one are left (`:1272`). Without `spare`, both are the old checks. | `test_reply_beside_the_spared_parent_over_the_headroom`: headroom = D's prompt entry + C's parent; the extension fits alone, not beside the parent, so it is not kept and logged. It fails with the old `new.nbytes` check. |
 
 CPU suite after round 2 (`--ignore tests/test_mrqmm.py --ignore tests/test_pfqmm.py --ignore tests/test_rattn.py`): **251 passed, 2 skipped** (247 + 4 new). Mutants: `clock=None`, no restore, the old `new.nbytes` limit check: each fails its test.
+
+### After the GPU gate (`../reply_kv_gpu.md`)
+
+| # | finding | change | test |
+|---|---|---|---|
+| F1 | LOW: a row still in a cascade group at its end was skipped silently | `_reply_cache` logs `id=… prompt cache reply skipped: in a cascade group (P=…) …` (INFO) for a stop / length text row that is not DFlash; `worker_log.py` event `reply_grouped`, `analyze_worker_log.py` `reply KV:` key `grouped` | `test_reply_cache_gates` (one line, only for a candidate row), `test_cascade_sched.py::test_reply_kv_skips_grouped_rows_with_a_log_line` (the dissolve wave: r0 / r1 end grouped → 2 lines; r2 / r3 released → stored) |
+| F2 | LOW: any `<think>` / `</think>` id in the fed tokens skipped the store, also for a thinking-off answer that mentions `<think>` | the skip is "the row generated a reasoning section": `_GenState.for_prompt(req.ids, eng._think).in_thinking`, the same start state the handler uses to split reasoning from content (the handler now builds its state with it too); the fed tokens are replayed through `token()` only for the log's reasoning count | `test_thinking_on_reply_without_think_ids_is_not_stored`; `test_think_id_in_the_content_with_thinking_off_is_stored` (stored, the next turn resumes after the reply; fails with the old rule) |
+| F3 | doc: the `length` row of the fed-ids table | corrected: every generated token is fed, entry = prompt + completion | — |
+| — | default | `QWEN_PROMPT_CACHE_REPLY=1` by default; `0` is the bit-exact way back. The prefill-store suites (`test_prompt_cache.small`, `test_partial_store.prod`, `test_cascade_sched.casc`) set it to 0 explicitly | CPU suite: 278 passed, 3 skipped |

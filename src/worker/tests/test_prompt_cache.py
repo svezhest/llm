@@ -20,8 +20,11 @@ GEN = [IM_START, A, NL, TH, NL]          # <|im_start|>assistant\n<think>\n
 def small(monkeypatch):
     """Cache on, slabs of 8 (message starts >= 4 apart cut too), a stride of 16;
     admission waits for any hit a slab deep, without a time bound (the
-    bounded wait has its own tests, on a fake clock)."""
+    bounded wait has its own tests, on a fake clock). The reply KV off (on by
+    default): these tests count prefill stores, entries = prompt[:-1];
+    test_reply_kv.py turns it on."""
     monkeypatch.setattr(worker, "PROMPT_CACHE", True)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_REPLY", False)
     monkeypatch.setattr(worker, "PREFILL_STEP", 8)
     monkeypatch.setattr(worker, "PREFILL_MIN_STEP", 4)
     monkeypatch.setattr(worker, "PROMPT_CACHE_STRIDE", 16)

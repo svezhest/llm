@@ -678,11 +678,13 @@ PROMPT_CACHE_CHAIN_FRESH_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_CHAIN_FR
 PROMPT_CACHE_STALE_S = float(os.environ.get("QWEN_PROMPT_CACHE_STALE_S", "300"))  # 0: off
 PROMPT_CACHE_KEEP_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_KEEP_TOKENS", "8192"))
 PROMPT_CACHE_KEEP_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_KEEP_WAIT_S", "10"))
-# Reply KV (QWEN_PROMPT_CACHE_REPLY=1, default off): when a text request ends
+# Reply KV (QWEN_PROMPT_CACHE_REPLY, default 1 since the 2026-10-17 GPU gate,
+# docs/perf/2026-10-17/reply_kv_gpu.md; 0 = off): when a text request ends
 # (stop / length; not cancel, stop strings or errors), its entry is extended
 # by the KV of the tokens the model consumed while answering (the prompt's
 # last token + the generated ones it fed back: the step-ahead feeds the EOS
-# it stops on, a sync row does not) and the recurrent state after them as the
+# it stops on, a sync row does not; a length row fed its last generated
+# token too, the entry = prompt + completion) and the recurrent state after them as the
 # new end state, so the next turn (prompt + reply + a new message: chats,
 # agent loops) resumes after the reply instead of at the last message start.
 # AppWorld traces: the template re-renders the reply to the same ids on 100 %
@@ -690,16 +692,19 @@ PROMPT_CACHE_KEEP_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_KEEP_WAIT_S",
 # docs/perf/2026-10-17/design/reply_kv.md). Numerics: the reply's KV comes
 # from decode kernels (qmv; mrqmm at B >= 3; cascade-released rows) and the
 # next turn's first slab starts at the reply end, so a hit through a reply
-# is not bit-identical to a cold prefill (the batched-decode numerics class);
-# with it on, a greedy answer can depend on what the cache holds. Skipped:
-# DFlash rows, vision, rows still in a cascade group, rows whose prefill entry
-# was evicted / absorbed meanwhile, replies with reasoning (thinking on:
-# clients rarely send it back). A stop string usually ends the row as a
+# is not bit-identical to a cold prefill (the batched-decode numerics class:
+# 9B gate, hit through a reply vs cold, top-1 99.88 %, KL 5.8e-5); with it on,
+# a greedy answer can depend on what the cache holds (0: the bit-exact path).
+# Skipped: DFlash rows, vision, rows still in a cascade group (logged), rows
+# whose prefill entry was evicted / absorbed meanwhile, replies that generated
+# a reasoning section (thinking on, as _GenState splits it: clients rarely
+# send it back; a think id inside the content with thinking off is content,
+# stored). A stop string usually ends the row as a
 # cancel (nothing stored), but its cancel can come after the row already
 # finished with stop / length: then the reply is stored with the tokens past
 # the string and the next turn falls back (harmless). A regenerate of the same prompt resumes at
 # the last message start (the prompt-end state is dropped with the extension).
-PROMPT_CACHE_REPLY = os.environ.get("QWEN_PROMPT_CACHE_REPLY", "0") == "1"
+PROMPT_CACHE_REPLY = os.environ.get("QWEN_PROMPT_CACHE_REPLY", "1") == "1"
 
 # Compute dtype (QWEN_FP16=1): cast every bfloat16 parameter (quant scales/
 # biases, norms, embeddings, A_log...) to float16 after load. M1/M2-class GPUs
@@ -3376,16 +3381,21 @@ class _Scheduler:
         """The cache list a finished row `i` of the batch ends with (its KV
         objects, its recurrent state in ArraysCaches of its own) -> None when
         it is not stored: ended otherwise than stop / length, still in a
-        cascade group (its KV is in the group's stack), DFlash, vision.
+        cascade group (its KV is in the group's stack; logged), DFlash, vision.
         Builds lazy arrays only. Its state is always a gather into a buffer
         of its own, never a view: at B >= 2 out of the stacked state (a
         slice would keep the batch's whole stack alive in the entry), at
         B = 1 too (right after the batch shrank to it, its arrays are still
         _gdn_split's views of the old stack)."""
         try:
-            if (row.why not in ("stop", "length") or row.spec or row.req.images
-                    or row.group is not None
-                    or any(not hasattr(row.cache[j], "keys") for j in self.fa_layers)):
+            if row.why not in ("stop", "length") or row.spec or row.req.images:
+                return None
+            if row.group is not None:
+                log.info("id=%s prompt cache reply skipped: in a cascade group (P=%s) when it "
+                         "ended, its KV is in the group's stack; the next turn resumes at the "
+                         "prompt entry", row.req.id, getattr(row.group, "P", "?"))
+                return None
+            if any(not hasattr(row.cache[j], "keys") for j in self.fa_layers):
                 return None
             from mlx_vlm.models.cache import ArraysCache
             stacked = self.gdn is not None
@@ -3407,8 +3417,9 @@ class _Scheduler:
     def _store_reply(self, row, cache):
         """Extend the entry the row's prefill stored by the tokens the model
         consumed while it decoded (prompt + generated[:k]: the step-ahead fed
-        the EOS a row stops on, a sync row did not, a "length" row never fed
-        its pending token; row.pos says how many) and its state after them,
+        the EOS a row stops on, a sync row did not, a "length" row fed every
+        generated token, the last one too: prompt + completion; row.pos says
+        how many) and its state after them,
         through the same store as a prefill (budget checks, absorb, victim
         order) -> (the new entry or None, the entries it absorbed). Its
         copies are still lazy: _drop_done queues every finishing row's in one
@@ -3419,9 +3430,11 @@ class _Scheduler:
         pieces stay allocated until that prefill stores, as in _regrow).
         Nothing when the entry is gone (evicted / absorbed while it decoded:
         the victim order had decided its next turn is the furthest away),
-        nor for a reply with reasoning (thinking on: clients rarely send it
-        back, so the next prompt diverges at the reply start; the copy and
-        the prompt-end state, a regenerate's full hit, would be lost)."""
+        nor for a reply that generated a reasoning section (thinking on, as
+        _GenState splits it: clients rarely send it back, so the next prompt
+        diverges at the reply start; the copy and the prompt-end state, a
+        regenerate's full hit, would be lost). A think id the model emits
+        inside the content with thinking off is content: stored."""
         fed, row.fed = row.fed, None
         req = row.req
         if cache is None:
@@ -3436,14 +3449,20 @@ class _Scheduler:
             return None, []
         if n < 1 or len(fed) < n:
             return None, []                     # nothing decoded, or a fed token never read
+        # a reasoning section = what the handler's _GenState splits off as
+        # reasoning: generation started inside an open <think> (thinking on;
+        # it runs until </think> / <tool_call>). With thinking off a <think> /
+        # </think> id inside the content is content (_GenState: plain text /
+        # dropped), so it does not skip the store.
         think = getattr(self.eng, "_think", None)
-        if think:
-            tags = [t for t in req.ids if t in think]
-            inside = bool(tags) and tags[-1] == think[0]      # generation starts in reasoning
-            if inside or any(t in think for t in fed[:n]):
-                log.info("id=%s prompt cache reply not kept: reasoning in the reply "
-                         "(thinking on)", req.id)
-                return None, []
+        state = _GenState.for_prompt(req.ids, think)
+        if state.in_thinking:
+            tags = getattr(self.eng, "_tool_tags", None)
+            for t in fed[:n]:
+                state.token(t, think[1], tags[0] if tags else -1)
+            log.info("id=%s prompt cache reply not kept: reasoning in the reply (thinking on, "
+                     "%d of %d generated tokens)", req.id, state.reasoning_tokens, n)
+            return None, []
         ids = req.ids + fed[:n]
         L = len(e.ids)
         if e.ids != ids[:L] or any(row.cache[j].offset != row.pos for j in self.fa_layers):
@@ -4493,9 +4512,8 @@ class Engine:
 
             # Thinking = the prompt leaves <think> open (the template does that
             # unless enable_thinking is false).
-            inside = next((t == self._think[0] for t in reversed(ids) if t in self._think), False)
-            state = _GenState(inside)
-            state.counting = inside
+            state = _GenState.for_prompt(ids, self._think)
+            inside = state.in_thinking
 
             # Reasoning budget: forces \n</think> into the token stream when
             # exceeded (the KV cache stays consistent). Same criteria object
@@ -4740,8 +4758,18 @@ class _GenState:
 
     def __init__(self, thinking: bool):
         self.in_thinking = thinking
+        self.counting = thinking                  # token(): reasoning tokens still being counted
         self.gen_tokens = 0
         self.reasoning_tokens = 0
+
+    @classmethod
+    def for_prompt(cls, ids, think):
+        """The state generation starts in: thinking = the prompt leaves <think>
+        open (the last of `think` = [<think>, </think>] ids in it is the open
+        one; the template pre-opens it unless enable_thinking is false).
+        `think` None (ids unknown): never thinking."""
+        return cls(bool(think) and next((t == think[0] for t in reversed(ids) if t in think),
+                                        False))
 
     def feed(self, text: str) -> tuple[str, str]:
         """Split a chunk into (thinking_part, answer_part)."""
