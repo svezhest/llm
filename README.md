@@ -263,8 +263,24 @@ through the scheduler). The document strides cost nothing for AppWorld (its firs
 user message is ~300 tokens) and 2–4 more states (100–200 MB) per entry when the first
 message is an 8K document. Repeating an older turn still hits, at its last message
 start for the previous turn, else at the end of the system block (or a stride of the
-first user message); fresh entries keep the cap-12 policy; `QWEN_PROMPT_CACHE_CHAIN_MARKS=-1`
-turns the chain policy off. `QWEN_PROMPT_CACHE_GB` (3) is a soft cap: past it entries
+first user message); `QWEN_PROMPT_CACHE_CHAIN_MARKS=-1`
+turns the chain policy off. **Fresh entries** (nothing absorbed: a new conversation, a MISS)
+keep the cap-12 policy below `QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS` (16384 tokens; `0`:
+the cap policy at any length), so a sibling conversation over a short shared prompt still finds deep strides;
+from there on they take the chain policy too, plus the checkpoint at the divergence point
+from the closest other entry (a cancelled attempt of the same prompt does not count) and the
+strides inside the system block (thinned by the cap, like the first user message's: a new
+session whose long system prompt differs near its end resumes at the last one). AppWorld:
+an entry stored after a MISS on a 50K history kept 12 states; simulated 2.28 → 2.04 GB on
+the 9B, 12 → 7 states. **A cancelled prefill keeps
+its prefix**: a text request cancelled mid-prefill (a client timeout, the Cancel RPC) after
+at least one slab, or failing outside the forward, stores the entry for the prefix it
+prefilled — up to its last completed slab end, so the hit is bit-identical to a cold
+run — through the same store (budget checks, absorption, chain policy; logged as a
+normal store line + `(cancelled at pos/len)`). A retry of the same prompt resumes there
+instead of re-prefilling it (the 2026-10-17 AppWorld run re-prefilled a 114K prompt twice
+for 8 minutes after client timeouts). The retry absorbs it without counting as a chain.
+DFlash prefills and image prompts store nothing when cancelled. `QWEN_PROMPT_CACHE_GB` (3) is a soft cap: past it entries
 go at store (the newest stays, alone if need be) in the **eviction order** below. Entries **share their KV**: an entry is a chain of immutable
 segments, a store copies only the tokens past its resume point out of the request's
 cache and reuses the older entry's segments for the rest, so 16 conversations over
@@ -579,6 +595,7 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_PROMPT_CACHE_GB` / `_STRIDE` / `_CKPTS` | worker | `3` / `2048` / `12` — soft cap (evicted at store in the round-aware order, live bytes counted in the batch budget and evicted on demand), checkpoint stride, checkpoints per entry |
 | `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — an entry unused this long (and wanted by no waiting request) is stale: evicted first, LRU, even within the round of turns; `0` = off (the tick rule only) |
 | `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the end of the system block, this many last message starts, the strides in this many last tokens and inside the first user message, and its end state (`-1` marks: off, the `_CKPTS` policy everywhere) |
+| `QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS` | worker | `16384` — a fresh entry (absorbed nothing) of at least this many tokens takes the chain policy too (+ the divergence point and the system block's strides); shorter ones keep the `_CKPTS` policy; `0` = never (fresh entries always the `_CKPTS` policy) |
 | `QWEN_PROMPT_CACHE_REPLY` | worker | `0` — `1`: a finished request's entry is extended by its decoded tokens' KV + end state, so the next turn resumes after the reply (agentic loads: −21 % prefill tokens on AppWorld); a hit through a reply is not bit-identical to a cold prefill (decode numerics, see *Prompt cache*) |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — a request kept out only by the cache entry it would resume from waits for a running row to end only for a hit this deep, and only this long; else the entry is evicted and the request starts cold (8K tokens ≈ 14 s of 9B prefill, more than the wait) |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (see *Cascade attention*); only with `QWEN_KV_BITS=0` + `QWEN_PROMPT_CACHE=1` + max_batch ≥ 3, else off; `0` = the per-row path bit for bit |

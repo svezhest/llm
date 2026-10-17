@@ -618,7 +618,25 @@ CACHE_LIMIT_GB = float(os.environ.get("QWEN_CACHE_LIMIT_GB", "3"))
 # weight: ~60 % of an 11K agentic entry (9.7 x 49 MB of GDN states beside
 # 355 MB of KV; its first user message is short, so the document strides cost
 # nothing there; an 8K one keeps ~2-4 more states, ~100-200 MB). Fresh entries
-# (nothing absorbed) keep the cap-12 policy.
+# (nothing absorbed: a new conversation, a MISS) keep the cap-12 policy below
+# QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS (16384; 0: always the cap policy): a sibling
+# conversation over a short shared prompt still finds deep strides. From there
+# on they take the chain policy too, plus the divergence point from the
+# closest other entry and the strides inside the system block (as the first
+# user message's: a sibling session diverges inside either): a fresh 50K
+# entry after a MISS kept 12 states, ~0.6 GB of its ~2.3 GB (now 7); the
+# episode's next turn resumes at its last message starts anyway. An entry
+# stored for a cancelled prefill's prefix (below) does not count as absorbed:
+# the retry that absorbs it takes the policy its own prompt would take cold.
+# A text prefill cancelled after at least one slab (a client timeout on a
+# long prompt), or failing outside the forward (the caches still hold exactly
+# the prefix), stores the prefix it prefilled: ids = prompt[:pos], pos the last
+# slab end (a _bounds cut: its KV is the cold prefill's bits there), the row's
+# state at pos as the end state, the checkpoints taken so far, through the same
+# store (budget, absorb, chain policy). A retry of that prompt resumes at pos
+# (the 2026-10-17 AppWorld run lost 2 x 8 min re-prefilling a 114K prompt the
+# client had cancelled). Not for DFlash prefills nor vision (no store there
+# either); quantized KV as a full store (resumable from quantized_kv_start on).
 # Entries share their KV: an entry is a chain of immutable segments (buffers of
 # their own, per full-attention layer); a store copies only the tokens past
 # the resume point out of the row and reuses the parent's segments below it,
@@ -654,6 +672,9 @@ PROMPT_CACHE_STRIDE = int(os.environ.get("QWEN_PROMPT_CACHE_STRIDE", "2048"))
 PROMPT_CACHE_CKPTS = int(os.environ.get("QWEN_PROMPT_CACHE_CKPTS", "12"))
 PROMPT_CACHE_CHAIN_MARKS = int(os.environ.get("QWEN_PROMPT_CACHE_CHAIN_MARKS", "3"))  # < 0: off
 PROMPT_CACHE_CHAIN_TAIL = int(os.environ.get("QWEN_PROMPT_CACHE_CHAIN_TAIL", "4096"))
+# fresh entries of at least this many tokens take the chain policy (0: none)
+PROMPT_CACHE_CHAIN_FRESH_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS",
+                                                     "16384"))
 PROMPT_CACHE_STALE_S = float(os.environ.get("QWEN_PROMPT_CACHE_STALE_S", "300"))  # 0: off
 PROMPT_CACHE_KEEP_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_KEEP_TOKENS", "8192"))
 PROMPT_CACHE_KEEP_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_KEEP_WAIT_S", "10"))
@@ -901,9 +922,12 @@ class _Entry:
     between entries. `reply` (QWEN_PROMPT_CACHE_REPLY): the entry was
     extended past its prompt by a request's decoded tokens; `reply` is where
     they start (the prompt entry's length) and the end is resumable although
-    it is no slab end of the next prompt."""
+    it is no slab end of the next prompt. `partial`: stored for a cancelled
+    (or failed) prefill's prefix (absorbing it alone makes no chain);
+    `chained`: it absorbed an older turn (or a partial entry that had)."""
 
-    def __init__(self, ids, chain, ckpts, end, layout, quantized, low=0, reply=None):
+    def __init__(self, ids, chain, ckpts, end, layout, quantized, low=0, reply=None,
+                 partial=False):
         self.ids = ids
         self.chain = chain
         self.ckpts = ckpts                            # pos -> recurrent states, pos < len(ids)
@@ -912,6 +936,9 @@ class _Entry:
         self.quantized = quantized
         self.low = low                                # resumable from here on (quantized KV)
         self.reply = reply                            # decoded tokens from here on (reply KV)
+        self.partial = partial                        # a cancelled prefill's prefix
+        self.diverge = frozenset()                    # partial: its prompt's divergence points
+        self.chained = False                          # absorbed an older turn (store)
         self.used = time.time()
         self.seq = 0                                  # _PrefixCache.seq when stored / last hit
         self.index()
@@ -1114,7 +1141,7 @@ class _PrefixCache:
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
               kv_start=None, chain=None, wanted=(), reply=None, tick=True, sync=True, spare=(),
-              clock=None):
+              clock=None, fresh=None, partial=False):
         """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
         and checkpoints -> (entry or None when it was not kept, the older
         entries it absorbed). A reply store (_Scheduler._store_reply)
@@ -1133,7 +1160,11 @@ class _PrefixCache:
         the checkpoint positions thinning keeps (see _thin); `chain`: (the
         only checkpoint positions an entry that absorbs an older one keeps,
         the ones of them thinning keeps) (None: the fresh policy for it too;
-        see _Scheduler._prompt_cache);
+        see _Scheduler._prompt_cache); absorbing only `partial` entries that
+        absorbed nothing themselves makes no chain; `fresh`: the same pair
+        for an entry that absorbs no chain (a long fresh prompt:
+        QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS; None: the cap policy);
+        `partial`: it is a cancelled prefill's prefix (_Entry.partial);
         `limit`: the
         bytes the whole cache may hold beside the batch (entries go in
         `victim` order, `wanted` as there; when the new one alone is over, sized from the row's shapes
@@ -1195,19 +1226,23 @@ class _PrefixCache:
                     ckpts.setdefault(p, s)
             if e.end is not None and len(e.ids) in ends and len(e.ids) < L and prefix(e):
                 ckpts.setdefault(len(e.ids), e.end)
-        if covered and chain is not None:
-            # a chain (this conversation's previous turn absorbed): its next
-            # turn resumes at the last message starts, older turns' ones and
-            # strides below the tail are almost never used again
-            ckpts = {p: s for p, s in ckpts.items() if p in chain[0]}
-            protect = chain[1]
+        # a chain: this conversation's previous turn absorbed (a cancelled
+        # prefill's prefix alone is this same turn, not a previous one)
+        chained = any(not e.partial or e.chained for e in covered)
+        policy = chain if chained and chain is not None else fresh
+        if policy is not None:
+            # its next turn resumes at the last message starts, older turns'
+            # ones and strides below the tail are almost never used again
+            ckpts = {p: s for p, s in ckpts.items() if p in policy[0]}
+            protect = policy[1]
         if quantized:                                 # never resumable below the start
             ckpts = {p: s for p, s in ckpts.items() if p >= kv_start}
         ckpts.pop(L, None)
         _thin(ckpts, PROMPT_CACHE_CKPTS, protect)
         # the chain without its own segment yet: nbytes + extra = its size
         new = _Entry(ids, pieces, ckpts, _recurrent_states(cache), _layout(cache), quantized,
-                     kv_start if quantized else 0, reply)
+                     kv_start if quantized else 0, reply, partial)
+        new.chained = chained
         new.seq = self.seq
         if clock is not None:                         # before any eviction can see it
             new.used, new.seq = clock
@@ -2827,6 +2862,26 @@ class _Scheduler:
                 return bounds[k - 1] if k and bounds[k - 1] < end else None
             want = set(range(PROMPT_CACHE_STRIDE, end, PROMPT_CACHE_STRIDE))
             want.add(split)
+            # The divergence point from the closest OTHER prompt: this
+            # prompt's own cancelled attempts (partial entries that are a
+            # prefix of it) do not count (their end would be the split), their
+            # own divergence points carry over (`_Entry.diverge`: the
+            # sibling may be gone by the retry).
+            pc = eng._pcache
+            own = [e for e in pc.entries if e.partial and len(e.ids) < len(ids)
+                   and ids[:len(e.ids)] == e.ids]
+            other = split
+            if own:
+                other = max((min(_lcp(e.ids, ids), end) for e in pc.entries
+                             if not any(e is o for o in own)), default=0)
+                want.add(other)
+            diverge = {b for b in [below(other)] if b is not None}
+            for o in own:
+                diverge |= o.diverge
+                # taken too (keep maps them through below: only this
+                # prompt's slab ends) — a point past the cancel is not in
+                # the partial entry, and the sibling may be gone
+                want |= set(o.diverge)
             # Message boundaries are where prompts naturally diverge: the
             # end of the system/tools block (another conversation), the
             # last two messages (regenerate / edited turn) and the reply
@@ -2841,7 +2896,7 @@ class _Scheduler:
             # CHAIN_MARKS message starts, the strides in the last CHAIN_TAIL
             # tokens and in the first user message (see PROMPT_CACHE_CHAIN_*;
             # the end state is kept apart).
-            chain = None
+            chain = fresh = None
             if PROMPT_CACHE_CHAIN_MARKS >= 0:
                 last = starts[-PROMPT_CACHE_CHAIN_MARKS:] if PROMPT_CACHE_CHAIN_MARKS else []
                 want.update(last)
@@ -2860,6 +2915,18 @@ class _Scheduler:
                 u0, u1 = (starts[k], starts[k + 1]) if k is not None else (0, 0)
                 doc = {b for b in strides if u0 <= b < u1}
                 chain = (fixed | tail | doc, fixed)     # thinning drops the strides first
+                # a long fresh entry (absorbs no chain: a MISS, a new
+                # episode) takes it too, with the divergence point from the
+                # closest other entry (where a sibling would diverge again)
+                # and the strides inside the system block (before the first
+                # user message; unprotected like the document's: a new
+                # session whose long system prompt differs near its end,
+                # date / cwd / env, resumes at the last one). The length is
+                # the whole prompt's, also for a cancelled prefill's prefix:
+                # its retry then keeps the same set.
+                if 0 < PROMPT_CACHE_CHAIN_FRESH_TOKENS <= end:
+                    sysb = {b for b in strides if b < u0}
+                    fresh = (chain[0] | diverge | sysb, fixed)
             # checkpoints only at slab ends
             keep = {b for b in map(below, want) if b is not None and b > reused}
             start = self.kv["quantized_kv_start"]
@@ -2876,12 +2943,17 @@ class _Scheduler:
             if pos in keep:
                 ckpts[pos] = _recurrent_states(cache)
 
-        def snapshot(cache):
+        def snapshot(cache, upto=None, why=None):
+            """Store the entry for prompt[:-1] (the prefill's end), or with
+            `upto` for the prefix prompt[:upto] a cancelled / failed prefill
+            holds (`why`), when it prefilled at least a slab past `reused`.
+            Either way the prefill ends here."""
             nonlocal inherit
             row.parent = None
             try:
-                if use_cache and all(getattr(c, "keys", 1) is not None for c in cache):
-                    store(cache)
+                if (use_cache and (upto is None or upto > reused)
+                        and all(getattr(c, "keys", 1) is not None for c in cache)):
+                    store(cache, upto, why)
             finally:
                 # The caller's frame keeps this closure (a DFlash run: for its
                 # whole decode): let go of the parent's pieces and of the
@@ -2890,30 +2962,48 @@ class _Scheduler:
                 inherit = None
                 ckpts.clear()
 
-        def store(cache):
+        def store(cache, upto=None, why=None):
             pc = eng._pcache
+            L = len(ids) - 1 if upto is None else upto
+            # what the entry claims: the row's KV holds exactly ids[:L] (a
+            # prefix: the last completed slab's end, a _bounds cut; a failure
+            # after the last slab holds the whole prompt[:-1]: no partial)
+            partial = L < len(ids) - 1
+            if upto is not None and (L not in ends or any(
+                    c.offset != L for c in cache if not hasattr(c, "cache"))):
+                log.warning("id=%s prompt cache: the %s prefill's prefix is not stored: the "
+                            "cache does not hold a slab end (%d/%d)", req.id, why, L, len(ids))
+                return
             try:
-                e, covered = pc.store(ids[:-1], cache, ckpts, inherit, reused, ends, protect,
+                e, covered = pc.store(ids[:L], cache, ckpts, inherit, reused, ends, protect,
                                       limit=self.budget + self.prefill_reserve - self.reserved,
                                       kv_start=self.kv["quantized_kv_start"], chain=chain,
-                                      wanted=self._wanted)
+                                      wanted=self._wanted, fresh=fresh, partial=partial)
             except Exception:  # noqa: BLE001 — the prefill succeeded: the request goes on uncached
                 log.exception("id=%s prompt cache store failed (the request goes on)", req.id)
                 return
             if e is None:
+                if partial:
+                    log.info("id=%s prompt cache: the %s prefill's prefix (%d/%d tokens) was "
+                             "not kept", req.id, why, L, len(ids))
                 return
             row.cached = True
+            if partial:                         # for its retry (see `diverge` above)
+                e.diverge = frozenset(diverge)
             if row.fed is not None:
                 row.entry = weakref.ref(e)
             # MB: the entry's buffers (shared ones included); "MB total": live
             # bytes, every buffer once; gap: tokens the cache held but could
             # not resume from (no checkpoint there); pieces: its KV chain;
-            # states: its recurrent-state checkpoints + end state (in MB)
+            # states: its recurrent-state checkpoints + end state (in MB); a
+            # cancelled / failed prefill's prefix: the same line (log parsers
+            # match "prompt cache store: N tokens") + "(cancelled at L/len)"
             log.info("id=%s prompt cache store: %d tokens, %d checkpoints, %.1f MB "
                      "(%d entries, %.1f MB total) reused=%d gap=%d absorbed=%d pieces=%d "
-                     "states=%.1f MB", req.id, len(e.ids), len(e.ckpts), e.nbytes / 1e6,
+                     "states=%.1f MB%s", req.id, len(e.ids), len(e.ckpts), e.nbytes / 1e6,
                      len(pc.entries), pc.bytes / 1e6, reused, split - reused, len(covered),
-                     len(e.chain), e.state_bytes() / 1e6)
+                     len(e.chain), e.state_bytes() / 1e6,
+                     "" if upto is None else f" ({why} at {L}/{len(ids)})")
 
         return input_ids, cache, reused, set(bounds), checkpoint, snapshot
 
@@ -2960,34 +3050,55 @@ class _Scheduler:
             vision_pos = deltas = None
             lm._position_ids = None
         pos = start if pixel_values is None else int(cache[lm.model.fa_idx].offset)
-        while inputs_embeds.shape[1] > 1:
-            if req.cancel.is_set():
-                self._finish(row, "cancelled")
-                return
-            t = time.time()
-            n = _slab(pos, inputs_embeds.shape[1] - 1, cuts)
-            # An image prompt's mRoPE positions (get_input_embeddings) are
-            # sliced per slab: past the first slab the library would give
-            # every token offset + delta, right only after the last image.
-            if vision_pos is not None:
-                kwargs["position_ids"] = vision_pos[:, :, pos:pos + n]
-            # skip_logits: no lm_head over the slab (248K vocab = ~12% of
-            # the per-token FLOPs); only the cache matters here.
-            lm(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n], cache=cache,
-               skip_logits=True, **kwargs)
-            self.quantize(cache)
-            mx.eval([c.state for c in cache])
-            pos += n
-            if pos in cuts:
-                on_ckpt(pos, cache)
-            inputs_embeds = inputs_embeds[:, n:]
-            input_ids = input_ids[:, n:]
-            if CLEAR_CACHE:
-                mx.clear_cache()
-            if inputs_embeds.shape[1] > 1:      # the last slab joins at once
-                self._slab_done(time.time() - t)
-                yield
-                seg = time.time()
+        # A text prefill that stops early (cancel; a failure outside the
+        # forward) stores the prefix it holds, prompt[:pos] with pos the last
+        # completed slab's end, once it prefilled a slab past `start`
+        # (on_prefilled with upto: _prompt_cache's snapshot; vision stores
+        # nothing). Like the full store it runs here, in _advance, never
+        # between a decode step being queued and its tokens being read.
+        intact, cancelled = True, False         # intact: the caches hold exactly prompt[:pos]
+        try:
+            while inputs_embeds.shape[1] > 1:
+                if req.cancel.is_set():
+                    cancelled = True
+                    break
+                t = time.time()
+                n = _slab(pos, inputs_embeds.shape[1] - 1, cuts)
+                # An image prompt's mRoPE positions (get_input_embeddings) are
+                # sliced per slab: past the first slab the library would give
+                # every token offset + delta, right only after the last image.
+                if vision_pos is not None:
+                    kwargs["position_ids"] = vision_pos[:, :, pos:pos + n]
+                # skip_logits: no lm_head over the slab (248K vocab = ~12% of
+                # the per-token FLOPs); only the cache matters here.
+                intact = False                  # the forward moves every cache's offset
+                lm(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n], cache=cache,
+                   skip_logits=True, **kwargs)
+                self.quantize(cache)
+                mx.eval([c.state for c in cache])
+                pos += n
+                intact = True
+                if pos in cuts:
+                    on_ckpt(pos, cache)
+                inputs_embeds = inputs_embeds[:, n:]
+                input_ids = input_ids[:, n:]
+                if CLEAR_CACHE:
+                    mx.clear_cache()
+                if inputs_embeds.shape[1] > 1:      # the last slab joins at once
+                    self._slab_done(time.time() - t)
+                    yield
+                    seg = time.time()
+        except Exception:
+            # (GeneratorExit is no Exception: a scheduler closing drops the
+            # generator at its yield, nothing is stored then)
+            if intact and pos > start and pixel_values is None:
+                self._store_prefix(row, on_prefilled, cache, pos, "failed")
+            raise
+        if cancelled:
+            if pos > start and pixel_values is None:
+                self._store_prefix(row, on_prefilled, cache, pos, "cancelled")
+            self._finish(row, "cancelled")
+            return
         on_prefilled(cache)
         row.pos = pos
         if deltas is not None:
@@ -2999,6 +3110,16 @@ class _Scheduler:
         # queue of short prefills would hold every running row (and the
         # first token of the rows that just joined) until it drains.
         self._slab_done(time.time() - seg)
+
+    def _store_prefix(self, row, on_prefilled, cache, pos, why):
+        """The early-stop store (a cancelled / failed prefill's prefix): a
+        failure here is logged and never changes how the request ends (a
+        cancel stays a cancel, a failure keeps its own error)."""
+        try:
+            on_prefilled(cache, pos, why)
+        except Exception:  # noqa: BLE001 — costs the prefix entry only
+            log.exception("id=%s prompt cache: storing the %s prefill's prefix failed",
+                          row.req.id, why)
 
     def _spec(self, row):
         """Greedy text-only prefill + DFlash speculative decode for a lone row

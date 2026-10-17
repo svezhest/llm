@@ -3,9 +3,14 @@ random model, CPU, production knobs: slab 2048 / min 256 / stride 2048 / cap
 12): checkpoints per entry with the chain policy off and on, and the entry's
 size scaled to the 9B (32 KiB of KV per token, 49 MB per GDN state).
 SIM_USER0=8000: the first user message an 8K document instead of 300 tokens
-(the chain keeps that message's strides: review 2026-10-16 #6)."""
+(the chain keeps that message's strides: review 2026-10-16 #6).
+SIM_FRESH=1 (2026-10-17): also a FRESH entry (a MISS: nothing absorbed) for the
+first prompt of a 60-turn episode past 50K tokens, with
+QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS at 0 (the cap policy, before) and 16384
+(the chain policy)."""
 import os, sys, random
-sys.path[:0] = ["/Users/user/Projects/llm/src/worker", "/Users/user/Projects/llm/src/worker/tests"]
+_W = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "src", "worker")
+sys.path[:0] = [_W, os.path.join(_W, "tests")]
 import conftest  # noqa (CPU device)
 from conftest import IM_START, build_lm, prompts, request, run, scheduler
 import mlx.core as mx
@@ -52,3 +57,16 @@ for turns, seed in ((30, 1), (60, 2)):
         mb = lambda c: (kv * 32 * 1024 + (c + 1) * 49e6) / 1e6
         print(f"turns={turns} L={L:6d} ckpts off={c0:2d} on={c1:2d}  9B MB off={mb(c0):6.0f} on={mb(c1):6.0f}  "
               f"reused off={ru0} on={ru1}")
+
+
+if os.environ.get("SIM_FRESH"):
+    ps = episode(200, 3)
+    ids = next(p for p in ps if len(p) >= 50000)
+    for fresh in (0, 16384):
+        worker.PROMPT_CACHE_CHAIN_FRESH_TOKENS = fresh
+        sched = scheduler(lm, max_batch=1)
+        run(sched, [request(ids, 1, "fresh")])
+        (e,) = sched.eng._pcache.entries
+        mb = (len(e.ids) * 32 * 1024 + (len(e.ckpts) + 1) * 49e6) / 1e6
+        print(f"fresh L={len(e.ids)} CHAIN_FRESH_TOKENS={fresh:5d} ckpts={len(e.ckpts):2d}  "
+              f"9B MB={mb:6.0f} (states {(len(e.ckpts) + 1) * 49:4.0f})")

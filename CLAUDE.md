@@ -374,8 +374,13 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   the alternative (chain filter only from the 2nd absorption) was rejected: it keeps
   nothing of the document past turn 3. The quantized floor is applied by `store` (the
   chain is not pre-filtered). Computed in
-  `_prompt_cache` (`chain`), applied in `store`; fresh entries keep the cap-12
-  policy; `CHAIN_MARKS=-1` = off. Byte-identical (a subset of valid checkpoints).
+  `_prompt_cache` (`chain`), applied in `store`; `CHAIN_MARKS=-1` = off. Fresh entries
+  (no chain absorbed) keep the cap-12 policy below `QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS`
+  (16384, 0 = never; length of the whole prompt), from there `fresh` = `chain` + the
+  divergence point from the closest *other* entry (`diverge`: the prompt's own partial
+  entries are ignored, their `_Entry.diverge` carried) + the strides inside the system
+  block (before the first user message, unprotected) (2026-10-17: a 50K MISS entry
+  12 → 7 states, 2.28 → 2.04 GB simulated). Byte-identical (a subset of valid checkpoints).
   Simulated through the scheduler (CPU, production knobs, AppWorld-shaped turns,
   9B bytes, `docs/perf/2026-10-16/chain_ckpts_sim.py`): 11.4K 1012 → 669 MB (12 → 5
   states), 41K 1995 → 1652 MB, resume
@@ -430,6 +435,17 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   `language_model._rope_deltas` to zeros (text mRoPE continues from the cache
   offset; a previous vision request leaves its own delta there). Text-only.
   7.5K shared system prompt, new conversation: TTFT 14.4 → 0.20 s, byte-identical.
+  **Partial store (2026-10-17)**: a text `_prefill` that stops early — cancel at the slab
+  loop's top, or an exception outside the forward (`intact`: after the slab's eval) —
+  with ≥ 1 slab past `reused` calls `snapshot(cache, upto=pos, why)`: ids = prompt[:pos],
+  pos the last completed slab end (∈ `ends`, offsets checked), the row's state = end
+  state, checkpoints so far, same `pc.store` (limit, absorb, chain/fresh, `_Inherit`
+  released); `_Entry.partial` (absorbing only partial entries is no chain: `chained` =
+  any non-partial or chained covered entry), logged as the normal store line +
+  ` (cancelled at pos/len)`. Runs in `_advance` like the full store. DFlash (`_spec`) and
+  vision: nothing. Retry resumes at pos, bit-identical to cold. A store exception there
+  is logged (`_store_prefix`), never changes the outcome. `docs/perf/2026-10-17/
+  design/partial_store.md`, `tests/test_partial_store.py`.
   **Reply KV (`QWEN_PROMPT_CACHE_REPLY=1`, default off, 2026-10-17)**: at a row's end
   (`stop`/`length`; not cancel (stop strings usually; a late cancel after stop/length
   stores, harmlessly), errors, DFlash, vision, rows still in a cascade group, replies
@@ -700,6 +716,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: evicted at store; counted live in the batch budget, evicted on demand; order: wanted by the queue last, stale LRU first, else MRU) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
 | `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — unused this long and wanted by no waiting request = stale (evicted first, LRU) even within the round; `0` = off |
 | `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the system-block end, the last N message starts, strides in the last N tokens and in the first user message + its end state; `-1` marks = off |
+| `QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS` | worker | `16384` — fresh entries this long take the chain policy (+ the divergence point); shorter: the cap policy; `0` = never |
 | `QWEN_PROMPT_CACHE_REPLY` | worker | `0` — `1`: a finished request's entry is extended by its decoded tokens' KV + end state; the next turn resumes after the reply (AppWorld: −21 % prefill tokens); not bit-identical to a cold prefill (decode numerics) |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
