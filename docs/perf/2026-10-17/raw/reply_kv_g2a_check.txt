@@ -1,0 +1,7 @@
+log lines in window 200; errors/tracebacks/step failures/worker_fault: 0
+requests 32, failed 0
+Generates in window 32, foreign (not rk-g2a-*) 0
+reply lines: kept 32, not kept 0, no line 0
+next turn resumes at the reply end (cached == prompt + fed reply == entry length): 24 ok, 0 not
+reply-kept passes (lines < 5 ms apart): sizes [8, 8, 8, 8]
+batch ticks with groups>0: 0; cascade log lines: 0

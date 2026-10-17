@@ -1,0 +1,31 @@
+log lines in window 198; errors/tracebacks/step failures/worker_fault: 0
+requests 32, failed 0
+Generates in window 32, foreign (not rk-g2b-*) 0
+reply lines: kept 5, not kept 0, no line 27
+next turn resumes at the reply end (cached == prompt + fed reply == entry length): 0 ok, 0 not
+    ('rk-g2b-0-1', 'none', None, 5298, None)
+    ('rk-g2b-1-1', 'none', None, 5297, None)
+    ('rk-g2b-2-1', 'none', None, 5299, None)
+    ('rk-g2b-3-1', 'none', None, 5308, None)
+    ('rk-g2b-4-1', 'none', None, 5302, None)
+    ('rk-g2b-5-1', 'none', None, 5300, None)
+    ('rk-g2b-6-1', 'none', None, 5329, None)
+    ('rk-g2b-7-1', 'none', None, 5308, None)
+    ('rk-g2b-8-1', 'none', None, 5307, None)
+    ('rk-g2b-9-1', 'none', None, 5301, None)
+    ('rk-g2b-10-1', 'none', None, 5307, None)
+    ('rk-g2b-11-1', 'none', None, 5311, None)
+    ('rk-g2b-12-1', 'none', None, 5298, None)
+    ('rk-g2b-13-1', 'none', None, 5332, None)
+    ('rk-g2b-14-1', 'none', None, 5304, None)
+    ('rk-g2b-15-1', 'none', None, 5338, None)
+reply-kept passes (lines < 5 ms apart): sizes [1, 1, 1, 1, 1]
+batch ticks with groups>0: 3; cascade log lines: 28
+    04:43:32.771 batch: rows=9 waiting=6 prefilling=chatcmpl-rk-g2b-6-1-f736d4f225e5 steps/s=6.1 mean_rows=8.23 reserved=2.17/15.75GiB pcache=1.67GiB active=11.92GiB groups=1 grouped=9
+    04:43:43.526 batch: rows=8 waiting=7 prefilling=chatcmpl-rk-g2b-7-2-e6404ac52f64 steps/s=6.5 mean_rows=7.76 reserved=2.34/15.75GiB pcache=2.30GiB active=12.74GiB groups=1 grouped=8
+    04:43:26.038 cascade: group formed: P=4981, 8 rows (chatcmpl-rk-g2b-0-1-e712efc05401,chatcmpl-rk-g2b-11-1-4b35cea07b2e,chatcmpl-rk-g2b-1-1-8c8182e9f0fe,chatcmpl-rk-g2b-3-1-49aa96c7ae4a,chatcmpl-rk-g2b-8-1-f3779f8c4844,chatcmpl-rk-g2b-7-1-450fb
+    04:43:27.025 cascade: id=chatcmpl-rk-g2b-9-1-838a674a5715 joined group P=4981 (9 rows, charged 0.96 GiB)
+    04:43:28.031 cascade: id=chatcmpl-rk-g2b-12-1-ab386cc8ae20 joined group P=4981 (10 rows, charged 0.99 GiB)
+    04:43:29.072 cascade: id=chatcmpl-rk-g2b-2-1-157b44c960d0 joined group P=4981 (11 rows, charged 1.03 GiB)
+    04:43:30.430 cascade: id=chatcmpl-rk-g2b-14-1-d0e8f7a52f80 joined group P=4981 (12 rows, charged 1.06 GiB)
+    04:43:31.890 cascade: id=chatcmpl-rk-g2b-10-1-a73a883a3947 joined group P=4981 (10 rows, charged 0.99 GiB)

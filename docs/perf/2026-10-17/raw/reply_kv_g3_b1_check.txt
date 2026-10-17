@@ -1,0 +1,8 @@
+log lines in window 300; errors/tracebacks/step failures/worker_fault: 0
+requests 48, failed 0
+Generates in window 48, foreign (not rk-g3b1-*) 0
+reply lines: kept 48, not kept 0, no line 0
+next turn resumes at the reply end (cached == prompt + fed reply == entry length): 39 ok, 1 not
+    ('rk-g3b1-5-4', 'kept', 4651, 4580, False)
+reply-kept passes (lines < 5 ms apart): sizes [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+batch ticks with groups>0: 0; cascade log lines: 0

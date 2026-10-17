@@ -1,0 +1,14 @@
+turn1      SAME prompt=2785 cached A=0 B=0 compl A=57 B=57 stop/stop
+turn2      SAME prompt=3159 cached A=2843 B=0 compl A=96 B=96 length/length
+turn3      SAME prompt=3574 cached A=3152 B=0 compl A=78 B=78 stop/stop
+turn4      SAME prompt=4065 cached A=3653 B=0 compl A=96 B=96 length/length
+turn5      SAME prompt=4783 cached A=4161 B=0 compl A=96 B=96 length/length
+turn6      SAME prompt=5576 cached A=4879 B=0 compl A=48 B=48 stop/stop
+identical 6/6 (len A 6, B 6)
+turn1      SAME prompt=2782 cached A=2484 B=0 compl A=52 B=52 stop/stop
+turn2      SAME prompt=3133 cached A=2835 B=0 compl A=96 B=96 length/length
+turn3      DIFF prompt=3537 cached A=3229 B=0 compl A=87 B=75 stop/stop
+turn4      SAME prompt=4040 cached A=3625 B=0 compl A=96 B=96 length/length
+turn5      SAME prompt=4560 cached A=4136 B=0 compl A=96 B=96 length/length
+turn6      SAME prompt=4986 cached A=4656 B=0 compl A=69 B=69 stop/stop
+identical 5/6 (len A 6, B 6)

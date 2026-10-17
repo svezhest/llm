@@ -1,0 +1,18 @@
+reply_kv_replay_r0.json: 201 requests, 192 continuing pairs
+    191 (99.5%) before the previous prompt end (slab-end checkpoint)
+      1 (0.5%) miss
+   prefilled tokens per continuing call: mean 732 median 451; per request (all): mean 854; completion mean 54.7
+reply_kv_replay_r1.json: 214 requests, 205 continuing pairs
+    203 (99.0%) after the reply (>= prompt + completion)
+      2 (1.0%) miss
+   prefilled tokens per continuing call: mean 700 median 232; per request (all): mean 816; completion mean 53.4
+reply_kv_replay_r0b.json: 201 requests, 192 continuing pairs
+    191 (99.5%) before the previous prompt end (slab-end checkpoint)
+      1 (0.5%) miss
+   prefilled tokens per continuing call: mean 727 median 451; per request (all): mean 850; completion mean 54.9
+matched calls that hit in both: 190: prefilled 662 vs 522 per call (-21.2%)
+matched continuing calls reply_kv_replay_r0.json vs reply_kv_replay_r1.json: 192 (same prompt length 151); prefilled 732 vs 635 per call (-13.2%)
+matched calls that hit in both: 187: prefilled 661 vs 661 per call (+0.0%)
+matched continuing calls reply_kv_replay_r0.json vs reply_kv_replay_r0b.json: 188 (same prompt length 187); prefilled 735 vs 661 per call (-10.1%)
+matched calls that hit in both: 191: prefilled 658 vs 515 per call (-21.7%)
+matched continuing calls reply_kv_replay_r0b.json vs reply_kv_replay_r1.json: 192 (same prompt length 153); prefilled 727 vs 514 per call (-29.3%)

@@ -1,0 +1,318 @@
+=== start Sat Oct 17 04:58:05 MSK 2026 env: QWEN_PROMPT_CACHE=1 QWEN_PROMPT_CACHE_GB=6 QWEN_PROMPT_CACHE_REPLY=1
+2026-10-17 04:58:10,984 INFO  qwen.worker loading model: /Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit
+2026-10-17 04:58:10,984 WARNING qwen.worker no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+2026-10-17 04:58:11,051 WARNING root Checkpoint has no weights for module(s): vision_tower. Disabling them.
+2026-10-17 04:58:13,190 INFO  qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-17 04:58:13,190 INFO  qwen.worker eos token ids: [248044, 248046]
+2026-10-17 04:58:14,541 INFO  qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: True
+2026-10-17 04:58:14,559 INFO  qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-17 04:58:14,559 INFO  qwen.worker prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-10-17 04:58:14,870 INFO  worker.pfqmm pfqmm 8-bit g64: tested, 249 modules on (lm_head K=4096 N=248320 M=256/264)
+2026-10-17 04:58:14,870 INFO  worker.pfqmm pfqmm: 249 modules on the 64-row prefill qmm (8-bit g64 tested)
+2026-10-17 04:58:14,872 INFO  worker.mrqmm mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8); left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-17 04:58:14,967 INFO  qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 24 layers
+2026-10-17 04:58:14,967 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 1024 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 6.0 GiB, evicted on demand)
+2026-10-17 04:58:14,967 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens
+2026-10-17 04:58:14,968 INFO  qwen.worker model loaded in 3557 ms
+2026-10-17 04:58:14,980 INFO  qwen.worker worker serving on 127.0.0.1:50051 (32 generation slots, 40 threads)
+2026-10-17 04:58:35,854 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-1-1-492421b0d20b images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,855 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-6-1-7e51861f66a9 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,856 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-7-1-4270e7f9d012 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,856 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,858 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-4-1-0d1f7e9e5839 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,858 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,858 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-5-1-62ff0a963e6f images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,859 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-0-1-e54139bec8fd images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:58:35,860 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-1-492421b0d20b prompt_tokens=3334 (images=0)
+2026-10-17 04:58:35,860 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-1-7e51861f66a9 prompt_tokens=3324 (images=0)
+2026-10-17 04:58:35,952 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd prompt_tokens=3306 (images=0)
+2026-10-17 04:58:35,952 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-1-4270e7f9d012 prompt_tokens=3339 (images=0)
+2026-10-17 04:58:35,952 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-1-0d1f7e9e5839 prompt_tokens=3318 (images=0)
+2026-10-17 04:58:35,952 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-1-62ff0a963e6f prompt_tokens=3308 (images=0)
+2026-10-17 04:58:35,952 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f prompt_tokens=3410 (images=0)
+2026-10-17 04:58:35,953 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-1-492421b0d20b prompt cache MISS (common prefix 0, 0 entries)
+2026-10-17 04:58:35,959 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-1-e54139bec8fd prompt_tokens=3310 (images=0)
+2026-10-17 04:58:36,722 INFO  qwen.worker batch: rows=0 waiting=7 prefilling=chatcmpl-rk-g3a1-1-1-492421b0d20b steps/s=0.0 mean_rows=0.00 reserved=0.21/15.75GiB pcache=0.00GiB active=9.13GiB groups=0 grouped=0
+2026-10-17 04:58:43,639 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-1-492421b0d20b prompt cache store: 3333 tokens, 3 checkpoints, 315.3 MB (1 entries, 315.3 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:58:43,668 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-1-7e51861f66a9 prompt cache MISS (common prefix 7, 1 entries)
+2026-10-17 04:58:48,126 INFO  qwen.worker batch: rows=1 waiting=6 prefilling=chatcmpl-rk-g3a1-6-1-7e51861f66a9 steps/s=0.1 mean_rows=1.00 reserved=0.42/15.75GiB pcache=0.29GiB active=9.62GiB groups=0 grouped=0
+2026-10-17 04:58:51,317 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-1-7e51861f66a9 prompt cache store: 3323 tokens, 3 checkpoints, 314.9 MB (2 entries, 630.2 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:58:51,348 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd prompt cache MISS (common prefix 7, 2 entries)
+2026-10-17 04:58:58,202 INFO  qwen.worker batch: rows=2 waiting=5 prefilling=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd steps/s=1.9 mean_rows=1.47 reserved=0.64/15.75GiB pcache=0.59GiB active=10.35GiB groups=0 grouped=0
+2026-10-17 04:58:59,482 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd prompt cache store: 3305 tokens, 3 checkpoints, 314.3 MB (3 entries, 944.5 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:58:59,522 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-1-4270e7f9d012 prompt cache MISS (common prefix 7, 3 entries)
+2026-10-17 04:59:08,436 INFO  qwen.worker batch: rows=3 waiting=4 prefilling=chatcmpl-rk-g3a1-7-1-4270e7f9d012 steps/s=2.7 mean_rows=2.79 reserved=0.85/15.75GiB pcache=0.88GiB active=10.65GiB groups=0 grouped=0
+2026-10-17 04:59:08,697 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-1-4270e7f9d012 prompt cache store: 3338 tokens, 3 checkpoints, 315.4 MB (4 entries, 1260.0 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:59:08,735 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-1-0d1f7e9e5839 prompt cache MISS (common prefix 7, 4 entries)
+2026-10-17 04:59:13,783 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-1-492421b0d20b prompt cache reply kept: 3398 tokens (+64 generated), 3 checkpoints, 317.4 MB (4 entries, 1262.1 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:13,784 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-1-492421b0d20b finish=length gen_tokens=64 ttft_ms=12205 tps=2.5 cached=0 peak=13.14GB active=11.66GB pool=0.89GB queue_ms=97 batch=2.65
+2026-10-17 04:59:13,793 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:13,798 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b prompt_tokens=3742 (images=0)
+2026-10-17 04:59:16,314 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-1-7e51861f66a9 prompt cache reply kept: 3388 tokens (+64 generated), 3 checkpoints, 317.1 MB (4 entries, 1264.2 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:16,314 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-1-7e51861f66a9 finish=length gen_tokens=64 ttft_ms=12138 tps=3.1 cached=0 peak=13.14GB active=11.57GB pool=0.46GB queue_ms=7811 batch=2.98
+2026-10-17 04:59:16,322 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-6-2-2abedf2929ed images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:16,325 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-2-2abedf2929ed prompt_tokens=3740 (images=0)
+2026-10-17 04:59:17,356 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-1-0d1f7e9e5839 prompt cache store: 3317 tokens, 3 checkpoints, 314.7 MB (5 entries, 1579.0 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:59:17,387 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-1-62ff0a963e6f prompt cache MISS (common prefix 7, 5 entries)
+2026-10-17 04:59:21,756 INFO  qwen.worker batch: rows=3 waiting=4 prefilling=chatcmpl-rk-g3a1-5-1-62ff0a963e6f steps/s=2.4 mean_rows=3.34 reserved=0.85/15.75GiB pcache=1.47GiB active=11.74GiB groups=0 grouped=0
+2026-10-17 04:59:22,138 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd prompt cache reply kept: 3370 tokens (+64 generated), 3 checkpoints, 316.5 MB (5 entries, 1581.1 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:22,139 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-1-fdf3d48bbcdd finish=length gen_tokens=64 ttft_ms=12762 tps=3.5 cached=0 peak=13.30GB active=11.80GB pool=0.89GB queue_ms=15490 batch=3.17
+2026-10-17 04:59:22,147 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-2-2-ea47b466d7e8 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:22,151 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-2-ea47b466d7e8 prompt_tokens=3711 (images=0)
+2026-10-17 04:59:25,616 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-1-62ff0a963e6f prompt cache store: 3307 tokens, 3 checkpoints, 314.4 MB (6 entries, 1895.5 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:59:25,647 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f prompt cache MISS (common prefix 7, 6 entries)
+2026-10-17 04:59:32,841 INFO  qwen.worker batch: rows=3 waiting=4 prefilling=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f steps/s=3.1 mean_rows=2.76 reserved=0.85/15.75GiB pcache=1.77GiB active=11.75GiB groups=0 grouped=0
+2026-10-17 04:59:32,911 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-1-4270e7f9d012 prompt cache reply kept: 3403 tokens (+64 generated), 3 checkpoints, 317.6 MB (6 entries, 1897.6 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:32,911 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-1-4270e7f9d012 finish=length gen_tokens=64 ttft_ms=13840 tps=3.3 cached=0 peak=13.61GB active=12.20GB pool=0.49GB queue_ms=23664 batch=3.05
+2026-10-17 04:59:32,918 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-7-2-e1107de5a79a images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:32,922 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-2-e1107de5a79a prompt_tokens=3739 (images=0)
+2026-10-17 04:59:34,194 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f prompt cache store: 3409 tokens, 3 checkpoints, 317.8 MB (7 entries, 2215.4 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:59:34,225 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-1-e54139bec8fd prompt cache MISS (common prefix 7, 7 entries)
+2026-10-17 04:59:42,236 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-1-0d1f7e9e5839 prompt cache reply kept: 3382 tokens (+64 generated), 3 checkpoints, 316.9 MB (7 entries, 2217.5 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:42,236 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-1-0d1f7e9e5839 finish=length gen_tokens=64 ttft_ms=13060 tps=3.1 cached=0 peak=13.93GB active=12.59GB pool=0.19GB queue_ms=32875 batch=2.78
+2026-10-17 04:59:42,244 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-4-2-b064a7c3b208 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:42,248 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-2-b064a7c3b208 prompt_tokens=3733 (images=0)
+2026-10-17 04:59:42,392 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-1-e54139bec8fd prompt cache store: 3309 tokens, 3 checkpoints, 314.5 MB (8 entries, 2532.0 MB total) reused=0 gap=7 absorbed=0 pieces=1 states=206.0 MB
+2026-10-17 04:59:42,435 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b prompt cache HIT: 3398/3742 tokens reused (common prefix 3398), prefilling 344
+2026-10-17 04:59:43,363 INFO  qwen.worker batch: rows=3 waiting=4 prefilling=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b steps/s=3.0 mean_rows=2.78 reserved=0.86/15.75GiB pcache=2.36GiB active=12.01GiB groups=0 grouped=0
+2026-10-17 04:59:43,578 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b prompt cache store: 3741 tokens, 3 checkpoints, 328.6 MB (8 entries, 2543.2 MB total) reused=3398 gap=0 absorbed=1 pieces=3 states=206.0 MB
+2026-10-17 04:59:43,622 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-2-2abedf2929ed prompt cache HIT: 3388/3740 tokens reused (common prefix 3388), prefilling 352
+2026-10-17 04:59:44,829 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-2-2abedf2929ed prompt cache store: 3739 tokens, 4 checkpoints, 380.1 MB (8 entries, 2606.2 MB total) reused=3388 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:44,876 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-2-ea47b466d7e8 prompt cache HIT: 3370/3711 tokens reused (common prefix 3370), prefilling 341
+2026-10-17 04:59:46,162 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-2-ea47b466d7e8 prompt cache store: 3710 tokens, 4 checkpoints, 379.1 MB (8 entries, 2668.9 MB total) reused=3370 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:46,212 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-2-e1107de5a79a prompt cache HIT: 3403/3739 tokens reused (common prefix 3403), prefilling 336
+2026-10-17 04:59:47,325 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-1-62ff0a963e6f prompt cache reply kept: 3372 tokens (+64 generated), 3 checkpoints, 316.5 MB (8 entries, 2671.0 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:47,326 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-1-62ff0a963e6f finish=length gen_tokens=64 ttft_ms=12767 tps=3.7 cached=0 peak=13.94GB active=13.49GB pool=0.20GB queue_ms=41526 batch=3.34
+2026-10-17 04:59:47,334 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-5-2-d7150550716f images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:47,339 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-2-d7150550716f prompt_tokens=3729 (images=0)
+2026-10-17 04:59:47,571 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-2-e1107de5a79a prompt cache store: 3738 tokens, 4 checkpoints, 380.0 MB (8 entries, 2733.5 MB total) reused=3403 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:47,621 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-2-b064a7c3b208 prompt cache HIT: 3382/3733 tokens reused (common prefix 3382), prefilling 351
+2026-10-17 04:59:48,985 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-2-b064a7c3b208 prompt cache store: 3732 tokens, 4 checkpoints, 379.8 MB (8 entries, 2796.5 MB total) reused=3382 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:49,038 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-2-d7150550716f prompt cache HIT: 3372/3729 tokens reused (common prefix 3372), prefilling 357
+2026-10-17 04:59:50,460 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-2-d7150550716f prompt cache store: 3728 tokens, 4 checkpoints, 379.7 MB (8 entries, 2859.7 MB total) reused=3372 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:50,693 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f prompt cache reply kept: 3474 tokens (+64 generated), 3 checkpoints, 319.9 MB (8 entries, 2861.8 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:50,694 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-1-b8ac4d5c611f finish=length gen_tokens=64 ttft_ms=12945 tps=5.3 cached=0 peak=14.30GB active=13.88GB pool=0.48GB queue_ms=49787 batch=4.72
+2026-10-17 04:59:50,705 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-3-2-1acedb184cd2 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:50,710 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-2-1acedb184cd2 prompt_tokens=3829 (images=0)
+2026-10-17 04:59:50,749 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-2-1acedb184cd2 prompt cache HIT: 3474/3829 tokens reused (common prefix 3474), prefilling 355
+2026-10-17 04:59:52,155 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-2-1acedb184cd2 prompt cache store: 3828 tokens, 4 checkpoints, 383.0 MB (8 entries, 2924.9 MB total) reused=3474 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:52,854 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-1-e54139bec8fd prompt cache reply kept: 3374 tokens (+64 generated), 3 checkpoints, 316.6 MB (8 entries, 2927.0 MB total) absorbed=1 pieces=2
+2026-10-17 04:59:52,855 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-1-e54139bec8fd finish=length gen_tokens=64 ttft_ms=9170 tps=6.8 cached=0 peak=14.38GB active=13.96GB pool=0.48GB queue_ms=58364 batch=6.38
+2026-10-17 04:59:52,864 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-0-2-f89111544db3 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:52,869 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-2-f89111544db3 prompt_tokens=3715 (images=0)
+2026-10-17 04:59:52,910 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-2-f89111544db3 prompt cache HIT: 3374/3715 tokens reused (common prefix 3374), prefilling 341
+2026-10-17 04:59:53,884 INFO  qwen.worker batch: rows=7 waiting=0 prefilling=chatcmpl-rk-g3a1-0-2-f89111544db3 steps/s=6.2 mean_rows=6.45 reserved=1.81/15.75GiB pcache=2.73GiB active=13.08GiB groups=0 grouped=0
+2026-10-17 04:59:54,023 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b prompt cache reply kept: 3806 tokens (+64 generated), 3 checkpoints, 330.8 MB (8 entries, 2929.2 MB total) absorbed=1 pieces=4
+2026-10-17 04:59:54,024 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-2-b5aca4cecf2b finish=length gen_tokens=64 ttft_ms=2179 tps=6.8 cached=3398 peak=14.43GB active=13.97GB pool=0.22GB queue_ms=28628 batch=6.63
+2026-10-17 04:59:54,032 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-1-3-3fd1630c8255 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:54,037 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-3-3fd1630c8255 prompt_tokens=4205 (images=0)
+2026-10-17 04:59:54,279 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-2-f89111544db3 prompt cache store: 3714 tokens, 4 checkpoints, 379.3 MB (8 entries, 2991.8 MB total) reused=3374 gap=0 absorbed=1 pieces=3 states=257.6 MB
+2026-10-17 04:59:54,332 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-3-3fd1630c8255 prompt cache HIT: 3806/4205 tokens reused (common prefix 3806), prefilling 399
+2026-10-17 04:59:55,541 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-2-2abedf2929ed prompt cache reply kept: 3804 tokens (+64 generated), 4 checkpoints, 382.2 MB (8 entries, 2993.9 MB total) absorbed=1 pieces=4
+2026-10-17 04:59:55,541 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-2-2abedf2929ed finish=length gen_tokens=64 ttft_ms=2269 tps=6.6 cached=3388 peak=14.59GB active=14.05GB pool=0.23GB queue_ms=27288 batch=6.82
+2026-10-17 04:59:55,548 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-6-3-5a14d4bd0e9f images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:55,553 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-3-5a14d4bd0e9f prompt_tokens=4163 (images=0)
+2026-10-17 04:59:55,802 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-2-ea47b466d7e8 prompt cache reply kept: 3775 tokens (+64 generated), 4 checkpoints, 381.3 MB (8 entries, 2996.1 MB total) absorbed=1 pieces=4
+2026-10-17 04:59:55,803 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-2-ea47b466d7e8 finish=length gen_tokens=64 ttft_ms=2378 tps=7.5 cached=3370 peak=14.59GB active=13.88GB pool=0.87GB queue_ms=22717 batch=6.91
+2026-10-17 04:59:55,812 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-2-3-426b244f57b2 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:55,816 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-3-426b244f57b2 prompt_tokens=4138 (images=0)
+2026-10-17 04:59:55,960 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-3-3fd1630c8255 prompt cache store: 4204 tokens, 3 checkpoints, 343.8 MB (8 entries, 3009.1 MB total) reused=3806 gap=0 absorbed=1 pieces=5 states=206.0 MB
+2026-10-17 04:59:56,008 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-3-5a14d4bd0e9f prompt cache HIT: 3804/4163 tokens reused (common prefix 3804), prefilling 359
+2026-10-17 04:59:57,144 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-2-e1107de5a79a prompt cache reply kept: 3803 tokens (+64 generated), 4 checkpoints, 382.2 MB (8 entries, 3011.2 MB total) absorbed=1 pieces=4
+2026-10-17 04:59:57,144 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-2-e1107de5a79a finish=length gen_tokens=64 ttft_ms=2450 tps=7.5 cached=3403 peak=14.59GB active=13.90GB pool=0.21GB queue_ms=13281 batch=6.94
+2026-10-17 04:59:57,151 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-7-3-8545d600f2c5 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:57,156 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-3-8545d600f2c5 prompt_tokens=4132 (images=0)
+2026-10-17 04:59:57,297 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-3-5a14d4bd0e9f prompt cache store: 4162 tokens, 4 checkpoints, 393.9 MB (8 entries, 3023.0 MB total) reused=3804 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 04:59:57,345 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-3-426b244f57b2 prompt cache HIT: 3775/4138 tokens reused (common prefix 3775), prefilling 363
+2026-10-17 04:59:58,455 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-2-b064a7c3b208 prompt cache reply kept: 3797 tokens (+64 generated), 4 checkpoints, 382.0 MB (8 entries, 3025.1 MB total) absorbed=1 pieces=4
+2026-10-17 04:59:58,456 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-2-b064a7c3b208 finish=length gen_tokens=64 ttft_ms=2466 tps=7.6 cached=3382 peak=14.59GB active=13.93GB pool=0.19GB queue_ms=5364 batch=6.92
+2026-10-17 04:59:58,463 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-4-3-93125cd563c3 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:58,469 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-3-93125cd563c3 prompt_tokens=4161 (images=0)
+2026-10-17 04:59:58,605 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-3-426b244f57b2 prompt cache store: 4137 tokens, 4 checkpoints, 393.1 MB (8 entries, 3037.0 MB total) reused=3775 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 04:59:58,652 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-3-8545d600f2c5 prompt cache HIT: 3803/4132 tokens reused (common prefix 3803), prefilling 329
+2026-10-17 04:59:59,917 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-3-8545d600f2c5 prompt cache store: 4131 tokens, 4 checkpoints, 392.9 MB (8 entries, 3047.7 MB total) reused=3803 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 04:59:59,919 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-2-d7150550716f prompt cache reply kept: 3793 tokens (+64 generated), 4 checkpoints, 381.8 MB (8 entries, 3049.8 MB total) absorbed=1 pieces=4
+2026-10-17 04:59:59,919 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-2-d7150550716f finish=length gen_tokens=64 ttft_ms=1527 tps=6.8 cached=3372 peak=14.59GB active=13.84GB pool=0.11GB queue_ms=1692 batch=6.78
+2026-10-17 04:59:59,926 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-5-3-be77d7f9e8d0 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 04:59:59,934 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-3-be77d7f9e8d0 prompt_tokens=4146 (images=0)
+2026-10-17 04:59:59,978 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-3-93125cd563c3 prompt cache HIT: 3797/4161 tokens reused (common prefix 3797), prefilling 364
+2026-10-17 05:00:01,232 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-3-93125cd563c3 prompt cache store: 4160 tokens, 4 checkpoints, 393.9 MB (8 entries, 3061.7 MB total) reused=3797 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 05:00:01,283 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-3-be77d7f9e8d0 prompt cache HIT: 3793/4146 tokens reused (common prefix 3793), prefilling 353
+2026-10-17 05:00:02,417 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-2-1acedb184cd2 prompt cache reply kept: 3893 tokens (+64 generated), 4 checkpoints, 385.1 MB (8 entries, 3063.9 MB total) absorbed=1 pieces=4
+2026-10-17 05:00:02,418 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-2-1acedb184cd2 finish=length gen_tokens=64 ttft_ms=1511 tps=6.3 cached=3474 peak=14.68GB active=14.18GB pool=0.05GB queue_ms=32 batch=6.60
+2026-10-17 05:00:02,425 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-3-3-b563f770effc images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:02,431 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-3-b563f770effc prompt_tokens=4242 (images=0)
+2026-10-17 05:00:02,569 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-3-be77d7f9e8d0 prompt cache store: 4145 tokens, 4 checkpoints, 393.4 MB (8 entries, 3075.4 MB total) reused=3793 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 05:00:02,620 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-3-b563f770effc prompt cache HIT: 3893/4242 tokens reused (common prefix 3893), prefilling 349
+2026-10-17 05:00:03,970 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-3-b563f770effc prompt cache store: 4241 tokens, 4 checkpoints, 396.5 MB (8 entries, 3086.8 MB total) reused=3893 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 05:00:03,970 INFO  qwen.worker batch: rows=8 waiting=0 prefilling=- steps/s=5.7 mean_rows=6.26 reserved=1.90/15.75GiB pcache=2.87GiB active=13.13GiB groups=0 grouped=0
+2026-10-17 05:00:04,638 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-2-f89111544db3 prompt cache reply kept: 3779 tokens (+64 generated), 4 checkpoints, 381.4 MB (8 entries, 3088.9 MB total) absorbed=1 pieces=4
+2026-10-17 05:00:04,638 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-2-f89111544db3 finish=length gen_tokens=64 ttft_ms=2642 tps=7.0 cached=3374 peak=14.70GB active=14.23GB pool=0.53GB queue_ms=34 batch=6.62
+2026-10-17 05:00:04,648 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-0-3-0a653fddfee2 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:04,652 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-3-0a653fddfee2 prompt_tokens=4125 (images=0)
+2026-10-17 05:00:04,694 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-3-0a653fddfee2 prompt cache HIT: 3779/4125 tokens reused (common prefix 3779), prefilling 346
+2026-10-17 05:00:06,120 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-3-0a653fddfee2 prompt cache store: 4124 tokens, 4 checkpoints, 392.7 MB (8 entries, 3100.2 MB total) reused=3779 gap=0 absorbed=1 pieces=5 states=257.6 MB
+2026-10-17 05:00:06,221 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-3-3fd1630c8255 prompt cache reply kept: 4269 tokens (+64 generated), 3 checkpoints, 345.9 MB (8 entries, 3102.4 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:06,221 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-3-3fd1630c8255 finish=length gen_tokens=64 ttft_ms=2654 tps=6.9 cached=3806 peak=14.72GB active=14.26GB pool=0.53GB queue_ms=289 batch=6.77
+2026-10-17 05:00:06,231 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-1-4-bcc3147c676a images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:06,237 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-4-bcc3147c676a prompt_tokens=4600 (images=0)
+2026-10-17 05:00:06,281 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-4-bcc3147c676a prompt cache HIT: 4269/4600 tokens reused (common prefix 4269), prefilling 331
+2026-10-17 05:00:07,607 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-3-5a14d4bd0e9f prompt cache reply kept: 4227 tokens (+64 generated), 4 checkpoints, 396.1 MB (8 entries, 3104.5 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:07,607 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-3-5a14d4bd0e9f finish=length gen_tokens=64 ttft_ms=2295 tps=6.9 cached=3804 peak=14.73GB active=14.27GB pool=0.22GB queue_ms=447 batch=6.89
+2026-10-17 05:00:07,616 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-6-4-d8f6792d0c2d images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:07,621 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-4-d8f6792d0c2d prompt_tokens=4567 (images=0)
+2026-10-17 05:00:07,771 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-4-bcc3147c676a prompt cache store: 4599 tokens, 4 checkpoints, 408.3 MB (8 entries, 3166.8 MB total) reused=4269 gap=0 absorbed=1 pieces=7 states=257.6 MB
+2026-10-17 05:00:07,825 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-4-d8f6792d0c2d prompt cache HIT: 4227/4567 tokens reused (common prefix 4227), prefilling 340
+2026-10-17 05:00:09,031 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-3-426b244f57b2 prompt cache reply kept: 4202 tokens (+64 generated), 4 checkpoints, 395.2 MB (8 entries, 3169.0 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:09,031 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-3-426b244f57b2 finish=length gen_tokens=64 ttft_ms=2263 tps=6.8 cached=3775 peak=14.83GB active=14.35GB pool=0.22GB queue_ms=1521 batch=7.00
+2026-10-17 05:00:09,039 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-2-4-03643586c0e7 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:09,045 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-4-03643586c0e7 prompt_tokens=4541 (images=0)
+2026-10-17 05:00:09,231 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-4-d8f6792d0c2d prompt cache store: 4566 tokens, 5 checkpoints, 458.7 MB (8 entries, 3231.6 MB total) reused=4227 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:09,283 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-4-03643586c0e7 prompt cache HIT: 4202/4541 tokens reused (common prefix 4202), prefilling 339
+2026-10-17 05:00:10,390 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-3-8545d600f2c5 prompt cache reply kept: 4196 tokens (+64 generated), 4 checkpoints, 395.1 MB (8 entries, 3233.7 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:10,391 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-3-8545d600f2c5 finish=length gen_tokens=64 ttft_ms=2281 tps=6.8 cached=3803 peak=14.91GB active=14.43GB pool=0.22GB queue_ms=1488 batch=7.08
+2026-10-17 05:00:10,398 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-7-4-1696cc35a359 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:10,404 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-4-1696cc35a359 prompt_tokens=4535 (images=0)
+2026-10-17 05:00:10,588 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-4-03643586c0e7 prompt cache store: 4540 tokens, 5 checkpoints, 457.8 MB (8 entries, 3296.3 MB total) reused=4202 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:10,639 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-4-1696cc35a359 prompt cache HIT: 4196/4535 tokens reused (common prefix 4196), prefilling 339
+2026-10-17 05:00:11,757 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-3-93125cd563c3 prompt cache reply kept: 4225 tokens (+64 generated), 4 checkpoints, 396.0 MB (8 entries, 3298.4 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:11,758 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-3-93125cd563c3 finish=length gen_tokens=64 ttft_ms=2276 tps=6.7 cached=3797 peak=14.98GB active=14.51GB pool=0.22GB queue_ms=1502 batch=7.15
+2026-10-17 05:00:11,766 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-4-4-e65ae5ce3d67 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:11,772 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-4-e65ae5ce3d67 prompt_tokens=4587 (images=0)
+2026-10-17 05:00:11,958 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-4-1696cc35a359 prompt cache store: 4534 tokens, 5 checkpoints, 457.6 MB (8 entries, 3361.0 MB total) reused=4196 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:12,011 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-4-e65ae5ce3d67 prompt cache HIT: 4225/4587 tokens reused (common prefix 4225), prefilling 362
+2026-10-17 05:00:13,134 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-3-be77d7f9e8d0 prompt cache reply kept: 4210 tokens (+64 generated), 4 checkpoints, 395.5 MB (8 entries, 3363.1 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:13,134 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-3-be77d7f9e8d0 finish=length gen_tokens=64 ttft_ms=2353 tps=6.7 cached=3793 peak=15.10GB active=14.59GB pool=0.23GB queue_ms=1345 batch=7.14
+2026-10-17 05:00:13,142 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:13,148 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 prompt_tokens=4587 (images=0)
+2026-10-17 05:00:13,334 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-4-e65ae5ce3d67 prompt cache store: 4586 tokens, 5 checkpoints, 459.3 MB (8 entries, 3426.5 MB total) reused=4225 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:13,386 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 prompt cache HIT: 4210/4587 tokens reused (common prefix 4210), prefilling 377
+2026-10-17 05:00:14,313 INFO  qwen.worker batch: rows=7 waiting=0 prefilling=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 steps/s=5.9 mean_rows=7.11 reserved=1.99/15.75GiB pcache=3.19GiB active=13.75GiB groups=0 grouped=0
+2026-10-17 05:00:14,486 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-3-b563f770effc prompt cache reply kept: 4306 tokens (+64 generated), 4 checkpoints, 398.7 MB (8 entries, 3428.6 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:14,487 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-3-b563f770effc finish=length gen_tokens=64 ttft_ms=1457 tps=6.1 cached=3893 peak=15.17GB active=14.67GB pool=0.22GB queue_ms=183 batch=7.11
+2026-10-17 05:00:14,495 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-3-4-57013755e322 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:14,501 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-4-57013755e322 prompt_tokens=4639 (images=0)
+2026-10-17 05:00:14,721 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 prompt cache store: 4586 tokens, 5 checkpoints, 459.3 MB (8 entries, 3492.4 MB total) reused=4210 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:14,772 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-4-57013755e322 prompt cache HIT: 4306/4639 tokens reused (common prefix 4306), prefilling 333
+2026-10-17 05:00:16,050 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-4-57013755e322 prompt cache store: 4638 tokens, 5 checkpoints, 461.0 MB (8 entries, 3554.8 MB total) reused=4306 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:16,551 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-3-0a653fddfee2 prompt cache reply kept: 4189 tokens (+64 generated), 4 checkpoints, 394.8 MB (8 entries, 3557.0 MB total) absorbed=1 pieces=6
+2026-10-17 05:00:16,552 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-3-0a653fddfee2 finish=length gen_tokens=64 ttft_ms=1538 tps=6.2 cached=3779 peak=15.22GB active=14.81GB pool=0.48GB queue_ms=34 batch=7.02
+2026-10-17 05:00:16,562 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-0-4-a3b4d9b75548 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:16,567 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-4-a3b4d9b75548 prompt_tokens=4527 (images=0)
+2026-10-17 05:00:16,605 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-4-a3b4d9b75548 prompt cache HIT: 4189/4527 tokens reused (common prefix 4189), prefilling 338
+2026-10-17 05:00:17,931 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-4-a3b4d9b75548 prompt cache store: 4526 tokens, 5 checkpoints, 457.4 MB (8 entries, 3619.5 MB total) reused=4189 gap=0 absorbed=1 pieces=7 states=309.1 MB
+2026-10-17 05:00:18,077 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-4-bcc3147c676a prompt cache reply kept: 4664 tokens (+64 generated), 4 checkpoints, 410.4 MB (8 entries, 3621.7 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:18,078 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-4-bcc3147c676a finish=length gen_tokens=64 ttft_ms=2579 tps=6.9 cached=4269 peak=15.30GB active=14.89GB pool=0.48GB queue_ms=37 batch=7.05
+2026-10-17 05:00:18,089 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-1-5-e433702fcf2d images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:18,095 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-5-e433702fcf2d prompt_tokens=5052 (images=0)
+2026-10-17 05:00:18,135 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-5-e433702fcf2d prompt cache HIT: 4664/5052 tokens reused (common prefix 4664), prefilling 388
+2026-10-17 05:00:19,558 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-5-e433702fcf2d prompt cache store: 5051 tokens, 4 checkpoints, 423.1 MB (8 entries, 3634.3 MB total) reused=4664 gap=0 absorbed=1 pieces=9 states=257.6 MB
+2026-10-17 05:00:19,562 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-4-d8f6792d0c2d prompt cache reply kept: 4631 tokens (+64 generated), 5 checkpoints, 460.8 MB (8 entries, 3636.5 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:19,562 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-4-d8f6792d0c2d finish=length gen_tokens=64 ttft_ms=2443 tps=6.9 cached=4227 peak=15.43GB active=14.79GB pool=0.11GB queue_ms=197 batch=7.08
+2026-10-17 05:00:19,570 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-6-5-f6d17f1c8b42 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:19,578 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-5-f6d17f1c8b42 prompt_tokens=4993 (images=0)
+2026-10-17 05:00:19,627 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-5-f6d17f1c8b42 prompt cache HIT: 4631/4993 tokens reused (common prefix 4631), prefilling 362
+2026-10-17 05:00:20,821 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-4-03643586c0e7 prompt cache reply kept: 4605 tokens (+64 generated), 5 checkpoints, 460.0 MB (8 entries, 3638.6 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:20,821 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-4-03643586c0e7 finish=length gen_tokens=64 ttft_ms=2350 tps=7.0 cached=4202 peak=15.43GB active=14.93GB pool=0.21GB queue_ms=231 batch=7.11
+2026-10-17 05:00:20,830 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-2-5-9b909a5119f8 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:20,836 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-5-9b909a5119f8 prompt_tokens=4989 (images=0)
+2026-10-17 05:00:20,971 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-5-f6d17f1c8b42 prompt cache store: 4992 tokens, 5 checkpoints, 472.6 MB (8 entries, 3650.4 MB total) reused=4631 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:21,022 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-5-9b909a5119f8 prompt cache HIT: 4605/4989 tokens reused (common prefix 4605), prefilling 384
+2026-10-17 05:00:22,136 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-4-1696cc35a359 prompt cache reply kept: 4599 tokens (+64 generated), 5 checkpoints, 459.8 MB (8 entries, 3652.6 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:22,136 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-4-1696cc35a359 finish=length gen_tokens=64 ttft_ms=2370 tps=7.0 cached=4196 peak=15.48GB active=14.96GB pool=0.22GB queue_ms=229 batch=7.12
+2026-10-17 05:00:22,144 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-7-5-7534a4fab147 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:22,150 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-5-7534a4fab147 prompt_tokens=4924 (images=0)
+2026-10-17 05:00:22,284 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-5-9b909a5119f8 prompt cache store: 4988 tokens, 5 checkpoints, 472.5 MB (8 entries, 3665.1 MB total) reused=4605 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:22,335 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-5-7534a4fab147 prompt cache HIT: 4599/4924 tokens reused (common prefix 4599), prefilling 325
+2026-10-17 05:00:23,402 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-5-7534a4fab147 prompt cache store: 4923 tokens, 5 checkpoints, 470.4 MB (8 entries, 3675.7 MB total) reused=4599 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:23,405 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-4-e65ae5ce3d67 prompt cache reply kept: 4651 tokens (+64 generated), 5 checkpoints, 461.5 MB (8 entries, 3677.8 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:23,405 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-4-e65ae5ce3d67 finish=length gen_tokens=64 ttft_ms=2356 tps=7.1 cached=4225 peak=15.48GB active=14.87GB pool=0.11GB queue_ms=232 batch=7.14
+2026-10-17 05:00:23,414 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-4-5-05ed0afa36da images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:23,421 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-5-05ed0afa36da prompt_tokens=4988 (images=0)
+2026-10-17 05:00:23,468 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-5-05ed0afa36da prompt cache HIT: 4651/4988 tokens reused (common prefix 4651), prefilling 337
+2026-10-17 05:00:24,396 INFO  qwen.worker batch: rows=7 waiting=0 prefilling=chatcmpl-rk-g3a1-4-5-05ed0afa36da steps/s=6.4 mean_rows=7.14 reserved=2.09/15.75GiB pcache=3.43GiB active=14.07GiB groups=0 grouped=0
+2026-10-17 05:00:24,782 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-5-05ed0afa36da prompt cache store: 4987 tokens, 5 checkpoints, 472.5 MB (8 entries, 3688.9 MB total) reused=4651 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:24,831 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 prompt cache reply kept: 4651 tokens (+64 generated), 5 checkpoints, 461.5 MB (8 entries, 3691.0 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:24,831 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-4-d79220b2d1d2 finish=length gen_tokens=64 ttft_ms=2346 tps=7.0 cached=4210 peak=15.50GB active=15.08GB pool=0.49GB queue_ms=231 batch=7.20
+2026-10-17 05:00:24,842 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-5-5-b382d1f1470e images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:24,848 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-5-b382d1f1470e prompt_tokens=4998 (images=0)
+2026-10-17 05:00:24,888 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-5-b382d1f1470e prompt cache HIT: 4651/4998 tokens reused (common prefix 4651), prefilling 347
+2026-10-17 05:00:26,325 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-5-b382d1f1470e prompt cache store: 4997 tokens, 5 checkpoints, 472.8 MB (8 entries, 3702.3 MB total) reused=4651 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:26,328 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-4-57013755e322 prompt cache reply kept: 4703 tokens (+64 generated), 5 checkpoints, 463.2 MB (8 entries, 3704.5 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:26,328 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-4-57013755e322 finish=length gen_tokens=64 ttft_ms=1381 tps=6.3 cached=4306 peak=15.54GB active=14.93GB pool=0.11GB queue_ms=265 batch=7.20
+2026-10-17 05:00:26,337 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-3-5-1f909da75dfd images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:26,344 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-5-1f909da75dfd prompt_tokens=5039 (images=0)
+2026-10-17 05:00:26,397 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-5-1f909da75dfd prompt cache HIT: 4703/5039 tokens reused (common prefix 4703), prefilling 336
+2026-10-17 05:00:27,906 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-5-1f909da75dfd prompt cache store: 5038 tokens, 5 checkpoints, 474.2 MB (8 entries, 3715.4 MB total) reused=4703 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:28,403 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-4-a3b4d9b75548 prompt cache reply kept: 4591 tokens (+64 generated), 5 checkpoints, 459.5 MB (8 entries, 3717.6 MB total) absorbed=1 pieces=8
+2026-10-17 05:00:28,404 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-4-a3b4d9b75548 finish=length gen_tokens=64 ttft_ms=1435 tps=6.2 cached=4189 peak=15.55GB active=15.09GB pool=0.53GB queue_ms=31 batch=7.18
+2026-10-17 05:00:28,414 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-0-5-301edce8b2a9 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:28,420 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-5-301edce8b2a9 prompt_tokens=4962 (images=0)
+2026-10-17 05:00:28,461 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-5-301edce8b2a9 prompt cache HIT: 4591/4962 tokens reused (common prefix 4591), prefilling 371
+2026-10-17 05:00:29,811 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-5-301edce8b2a9 prompt cache store: 4961 tokens, 5 checkpoints, 471.6 MB (8 entries, 3729.7 MB total) reused=4591 gap=0 absorbed=1 pieces=9 states=309.1 MB
+2026-10-17 05:00:30,001 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-5-e433702fcf2d prompt cache reply kept: 5116 tokens (+64 generated), 4 checkpoints, 425.2 MB (8 entries, 3731.8 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:30,001 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-5-e433702fcf2d finish=length gen_tokens=64 ttft_ms=2478 tps=6.8 cached=4664 peak=15.59GB active=15.11GB pool=0.53GB queue_ms=34 batch=7.20
+2026-10-17 05:00:30,013 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-1-6-6c08f4a39f56 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:30,019 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-6-6c08f4a39f56 prompt_tokens=5464 (images=0)
+2026-10-17 05:00:30,055 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-6-6c08f4a39f56 prompt cache HIT: 5116/5464 tokens reused (common prefix 5116), prefilling 348
+2026-10-17 05:00:31,410 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-6-6c08f4a39f56 prompt cache store: 5463 tokens, 4 checkpoints, 436.6 MB (8 entries, 3743.2 MB total) reused=5116 gap=0 absorbed=1 pieces=11 states=257.6 MB
+2026-10-17 05:00:31,459 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-5-f6d17f1c8b42 prompt cache reply kept: 5057 tokens (+64 generated), 5 checkpoints, 474.8 MB (8 entries, 3745.3 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:31,460 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-5-f6d17f1c8b42 finish=length gen_tokens=64 ttft_ms=2348 tps=6.7 cached=4631 peak=15.64GB active=15.19GB pool=0.49GB queue_ms=45 batch=7.23
+2026-10-17 05:00:31,470 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-6-6-e20055a1550b images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:31,476 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-6-e20055a1550b prompt_tokens=5392 (images=0)
+2026-10-17 05:00:31,516 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-6-e20055a1550b prompt cache HIT: 5057/5392 tokens reused (common prefix 5057), prefilling 335
+2026-10-17 05:00:32,951 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-6-e20055a1550b prompt cache store: 5391 tokens, 5 checkpoints, 485.7 MB (8 entries, 3756.3 MB total) reused=5057 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:32,954 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-5-9b909a5119f8 prompt cache reply kept: 5053 tokens (+64 generated), 5 checkpoints, 474.6 MB (8 entries, 3758.4 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:32,954 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-5-9b909a5119f8 finish=length gen_tokens=64 ttft_ms=2115 tps=6.5 cached=4605 peak=15.64GB active=15.04GB pool=0.11GB queue_ms=180 batch=7.25
+2026-10-17 05:00:32,963 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-2-6-121a7f9dcc5e images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:32,971 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-6-121a7f9dcc5e prompt_tokens=5377 (images=0)
+2026-10-17 05:00:33,023 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-6-121a7f9dcc5e prompt cache HIT: 5053/5377 tokens reused (common prefix 5053), prefilling 324
+2026-10-17 05:00:34,134 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-5-7534a4fab147 prompt cache reply kept: 4988 tokens (+64 generated), 5 checkpoints, 472.5 MB (8 entries, 3760.5 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:34,135 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-5-7534a4fab147 finish=length gen_tokens=64 ttft_ms=2116 tps=6.6 cached=4599 peak=15.65GB active=15.18GB pool=0.21GB queue_ms=179 batch=7.25
+2026-10-17 05:00:34,143 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:34,149 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 prompt_tokens=5384 (images=0)
+2026-10-17 05:00:34,299 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-6-121a7f9dcc5e prompt cache store: 5376 tokens, 5 checkpoints, 485.2 MB (8 entries, 3771.1 MB total) reused=5053 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:34,353 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 prompt cache HIT: 4988/5384 tokens reused (common prefix 4988), prefilling 396
+2026-10-17 05:00:35,522 INFO  qwen.worker batch: rows=7 waiting=0 prefilling=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 steps/s=5.9 mean_rows=7.23 reserved=2.18/15.75GiB pcache=3.51GiB active=14.26GiB groups=0 grouped=0
+2026-10-17 05:00:35,759 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-5-05ed0afa36da prompt cache reply kept: 5052 tokens (+64 generated), 5 checkpoints, 474.6 MB (8 entries, 3773.2 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:35,760 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-5-05ed0afa36da finish=length gen_tokens=64 ttft_ms=1421 tps=5.9 cached=4651 peak=15.75GB active=15.21GB pool=0.23GB queue_ms=42 batch=7.23
+2026-10-17 05:00:35,769 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-4-6-fe8433f9f18d images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:35,776 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-6-fe8433f9f18d prompt_tokens=5444 (images=0)
+2026-10-17 05:00:36,010 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 prompt cache store: 5383 tokens, 5 checkpoints, 485.5 MB (8 entries, 3786.2 MB total) reused=4988 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:36,064 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-6-fe8433f9f18d prompt cache HIT: 5052/5444 tokens reused (common prefix 5052), prefilling 392
+2026-10-17 05:00:37,433 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-5-b382d1f1470e prompt cache reply kept: 5062 tokens (+64 generated), 5 checkpoints, 474.9 MB (8 entries, 3788.3 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:37,433 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-5-b382d1f1470e finish=length gen_tokens=64 ttft_ms=2617 tps=6.4 cached=4651 peak=15.78GB active=15.24GB pool=0.23GB queue_ms=33 batch=7.17
+2026-10-17 05:00:37,442 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-5-6-e21de7de6072 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:37,449 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-6-e21de7de6072 prompt_tokens=5462 (images=0)
+2026-10-17 05:00:37,693 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-6-fe8433f9f18d prompt cache store: 5443 tokens, 5 checkpoints, 487.4 MB (8 entries, 3801.1 MB total) reused=5052 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:37,749 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-6-e21de7de6072 prompt cache HIT: 5062/5462 tokens reused (common prefix 5062), prefilling 400
+2026-10-17 05:00:39,151 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-5-1f909da75dfd prompt cache reply kept: 5103 tokens (+64 generated), 5 checkpoints, 476.3 MB (8 entries, 3803.3 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:39,151 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-5-1f909da75dfd finish=length gen_tokens=64 ttft_ms=1622 tps=5.7 cached=4703 peak=15.82GB active=15.26GB pool=0.23GB queue_ms=47 batch=7.12
+2026-10-17 05:00:39,161 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-3-6-64883bfe9d62 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:39,168 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-6-64883bfe9d62 prompt_tokens=5440 (images=0)
+2026-10-17 05:00:39,413 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-6-e21de7de6072 prompt cache store: 5461 tokens, 5 checkpoints, 488.0 MB (8 entries, 3816.3 MB total) reused=5062 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:39,469 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-6-64883bfe9d62 prompt cache HIT: 5103/5440 tokens reused (common prefix 5103), prefilling 337
+2026-10-17 05:00:40,886 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-6-64883bfe9d62 prompt cache store: 5439 tokens, 5 checkpoints, 487.3 MB (8 entries, 3827.3 MB total) reused=5103 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:41,233 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-5-301edce8b2a9 prompt cache reply kept: 5026 tokens (+64 generated), 5 checkpoints, 473.8 MB (8 entries, 3829.5 MB total) absorbed=1 pieces=10
+2026-10-17 05:00:41,233 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-5-301edce8b2a9 finish=length gen_tokens=64 ttft_ms=1458 tps=5.7 cached=4591 peak=15.82GB active=15.31GB pool=0.53GB queue_ms=34 batch=7.03
+2026-10-17 05:00:41,244 INFO  qwen.worker Generate id=chatcmpl-rk-g3a1-0-6-8969b1049805 images=0 max_tokens=64 template_kwargs={"enable_thinking":false} budget=-
+2026-10-17 05:00:41,251 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-6-8969b1049805 prompt_tokens=5371 (images=0)
+2026-10-17 05:00:41,290 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-6-8969b1049805 prompt cache HIT: 5026/5371 tokens reused (common prefix 5026), prefilling 345
+2026-10-17 05:00:42,727 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-6-8969b1049805 prompt cache store: 5370 tokens, 5 checkpoints, 485.0 MB (8 entries, 3840.7 MB total) reused=5026 gap=0 absorbed=1 pieces=11 states=309.1 MB
+2026-10-17 05:00:42,935 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-6-6c08f4a39f56 prompt cache reply kept: 5528 tokens (+64 generated), 4 checkpoints, 438.7 MB (8 entries, 3842.9 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:42,936 INFO  qwen.worker id=chatcmpl-rk-g3a1-1-6-6c08f4a39f56 finish=length gen_tokens=64 ttft_ms=1463 tps=5.6 cached=5116 peak=15.83GB active=15.34GB pool=0.53GB queue_ms=31 batch=7.03
+2026-10-17 05:00:43,329 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-6-e20055a1550b prompt cache reply kept: 5456 tokens (+64 generated), 5 checkpoints, 487.8 MB (8 entries, 3845.0 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:43,330 INFO  qwen.worker id=chatcmpl-rk-g3a1-6-6-e20055a1550b finish=length gen_tokens=64 ttft_ms=2436 tps=6.8 cached=5057 peak=15.83GB active=15.09GB pool=0.05GB queue_ms=34 batch=7.02
+2026-10-17 05:00:43,657 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-6-121a7f9dcc5e prompt cache reply kept: 5441 tokens (+64 generated), 5 checkpoints, 487.4 MB (8 entries, 3847.1 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:43,657 INFO  qwen.worker id=chatcmpl-rk-g3a1-2-6-121a7f9dcc5e finish=length gen_tokens=64 ttft_ms=2556 tps=7.9 cached=5053 peak=15.83GB active=14.85GB pool=0.76GB queue_ms=47 batch=6.92
+2026-10-17 05:00:44,060 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 prompt cache reply kept: 5448 tokens (+64 generated), 5 checkpoints, 487.6 MB (8 entries, 3849.3 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:44,060 INFO  qwen.worker id=chatcmpl-rk-g3a1-7-6-5421fd7b4e01 finish=length gen_tokens=64 ttft_ms=2943 tps=9.4 cached=4988 peak=15.83GB active=14.61GB pool=1.34GB queue_ms=198 batch=6.69
+2026-10-17 05:00:44,403 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-6-fe8433f9f18d prompt cache reply kept: 5508 tokens (+64 generated), 5 checkpoints, 489.6 MB (8 entries, 3851.4 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:44,404 INFO  qwen.worker id=chatcmpl-rk-g3a1-4-6-fe8433f9f18d finish=length gen_tokens=64 ttft_ms=2948 tps=11.8 cached=5052 peak=15.83GB active=14.39GB pool=1.85GB queue_ms=283 batch=6.37
+2026-10-17 05:00:44,737 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-6-e21de7de6072 prompt cache reply kept: 5526 tokens (+64 generated), 5 checkpoints, 490.1 MB (8 entries, 3853.5 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:44,737 INFO  qwen.worker id=chatcmpl-rk-g3a1-5-6-e21de7de6072 finish=length gen_tokens=64 ttft_ms=2790 tps=15.2 cached=5062 peak=15.83GB active=14.14GB pool=2.31GB queue_ms=294 batch=5.92
+2026-10-17 05:00:45,057 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-6-64883bfe9d62 prompt cache reply kept: 5504 tokens (+64 generated), 5 checkpoints, 489.4 MB (8 entries, 3855.6 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:45,057 INFO  qwen.worker id=chatcmpl-rk-g3a1-3-6-64883bfe9d62 finish=length gen_tokens=64 ttft_ms=1528 tps=15.7 cached=5103 peak=15.83GB active=13.90GB pool=2.70GB queue_ms=296 batch=5.38
+2026-10-17 05:00:45,477 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-6-8969b1049805 prompt cache reply kept: 5435 tokens (+64 generated), 5 checkpoints, 487.2 MB (8 entries, 3857.8 MB total) absorbed=1 pieces=12
+2026-10-17 05:00:45,478 INFO  qwen.worker id=chatcmpl-rk-g3a1-0-6-8969b1049805 finish=length gen_tokens=64 ttft_ms=1552 tps=24.2 cached=5026 peak=15.83GB active=13.65GB pool=2.97GB queue_ms=33 batch=3.98
+2026-10-17 05:00:45,536 INFO  qwen.worker worker stopped

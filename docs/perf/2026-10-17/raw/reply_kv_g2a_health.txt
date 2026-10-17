@@ -1,0 +1,1 @@
+ready=True model=ornith15-9b-mlx-8bit load_ms=3279 model_path=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit max_batch=16 prompt_cache_entries=8 prompt_cache_bytes=3636559872 prompt_cache_hits=24 prompt_cache_misses=8
