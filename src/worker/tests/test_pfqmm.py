@@ -36,11 +36,29 @@ def _qlinear(K, N, bits=8, dtype=mx.float16):
     return m
 
 
-@pytest.mark.parametrize("M,use", [(96, False), (128, True), (288, False), (2000, True),
-                                   (2048, True), (100000, True)])
+@pytest.mark.parametrize("M,use", [(32, False),        # below MIN_ROWS
+                                   (63, False),
+                                   (64, False),        # 256 tiles: MLX runs split-K
+                                   (96, True),         # 64 + a 32-row last tile
+                                   (128, True), (200, True), (288, True), (300, True),
+                                   (2000, True), (2048, True), (100000, True)])
 def test_use_rows(M, use):
     m = _qlinear(256, 4096)
     assert pfqmm._use(m, mx.zeros((1, M, 256), mx.float16)) is use
+
+
+def test_use_every_qmm_row_count():
+    """The mixed last tile pads no more than MLX's own 32-row tiles, so every
+    row count >= MIN_ROWS where MLX runs qmm_t takes the kernel (the 9B's
+    shapes; the GDN b/a N=32 never: always split-K), and none below."""
+    for K, N in [(4096, 12288), (12288, 4096), (4096, 8192), (4096, 4096), (4096, 1024), (4096, 32)]:
+        m = _qlinear(K, N)
+        for M in range(1, 1200):
+            want = M >= pfqmm.MIN_ROWS and pfqmm._mlx_uses_qmm(M, K, N, 64)
+            assert pfqmm._use(m, mx.zeros((1, M, K), mx.float16)) is want, (K, N, M)
+    m = _qlinear(4096, 12288)
+    assert pfqmm._use(m, mx.zeros((1, 64, 4096), mx.float16))       # gate/up: qmm_t from 32 rows
+    assert not pfqmm._use(m, mx.zeros((1, 63, 4096), mx.float16))
 
 
 def test_use_batched_x_falls_back():
@@ -68,18 +86,22 @@ def test_use_dtype_and_supported():
 
 
 def test_test_rows_never_vacuous():
-    """The self-test's rows: MLX runs qmm_t there and 8 rows further (checked
-    against the dispatch mirror), or None when the shape never leaves split-K
-    in range — never a row count it would skip."""
+    """The self-test's rows: MLX runs qmm_t there and at every TEST_TAILS
+    offset further (full 64-row tiles, a last 32-row tile ragged / full, a
+    last ragged 64-row tile; checked against the dispatch mirror), or None
+    when the shape never leaves split-K in range — never a row count it would
+    skip."""
+    tails = pfqmm.TEST_TAILS
+    assert {0, 8, 32, 40} <= set(tails)                              # every last-tile kind
     for K, N in [(4096, 248320), (4096, 12288), (2048, 256), (4096, 1024), (128, 256),
                  (5120, 640), (4096, 32), (2048, 32)]:
         M = pfqmm._test_rows(K, N, 64)
         if M is None:
-            assert not any(pfqmm._mlx_uses_qmm(r, K, N, 64) and pfqmm._mlx_uses_qmm(r + 8, K, N, 64)
+            assert not any(all(pfqmm._mlx_uses_qmm(r + t, K, N, 64) for t in tails)
                            for r in range(pfqmm.TEST_MIN_ROWS, pfqmm.TEST_MAX_ROWS + 1, 64))
             continue
         assert M % 64 == 0 and pfqmm.TEST_MIN_ROWS <= M <= pfqmm.TEST_MAX_ROWS
-        assert pfqmm._mlx_uses_qmm(M, K, N, 64) and pfqmm._mlx_uses_qmm(M + 8, K, N, 64)
+        assert all(pfqmm._mlx_uses_qmm(M + t, K, N, 64) for t in tails)
     assert pfqmm._test_rows(4096, 248320, 64) == 256                # 9B lm_head
     assert pfqmm._test_rows(2048, 256, 64) == 1088                  # 35B router: split-K below
     assert pfqmm._test_rows(4096, 32, 64) is None                   # GDN b/a: always split-K
@@ -233,33 +255,71 @@ def on_gpu():
     mx.set_default_device(prev)
 
 
+# Rows past a multiple of 64 → the last tile: 0 full 64-row tiles; 1 / 8 / 31 → a ragged 32-row
+# tile; 32 → a full 32-row tile; 33 / 40 / 63 → a ragged 64-row tile. 64…127 are the row
+# counts the mixed tile newly takes (gate/up / qkv / lm_head run qmm_t from 32–33 rows).
+KERNEL_ROWS = (64, 72, 96, 100, 127, 128, 129, 159, 160, 161, 191, 200, 232, 256, 288,
+               392, 416, 424, 448, 640, 2048)
+# per shape, how many of KERNEL_ROWS MLX runs as qmm_t (so are compared): a skipped list cannot pass
+KERNEL_COMPARED = {(4096, 4096): 20,       # qmm_t from 65 rows
+                   (4096, 1024): 7,        # from 257 (288, 392 … 2048)
+                   (5120, 640): 6,         # from 385 (392 / 416 / 424: every last-tile kind)
+                   (4096, 12288): 21}      # from 32: all of them
+
+
 @gpu
 @pytest.mark.parametrize("bits", [3, 4, 5, 6, 8])
-@pytest.mark.parametrize("K,N", [(4096, 4096), (4096, 1024), (5120, 640)])
+@pytest.mark.parametrize("K,N", sorted(KERNEL_COMPARED))
 def test_kernel_bit_identical(on_gpu, bits, K, N):
     w = (mx.random.normal((N, K), key=mx.random.key(bits)) * 0.02).astype(mx.float16)
     wq, s, b = mx.quantize(w, group_size=64, bits=bits)
     s, b = s.astype(mx.float16), b.astype(mx.float16)
     m = _qlinear(K, N, bits)
     m.weight, m.scales, m.biases = wq, s, b
-    for M in (128, 200, 256, 640, 2048):
+    compared = []
+    for M in KERNEL_ROWS:
         x = (mx.random.normal((1, M, K), key=mx.random.key(M)) * 2).astype(mx.float16)
         qmm = pfqmm._mlx_uses_qmm(M, K, N, 64)
-        assert pfqmm._use(m, x) == (qmm and M != 200)
+        assert pfqmm._use(m, x) == (qmm and M >= pfqmm.MIN_ROWS)
         if not qmm:                  # MLX runs split-K there: other rounding, never taken
             continue
         ref = mx.quantized_matmul(x, wq, s, b, transpose=True, group_size=64, bits=bits)
         y = pfqmm.pfqmm(x, wq, s, b, bits, 64)
         assert mx.array_equal(y, ref).item(), (bits, K, N, M)
+        compared.append(M)
+    assert len(compared) == KERNEL_COMPARED[(K, N)], compared
+    tails = {M % 64 for M in compared}
+    assert tails & {0} and tails & {1, 8, 31} and 32 in tails and tails & {33, 40, 63}, tails   # every tile kind
 
 
 @gpu
-def test_tiny_model_prefill(on_gpu):
+@pytest.mark.parametrize("K,N,split_k,qmm", [(4096, 1024, (256,), (257, 264)),
+                                             (4096, 4096, (64,), (65, 72))])
+def test_mlx_dispatch_boundary(on_gpu, K, N, split_k, qmm):
+    """`_mlx_uses_qmm` against real MLX: the 32-row kernel tile equals
+    quantized_matmul bit for bit exactly where MLX runs qmm_t, and differs
+    where MLX runs split-K (fp16 partial sums). An mlx bump that moves the
+    split-K threshold fails here, not only in the load self-test."""
+    w = (mx.random.normal((N, K), key=mx.random.key(7)) * 0.02).astype(mx.float16)
+    wq, s, b = mx.quantize(w, group_size=64, bits=8)
+    s, b = s.astype(mx.float16), b.astype(mx.float16)
+    for M, want in [(M, False) for M in split_k] + [(M, True) for M in qmm]:
+        assert pfqmm._mlx_uses_qmm(M, K, N, 64) is want, (K, N, M)
+        x = (mx.random.normal((1, M, K), key=mx.random.key(M)) * 2).astype(mx.float16)
+        ref = mx.quantized_matmul(x, wq, s, b, transpose=True, group_size=64, bits=8)
+        y = pfqmm.pfqmm(x, wq, s, b, 8, 64)
+        assert mx.array_equal(y, ref).item() is want, (K, N, M)
+
+
+@gpu
+@pytest.mark.parametrize("n", [2112, 2120, 2152])
+def test_tiny_model_prefill(on_gpu, n):
     """2112 rows: enough for the tiny model's narrow linears (K = 128/256,
-    N = 128/256) to leave split-K, so every linear takes the kernel."""
+    N = 128/256) to leave split-K, so every linear takes the kernel; 2120 /
+    2152 end on a ragged 32-row (8 rows) / a ragged 64-row (40 rows) last tile."""
     lm = build_lm("dense", wbits=8)
     assert pfqmm.install(lm) > 0
-    ids = mx.array([prompts([2112], 1)[0]])
+    ids = mx.array([prompts([n], 1)[0]])
     calls, real = [], pfqmm.pfqmm
 
     def spy(*a, **k):
@@ -286,7 +346,8 @@ def test_tiny_model_prefill(on_gpu):
 def test_selftest_compares_on_a_split_k_first_module(on_gpu):
     """The 35B case: the 8-bit key's first module is the MoE router (K=2048,
     N=256: split-K at 256 rows). install compares it at rows where MLX runs
-    qmm_t (1088 / 1096) instead of passing without a comparison."""
+    qmm_t (1088 and the last-tile offsets past it) instead of passing
+    without a comparison."""
     w = (mx.random.normal((256, 2048), key=mx.random.key(3)) * 0.02).astype(mx.float16)
     m = _qlinear(2048, 256)
     wq, s, b = mx.quantize(w, group_size=64, bits=8)
@@ -302,4 +363,4 @@ def test_selftest_compares_on_a_split_k_first_module(on_gpu):
     finally:
         pfqmm.pfqmm = real
         pfqmm.uninstall(_Holder(gate=m))
-    assert calls == [1088, 1096]
+    assert calls == [1088 + t for t in pfqmm.TEST_TAILS]

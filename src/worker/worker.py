@@ -755,8 +755,9 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # reaches ~8.1 TFLOPS on prefill slabs (fp16 GEMM: ~9.5). pfqmm runs the same
 # kernel code (the wheel's headers) with 64-row tiles: x1.03-1.28 per matmul
 # for 3..8-bit g64 (8-bit x1.10-1.14), bit-identical to quantized_matmul (same
-# per-element K order), and only where MLX itself would run qmm_t (>= 128
-# rows, not split-K), self-tested per (bits, group) at load. 9B
+# per-element K order), and only where MLX itself would run qmm_t (>= 64
+# rows, not split-K; the last tile is MLX's own 32-row one when <= 32 rows are
+# left), self-tested per (bits, group) at load. 9B
 # 2048-token slab, in-process A/B: x1.12 at offset 0, x1.17 at 8K/32K.
 
 

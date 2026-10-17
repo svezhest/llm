@@ -147,7 +147,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   quantized kernel's 32×32 tiles on non-NAX GPUs, fixed by `pfqmm.py`
   (`QWEN_PFQMM=1`: MLX's qmm_t code from the wheel's headers via `metal_kernel`,
   64-row tiles → 9.0 TFLOPS, ×1.10–1.14 per 8-bit matmul, ×1.03–1.28 over 3..8 bits,
-  **bit-identical**; taken only where MLX runs qmm_t, ≥128 rows, (1, M, K) inputs, g64;
+  **bit-identical**; taken only where MLX runs qmm_t, ≥ 64 rows (the last tile is MLX's own 32-row one when ≤ 32 rows are left: 2026-10-17, ×1.06–1.19 GEMM time on short slabs with M % 64 ∈ (0, 32], `docs/perf/2026-10-17/pfqmm_short_slabs.md`), (1, M, K) inputs, g64;
   self-tested at load per (bits, group) on the first module and row count where MLX
   surely runs qmm_t — a key with no such module is logged "untested" and stays off). Full prefill,
   in-process interleaved A/B, old → new (pfqmm + fixed fp16 slab): 8K 17.7 → 14.4 s
@@ -736,7 +736,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_MAX_BATCH` | worker | `16` — rows decoded together (`1` = serialized); Health reports it (1 when the budget holds < 2 typical rows) |
 | `QWEN_BATCH_MEM_GB` / `QWEN_BATCH_RESERVE_TOKENS` | worker | `0` = derived (cap − weights − prefill reserve − 1 GiB − pool if kept; the prompt cache's live bytes count inside it) / `4096` (generation tokens reserved per row at admission) |
 | `QWEN_BATCH_PREFILL_SHARE` | worker | `0.5` — prefill's time share when the batch is full; with B of max_batch rows it is `1-(1-s)·B/max` |
-| `QWEN_PFQMM` | worker | `1` — prefill matmul (`pfqmm.py`): MLX's own qmm_t code with 64-row tiles, ≥128 rows where MLX runs qmm_t; ×1.03–1.28 per matmul (8-bit ×1.10–1.14), bit-identical, self-tested per key at load; `0` = MLX `quantized_matmul`. Needs fp16 scales: `QWEN_FP16=0` leaves it off |
+| `QWEN_PFQMM` | worker | `1` — prefill matmul (`pfqmm.py`): MLX's own qmm_t code with 64-row tiles (a 32-row last tile when ≤ 32 rows are left), ≥ 64 rows where MLX runs qmm_t; ×1.03–1.28 per matmul (8-bit ×1.10–1.14), bit-identical, self-tested per key at load; `0` = MLX `quantized_matmul`. Needs fp16 scales: `QWEN_FP16=0` leaves it off |
 | `QWEN_MRQMM` | worker | `1` — multi-row 8-bit matmul kernel (`mrqmm.py`) for batched decode with 3..16 rows (8-bit affine g64 fp16 modules with N ≥ 512 only); `0` = MLX `quantized_matmul` |
 | `QWEN_GDN_FUSE` | worker | `1` — one matmul for a decode step's 4 GDN in-projections (weights concatenated at load, modules hold views); `0` = 4 launches. Needs fp16 scales (`QWEN_FP16=1`): with `QWEN_FP16=0` it fuses nothing |
 | `QWEN_SDPA_FUSED` | worker | `1` — force MLX's fused SDPA for fp16-KV prefill slabs ≥ 512 over ≥ 32K keys (per call ×0.89 at 2048 × 32K, ×0.6–0.7 at 64K+; 64K prefill −3…5%, −1.3 GB peak) |

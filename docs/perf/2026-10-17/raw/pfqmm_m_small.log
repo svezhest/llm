@@ -1,0 +1,111 @@
+mlx 0.32.3, Apple M1 Max
+check gate/up  M=   32 mlx=qmm_t : all bit-identical
+check gate/up  M=   40 mlx=qmm_t : all bit-identical
+check gate/up  M=   48 mlx=qmm_t : all bit-identical
+check gate/up  M=   56 mlx=qmm_t : all bit-identical
+check gate/up  M=   64 mlx=qmm_t : all bit-identical
+check gate/up  M=   80 mlx=qmm_t : all bit-identical
+check gate/up  M=   96 mlx=qmm_t : all bit-identical
+check gate/up  M=  112 mlx=qmm_t : all bit-identical
+check gate/up  M=  128 mlx=qmm_t : all bit-identical
+check down     M=   32 mlx=splitK: DIFFER: pfqmm,mix
+check down     M=   40 mlx=splitK: DIFFER: pfqmm,mix
+check down     M=   48 mlx=splitK: DIFFER: pfqmm,mix
+check down     M=   56 mlx=splitK: DIFFER: pfqmm,mix
+check down     M=   64 mlx=splitK: DIFFER: pfqmm,mix
+check down     M=   80 mlx=qmm_t : all bit-identical
+check down     M=   96 mlx=qmm_t : all bit-identical
+check down     M=  112 mlx=qmm_t : all bit-identical
+check down     M=  128 mlx=qmm_t : all bit-identical
+check qkv/q    M=   32 mlx=splitK: DIFFER: pfqmm,mix
+check qkv/q    M=   40 mlx=qmm_t : all bit-identical
+check qkv/q    M=   48 mlx=qmm_t : all bit-identical
+check qkv/q    M=   56 mlx=qmm_t : all bit-identical
+check qkv/q    M=   64 mlx=qmm_t : all bit-identical
+check qkv/q    M=   80 mlx=qmm_t : all bit-identical
+check qkv/q    M=   96 mlx=qmm_t : all bit-identical
+check qkv/q    M=  112 mlx=qmm_t : all bit-identical
+check qkv/q    M=  128 mlx=qmm_t : all bit-identical
+check z/out/o  M=   32 mlx=splitK: DIFFER: pfqmm,mix
+check z/out/o  M=   40 mlx=splitK: DIFFER: pfqmm,mix
+check z/out/o  M=   48 mlx=splitK: DIFFER: pfqmm,mix
+check z/out/o  M=   56 mlx=splitK: DIFFER: pfqmm,mix
+check z/out/o  M=   64 mlx=splitK: DIFFER: pfqmm,mix
+check z/out/o  M=   80 mlx=qmm_t : all bit-identical
+check z/out/o  M=   96 mlx=qmm_t : all bit-identical
+check z/out/o  M=  112 mlx=qmm_t : all bit-identical
+check z/out/o  M=  128 mlx=qmm_t : all bit-identical
+check k/v      M=   32 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=   40 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=   48 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=   56 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=   64 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=   80 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=   96 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=  112 mlx=splitK: DIFFER: pfqmm,mix
+check k/v      M=  128 mlx=splitK: DIFFER: pfqmm,mix
+round 1/9 2.7 s
+round 2/9 3.2 s
+round 3/9 3.1 s
+round 4/9 3.0 s
+round 5/9 2.9 s
+round 6/9 3.0 s
+round 7/9 2.9 s
+round 8/9 3.0 s
+round 9/9 2.9 s
+
+gate/up K=4096 N=12288 (64 calls/slab)  ms (TFLOPS), x vs mlx
+  M=   32 [qmm_t] mlx 0.473 (6.80, x1.000) | pfqmm 0.852 (3.78, x0.555) | mix 0.497 (6.48, x0.953)
+  M=   40 [qmm_t] mlx 0.922 (4.37, x1.000) | pfqmm 0.856 (4.70, x1.077) | mix 0.856 (4.70, x1.077)
+  M=   48 [qmm_t] mlx 0.962 (5.02, x1.000) | pfqmm 0.882 (5.48, x1.091) | mix 0.878 (5.50, x1.096)
+  M=   56 [qmm_t] mlx 0.951 (5.93, x1.000) | pfqmm 0.884 (6.38, x1.076) | mix 0.901 (6.26, x1.056)
+  M=   64 [qmm_t] mlx 0.950 (6.78, x1.000) | pfqmm 0.816 (7.89, x1.164) | mix 0.827 (7.79, x1.149)
+  M=   80 [qmm_t] mlx 1.403 (5.74, x1.000) | pfqmm 1.641 (4.91, x0.855) | mix 1.335 (6.03, x1.051)
+  M=   96 [qmm_t] mlx 1.389 (6.96, x1.000) | pfqmm 1.685 (5.74, x0.825) | mix 1.275 (7.58, x1.089)
+  M=  112 [qmm_t] mlx 1.869 (6.03, x1.000) | pfqmm 1.684 (6.70, x1.110) | mix 1.670 (6.75, x1.119)
+  M=  128 [qmm_t] mlx 1.838 (7.01, x1.000) | pfqmm 1.620 (7.95, x1.135) | mix 1.633 (7.89, x1.125)
+
+down K=12288 N=4096 (32 calls/slab)  ms (TFLOPS), x vs mlx
+  M=   32 [splitK] mlx 0.519 (6.21, x1.000) | pfqmm 0.903 (3.57, x0.575) NE | mix 0.552 (5.83, x0.939) NE
+  M=   40 [splitK] mlx 1.076 (3.74, x1.000) | pfqmm 0.938 (4.29, x1.148) NE | mix 0.912 (4.42, x1.180) NE
+  M=   48 [splitK] mlx 1.124 (4.30, x1.000) | pfqmm 0.965 (5.00, x1.164) NE | mix 0.947 (5.10, x1.187) NE
+  M=   56 [splitK] mlx 1.084 (5.20, x1.000) | pfqmm 0.945 (5.96, x1.147) NE | mix 0.951 (5.93, x1.140) NE
+  M=   64 [splitK] mlx 0.978 (6.59, x1.000) | pfqmm 0.839 (7.68, x1.166) NE | mix 0.877 (7.35, x1.116) NE
+  M=   80 [qmm_t] mlx 1.394 (5.78, x1.000) | pfqmm 1.764 (4.57, x0.791) | mix 1.447 (5.56, x0.963)
+  M=   96 [qmm_t] mlx 1.419 (6.81, x1.000) | pfqmm 1.758 (5.50, x0.807) | mix 1.397 (6.92, x1.016)
+  M=  112 [qmm_t] mlx 2.189 (5.15, x1.000) | pfqmm 1.837 (6.14, x1.192) | mix 1.866 (6.04, x1.173)
+  M=  128 [qmm_t] mlx 1.907 (6.76, x1.000) | pfqmm 1.728 (7.46, x1.103) | mix 1.740 (7.41, x1.096)
+
+qkv/q K=4096 N=8192 (32 calls/slab)  ms (TFLOPS), x vs mlx
+  M=   32 [splitK] mlx 0.364 (5.91, x1.000) | pfqmm 0.606 (3.54, x0.600) NE | mix 0.379 (5.66, x0.959) NE
+  M=   40 [qmm_t] mlx 0.647 (4.15, x1.000) | pfqmm 0.632 (4.25, x1.025) | mix 0.638 (4.21, x1.014)
+  M=   48 [qmm_t] mlx 0.654 (4.92, x1.000) | pfqmm 0.626 (5.15, x1.045) | mix 0.628 (5.13, x1.042)
+  M=   56 [qmm_t] mlx 0.636 (5.91, x1.000) | pfqmm 0.634 (5.93, x1.004) | mix 0.626 (6.01, x1.017)
+  M=   64 [qmm_t] mlx 0.675 (6.36, x1.000) | pfqmm 0.577 (7.45, x1.170) | mix 0.598 (7.18, x1.129)
+  M=   80 [qmm_t] mlx 0.926 (5.80, x1.000) | pfqmm 1.144 (4.69, x0.809) | mix 0.909 (5.91, x1.018)
+  M=   96 [qmm_t] mlx 0.973 (6.62, x1.000) | pfqmm 1.133 (5.69, x0.858) | mix 0.883 (7.30, x1.101)
+  M=  112 [qmm_t] mlx 1.304 (5.76, x1.000) | pfqmm 1.161 (6.48, x1.123) | mix 1.195 (6.29, x1.091)
+  M=  128 [qmm_t] mlx 1.316 (6.53, x1.000) | pfqmm 1.125 (7.64, x1.170) | mix 1.164 (7.38, x1.131)
+
+z/out/o K=4096 N=4096 (56 calls/slab)  ms (TFLOPS), x vs mlx
+  M=   32 [splitK] mlx 0.188 (5.71, x1.000) | pfqmm 0.313 (3.44, x0.602) NE | mix 0.185 (5.79, x1.015) NE
+  M=   40 [splitK] mlx 0.349 (3.85, x1.000) | pfqmm 0.311 (4.31, x1.120) NE | mix 0.312 (4.30, x1.117) NE
+  M=   48 [splitK] mlx 0.352 (4.57, x1.000) | pfqmm 0.313 (5.14, x1.124) NE | mix 0.317 (5.07, x1.109) NE
+  M=   56 [splitK] mlx 0.353 (5.32, x1.000) | pfqmm 0.322 (5.84, x1.098) NE | mix 0.331 (5.68, x1.068) NE
+  M=   64 [splitK] mlx 0.325 (6.60, x1.000) | pfqmm 0.318 (6.76, x1.024) NE | mix 0.307 (6.99, x1.059) NE
+  M=   80 [qmm_t] mlx 0.461 (5.82, x1.000) | pfqmm 0.594 (4.52, x0.776) | mix 0.501 (5.36, x0.921)
+  M=   96 [qmm_t] mlx 0.485 (6.64, x1.000) | pfqmm 0.628 (5.13, x0.772) | mix 0.483 (6.67, x1.004)
+  M=  112 [qmm_t] mlx 0.635 (5.92, x1.000) | pfqmm 0.618 (6.08, x1.028) | mix 0.632 (5.95, x1.004)
+  M=  128 [qmm_t] mlx 0.629 (6.83, x1.000) | pfqmm 0.584 (7.35, x1.077) | mix 0.577 (7.44, x1.090)
+
+k/v K=4096 N=1024 (16 calls/slab)  ms (TFLOPS), x vs mlx
+  M=   32 [splitK] mlx 0.051 (5.26, x1.000) | pfqmm 0.084 (3.19, x0.606) NE | mix 0.053 (5.02, x0.954) NE
+  M=   40 [splitK] mlx 0.090 (3.71, x1.000) | pfqmm 0.082 (4.07, x1.096) NE | mix 0.084 (3.98, x1.071) NE
+  M=   48 [splitK] mlx 0.093 (4.31, x1.000) | pfqmm 0.082 (4.89, x1.133) NE | mix 0.082 (4.88, x1.132) NE
+  M=   56 [splitK] mlx 0.098 (4.81, x1.000) | pfqmm 0.082 (5.75, x1.196) NE | mix 0.083 (5.65, x1.175) NE
+  M=   64 [splitK] mlx 0.090 (5.98, x1.000) | pfqmm 0.077 (6.98, x1.166) NE | mix 0.078 (6.87, x1.148) NE
+  M=   80 [splitK] mlx 0.140 (4.80, x1.000) | pfqmm 0.148 (4.53, x0.944) NE | mix 0.122 (5.49, x1.145) NE
+  M=   96 [splitK] mlx 0.133 (6.07, x1.000) | pfqmm 0.149 (5.39, x0.888) NE | mix 0.121 (6.63, x1.093) NE
+  M=  112 [splitK] mlx 0.168 (5.59, x1.000) | pfqmm 0.154 (6.11, x1.093) NE | mix 0.154 (6.09, x1.089) NE
+  M=  128 [splitK] mlx 0.164 (6.55, x1.000) | pfqmm 0.150 (7.16, x1.092) NE | mix 0.152 (7.07, x1.079) NE
+wrote ../../docs/perf/2026-10-17/raw/pfqmm_m_small.json

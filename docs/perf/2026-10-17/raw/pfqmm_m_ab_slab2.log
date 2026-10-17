@@ -1,0 +1,35 @@
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+fast paths: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+pfqmm modules: 249
+offset 0 slab 416 (M % 64 = 32):
+  mlx     957.7 ms  x1.000 vs mlx  x1.003 vs old     434 tok/s  bit-identical  runs 980 946 969 989 882 943
+  old     960.6 ms  x0.997 vs mlx  x1.000 vs old     433 tok/s  bit-identical  runs 1218 927 956 996 879 966
+  new     876.3 ms  x1.093 vs mlx  x1.096 vs old     475 tok/s  bit-identical  runs 1147 845 864 889 841 902
+offset 0 slab 288 (M % 64 = 32):
+  mlx     664.2 ms  x1.000 vs mlx  x1.002 vs old     434 tok/s  bit-identical  runs 653 643 671 676 658 671
+  old     665.2 ms  x0.998 vs mlx  x1.000 vs old     433 tok/s  bit-identical  runs 645 666 665 666 669 664
+  new     617.5 ms  x1.076 vs mlx  x1.077 vs old     466 tok/s  bit-identical  runs 593 621 618 617 610 619
+offset 0 slab 432 (M % 64 = 48):
+  mlx     963.4 ms  x1.000 vs mlx  x0.894 vs old     448 tok/s  bit-identical  runs 937 962 945 965 966 973
+  old     861.6 ms  x1.118 vs mlx  x1.000 vs old     501 tok/s  bit-identical  runs 829 887 861 878 860 862
+  new     882.2 ms  x1.092 vs mlx  x0.977 vs old     490 tok/s  bit-identical  runs 848 898 884 885 876 880
+offset 0 slab 2048 (M % 64 = 0):
+  mlx    4770.5 ms  x1.000 vs mlx  x0.832 vs old     429 tok/s  bit-identical  runs 4773 4868 4768 4737 4659 4794
+  old    3970.5 ms  x1.201 vs mlx  x1.000 vs old     516 tok/s  bit-identical  runs 3950 4168 3852 3850 3991 4102
+  new    3928.3 ms  x1.214 vs mlx  x1.011 vs old     521 tok/s  bit-identical  runs 3958 3981 3821 3899 3861 4030
+offset 12288 slab 416 (M % 64 = 32):
+  mlx    1116.7 ms  x1.000 vs mlx  x1.005 vs old     373 tok/s  bit-identical  runs 1103 1116 1117 1202 1107 1203
+  old    1121.9 ms  x0.995 vs mlx  x1.000 vs old     371 tok/s  bit-identical  runs 1121 1123 1092 1218 1070 1235
+  new    1033.1 ms  x1.081 vs mlx  x1.086 vs old     403 tok/s  bit-identical  runs 1046 1025 989 1042 991 1081
+offset 12288 slab 288 (M % 64 = 32):
+  mlx     790.0 ms  x1.000 vs mlx  x1.008 vs old     365 tok/s  bit-identical  runs 832 846 780 800 775 779
+  old     796.7 ms  x0.992 vs mlx  x1.000 vs old     362 tok/s  bit-identical  runs 790 861 775 815 773 803
+  new     754.8 ms  x1.047 vs mlx  x1.055 vs old     382 tok/s  bit-identical  runs 718 794 752 767 740 757
+offset 12288 slab 432 (M % 64 = 48):
+  mlx    1228.1 ms  x1.000 vs mlx  x0.913 vs old     352 tok/s  bit-identical  runs 1153 1251 1173 1282 1205 1348
+  old    1121.5 ms  x1.095 vs mlx  x1.000 vs old     385 tok/s  bit-identical  runs 1043 1192 1051 1203 1050 1292
+  new    1093.1 ms  x1.123 vs mlx  x1.026 vs old     395 tok/s  bit-identical  runs 1057 1122 1080 1106 1061 1147
+offset 12288 slab 2048 (M % 64 = 0):
+  mlx    6194.9 ms  x1.000 vs mlx  x0.843 vs old     331 tok/s  bit-identical  runs 6105 6102 6259 6291 6131 6268
+  old    5220.8 ms  x1.187 vs mlx  x1.000 vs old     392 tok/s  bit-identical  runs 5085 5236 5211 5258 5201 5231
+  new    5142.2 ms  x1.205 vs mlx  x1.015 vs old     398 tok/s  bit-identical  runs 5056 5110 5149 5166 5145 5140

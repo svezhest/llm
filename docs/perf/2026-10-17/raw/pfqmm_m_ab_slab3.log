@@ -1,0 +1,43 @@
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+fast paths: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+pfqmm modules: 249
+offset 12288 slab 416 (M % 64 = 32):
+  mlx     869.0 ms  x1.000 vs mlx  x1.045 vs old     479 tok/s  bit-identical (7/7 calls)  runs 971 977 869 869 867 868
+  old     907.7 ms  x0.957 vs mlx  x1.000 vs old     458 tok/s  bit-identical (7/7 calls)  runs 868 960 935 981 881 863
+  new     816.2 ms  x1.065 vs mlx  x1.112 vs old     510 tok/s  bit-identical (7/7 calls)  runs 808 832 826 814 818 810
+offset 12288 slab 288 (M % 64 = 32):
+  mlx     645.1 ms  x1.000 vs mlx  x0.994 vs old     446 tok/s  bit-identical (7/7 calls)  runs 648 623 642 671 652 619
+  old     641.3 ms  x1.006 vs mlx  x1.000 vs old     449 tok/s  bit-identical (7/7 calls)  runs 612 642 635 640 653 674
+  new     586.4 ms  x1.100 vs mlx  x1.094 vs old     491 tok/s  bit-identical (7/7 calls)  runs 583 586 588 586 588 587
+offset 12288 slab 600 (M % 64 = 24):
+  mlx    1415.6 ms  x1.000 vs mlx  x0.876 vs old     424 tok/s  bit-identical (7/7 calls)  runs 1338 1344 1416 1415 1459 1451
+  old    1240.1 ms  x1.142 vs mlx  x1.000 vs old     484 tok/s  bit-identical (7/7 calls)  runs 1220 1217 1216 1260 1270 1299
+  new    1207.6 ms  x1.172 vs mlx  x1.027 vs old     497 tok/s  bit-identical (7/7 calls)  runs 1184 1184 1180 1231 1234 1238
+offset 12288 slab 432 (M % 64 = 48):
+  mlx    1070.1 ms  x1.000 vs mlx  x0.859 vs old     404 tok/s  bit-identical (7/7 calls)  runs 1068 1061 1073 1069 1071 1081
+  old     918.9 ms  x1.164 vs mlx  x1.000 vs old     470 tok/s  bit-identical (7/7 calls)  runs 919 917 916 919 931 922
+  new     919.7 ms  x1.163 vs mlx  x0.999 vs old     470 tok/s  bit-identical (7/7 calls)  runs 919 921 925 918 929 917
+offset 12288 slab 2048 (M % 64 = 0):
+  mlx    5080.1 ms  x1.000 vs mlx  x0.844 vs old     403 tok/s  bit-identical (7/7 calls)  runs 5012 5052 5057 5139 5103 5144
+  old    4285.4 ms  x1.185 vs mlx  x1.000 vs old     478 tok/s  bit-identical (7/7 calls)  runs 4236 4256 4279 4292 4311 4332
+  new    4276.2 ms  x1.188 vs mlx  x1.002 vs old     479 tok/s  bit-identical (7/7 calls)  runs 4247 4265 4261 4289 4288 4338
+offset 0 slab 416 (M % 64 = 32):
+  mlx     968.8 ms  x1.000 vs mlx  x1.022 vs old     429 tok/s  bit-identical (7/7 calls)  runs 928 971 1022 943 1006 966
+  old     989.7 ms  x0.979 vs mlx  x1.000 vs old     420 tok/s  bit-identical (7/7 calls)  runs 1004 971 961 993 1008 987
+  new     793.8 ms  x1.221 vs mlx  x1.247 vs old     524 tok/s  bit-identical (7/7 calls)  runs 790 793 795 790 820 813
+offset 0 slab 288 (M % 64 = 32):
+  mlx     687.1 ms  x1.000 vs mlx  x1.000 vs old     419 tok/s  bit-identical (7/7 calls)  runs 683 693 678 671 705 691
+  old     687.2 ms  x1.000 vs mlx  x1.000 vs old     419 tok/s  bit-identical (7/7 calls)  runs 698 683 675 664 702 692
+  new     563.4 ms  x1.219 vs mlx  x1.220 vs old     511 tok/s  bit-identical (7/7 calls)  runs 565 568 576 561 562 552
+offset 0 slab 600 (M % 64 = 24):
+  mlx    1458.4 ms  x1.000 vs mlx  x0.838 vs old     411 tok/s  bit-identical (7/7 calls)  runs 1427 1504 1479 1437 1530 1410
+  old    1222.8 ms  x1.193 vs mlx  x1.000 vs old     491 tok/s  bit-identical (7/7 calls)  runs 1225 1209 1221 1217 1229 1260
+  new    1201.8 ms  x1.214 vs mlx  x1.017 vs old     499 tok/s  bit-identical (7/7 calls)  runs 1193 1193 1231 1239 1210 1186
+offset 0 slab 432 (M % 64 = 48):
+  mlx    1055.4 ms  x1.000 vs mlx  x0.820 vs old     409 tok/s  bit-identical (7/7 calls)  runs 1054 1045 1089 1045 1074 1057
+  old     865.6 ms  x1.219 vs mlx  x1.000 vs old     499 tok/s  bit-identical (7/7 calls)  runs 875 880 862 862 869 856
+  new     860.1 ms  x1.227 vs mlx  x1.006 vs old     502 tok/s  bit-identical (7/7 calls)  runs 856 864 870 855 880 856
+offset 0 slab 2048 (M % 64 = 0):
+  mlx    5090.9 ms  x1.000 vs mlx  x0.837 vs old     402 tok/s  bit-identical (7/7 calls)  runs 4817 4889 5067 5114 5242 5297
+  old    4261.9 ms  x1.195 vs mlx  x1.000 vs old     481 tok/s  bit-identical (7/7 calls)  runs 4047 4206 4174 4318 4321 4460
+  new    4220.8 ms  x1.206 vs mlx  x1.010 vs old     485 tok/s  bit-identical (7/7 calls)  runs 3959 4125 4166 4275 4315 4384

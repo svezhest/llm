@@ -1,0 +1,210 @@
+mlx v0.32.3 mlx/backend/metal/quantized.cpp — excerpts behind pfqmm._mlx_uses_qmm
+source: https://raw.githubusercontent.com/ml-explore/mlx/v0.32.3/mlx/backend/metal/quantized.cpp
+sha256 of the full file: 36b79607ee01bc213511dcdad590b2dc3b96099300551cbc3e7e6c7e13ba5982  (2297 lines, fetched 2026-10-17)
+
+----- lines 89-136 -----
+   89  inline int get_qmv_batch_limit(int D, int O, metal::Device& d) {
+   90    auto arch_size = d.get_architecture().back();
+   91    auto arch_gen = d.get_architecture_gen();
+   92    if (arch_gen >= 17 && arch_size != 'd') {
+   93      if (D <= 2048 && O <= 2048) {
+   94        return 33;
+   95      } else if (D <= 4096 && O <= 4096) {
+   96        return 25;
+   97      } else {
+   98        return 13;
+   99      }
+  100    } else if (arch_gen >= 15 && arch_size != 'd') {
+  101      if (D <= 2048 && O <= 2048) {
+  102        return 13;
+  103      } else if (D <= 4096 && O <= 4096) {
+  104        return 15;
+  105      } else {
+  106        return 13;
+  107      }
+  108    } else if (arch_gen >= 13) {
+  109      switch (arch_size) {
+  110        case 'd':
+  111          if (D <= 2048 && O <= 2048) {
+  112            return 32;
+  113          } else if (D <= 4096 && O <= 4096) {
+  114            return 18;
+  115          } else {
+  116            return 12;
+  117          }
+  118        default:
+  119          if (D <= 2048 && O <= 2048) {
+  120            return 14;
+  121          } else if (D <= 4096 && O <= 4096) {
+  122            return 10;
+  123          } else {
+  124            return 6;
+  125          }
+  126      }
+  127    } else {
+  128      switch (arch_size) {
+  129        case 'd':
+  130          if (D <= 2048 && O <= 2048) {
+  131            return 32;
+  132          } else if (D <= 4096 && O <= 4096) {
+  133            return 18;
+  134          } else {
+  135            return 12;
+  136          }
+
+----- lines 1042-1092 -----
+ 1042  void qmm(
+ 1043      const array& x,
+ 1044      const array& w,
+ 1045      const array& scales,
+ 1046      const std::optional<array>& biases,
+ 1047      const std::optional<array>& global_scale,
+ 1048      array& out,
+ 1049      bool transpose,
+ 1050      int group_size,
+ 1051      int bits,
+ 1052      int M,
+ 1053      int N,
+ 1054      int K,
+ 1055      metal::Device& d,
+ 1056      const Stream& s,
+ 1057      const std::string& mode) {
+ 1058    assert(
+ 1059        (!global_scale || (transpose && !biases)) &&
+ 1060        "qmm global scale requires transposed weights without biases");
+ 1061  
+ 1062    bool has_nax_kernel =
+ 1063        metal::is_nax_available() && (transpose || mode == "affine");
+ 1064    bool nax_aligned = (K % 64 == 0) && (transpose || N % 64 == 0);
+ 1065    if (has_nax_kernel && nax_aligned &&
+ 1066        (env::enable_tf32() || x.dtype() != float32)) {
+ 1067      return qmm_nax(
+ 1068          /* const array& x = */ x,
+ 1069          /* const array& w = */ w,
+ 1070          /* const array& scales = */ scales,
+ 1071          /* const std::optional<array>& biases = */ biases,
+ 1072          /* const std::optional<array>& global_scale = */ global_scale,
+ 1073          /* array& out = */ out,
+ 1074          /* bool transpose = */ transpose,
+ 1075          /* int group_size = */ group_size,
+ 1076          /* int bits = */ bits,
+ 1077          /* int M = */ M,
+ 1078          /* int N = */ N,
+ 1079          /* int K = */ K,
+ 1080          /* metal::Device& d = */ d,
+ 1081          /* const Stream& s = */ s,
+ 1082          /* const std::string& mode = */ mode);
+ 1083    }
+ 1084  
+ 1085    int B = out.size() / M / N;
+ 1086  
+ 1087    int wm = 2;
+ 1088    int wn = 2;
+ 1089    int bm = 32;
+ 1090    int bn = 32;
+ 1091    MTL::Size group_dims(32, wn, wm);
+ 1092    MTL::Size grid_dims((N + bn - 1) / bn, (M + bm - 1) / bm, B);
+
+----- lines 1152-1201 -----
+ 1152  void qmm_splitk(
+ 1153      const array& x,
+ 1154      const array& w,
+ 1155      const array& scales,
+ 1156      const std::optional<array>& biases,
+ 1157      array& out,
+ 1158      int group_size,
+ 1159      int bits,
+ 1160      int M,
+ 1161      int N,
+ 1162      int K,
+ 1163      metal::Device& d,
+ 1164      const Stream& s,
+ 1165      const std::string& mode) {
+ 1166    // Choose split_k to target ~512 threadgroups
+ 1167    int bm = 32, bn = 32;
+ 1168    int n_tiles = (N + bn - 1) / bn;
+ 1169    int m_tiles = (M + bm - 1) / bm;
+ 1170    int current_tgs = n_tiles * m_tiles;
+ 1171    int split_k = std::max(1, 512 / current_tgs);
+ 1172  
+ 1173    // Each K partition must be a whole number of BK-wide (32) K-tiles as well as
+ 1174    // whole quantization groups. The qmm_t_splitk kernels tile K by BK=32 and do
+ 1175    // not bound the K dimension, so a partition smaller than BK (e.g. nvfp4's
+ 1176    // group_size=16) would over-read into the next group's weights/scales.
+ 1177    int k_align = group_size > 32 ? group_size : 32;
+ 1178    split_k = std::min(split_k, K / k_align);
+ 1179  
+ 1180    // Ensure K divides evenly by split_k * k_align
+ 1181    while (split_k > 1 && (K % (split_k * k_align) != 0)) {
+ 1182      split_k--;
+ 1183    }
+ 1184    if (split_k <= 1) {
+ 1185      return qmm(
+ 1186          x,
+ 1187          w,
+ 1188          scales,
+ 1189          biases,
+ 1190          std::nullopt,
+ 1191          out,
+ 1192          true,
+ 1193          group_size,
+ 1194          bits,
+ 1195          M,
+ 1196          N,
+ 1197          K,
+ 1198          d,
+ 1199          s,
+ 1200          mode);
+ 1201    }
+
+----- lines 1868-1917 -----
+ 1868  void QuantizedMatmul::eval_gpu(const std::vector<array>& inputs, array& out) {
+ 1869    auto& s = stream();
+ 1870    auto& d = metal::device(s.device);
+ 1871  
+ 1872    out.set_data(allocator::malloc(out.nbytes()));
+ 1873  
+ 1874    // Make sure the last two dims of x and w, s, b are contiguous. This should
+ 1875    // be relaxed for x.
+ 1876    array x = ensure_row_contiguous_matrix(inputs[0], d, s);
+ 1877    array w = ensure_row_contiguous_matrix(inputs[1], d, s);
+ 1878    array scales = ensure_row_contiguous_matrix(inputs[2], d, s);
+ 1879    std::optional<array> biases = std::nullopt;
+ 1880    if (inputs.size() == 4) {
+ 1881      biases = ensure_row_contiguous_matrix(inputs[3], d, s);
+ 1882    }
+ 1883  
+ 1884    // Extract the matmul shapes
+ 1885    bool non_batched = w.ndim() == 2 && x.flags().row_contiguous;
+ 1886    int K = x.shape(-1);
+ 1887    int M = non_batched ? x.size() / K : x.shape(-2);
+ 1888    int N = out.shape(-1);
+ 1889  
+ 1890    int vector_limit = transpose_ ? get_qmv_batch_limit(K, N, d) : 4;
+ 1891    auto mode = quantization_mode_to_string(mode_);
+ 1892    // It is a matrix matrix product.
+ 1893    if (M >= vector_limit) {
+ 1894      // Use split-K qmm for small M with transposed weights (non-batched only)
+ 1895      int B = out.size() / M / N;
+ 1896      if (transpose_ && B == 1) {
+ 1897        qmm_splitk(
+ 1898            x, w, scales, biases, out, group_size_, bits_, M, N, K, d, s, mode);
+ 1899        return;
+ 1900      }
+ 1901      qmm(x,
+ 1902          w,
+ 1903          scales,
+ 1904          biases,
+ 1905          std::nullopt,
+ 1906          out,
+ 1907          transpose_,
+ 1908          group_size_,
+ 1909          bits_,
+ 1910          M,
+ 1911          N,
+ 1912          K,
+ 1913          d,
+ 1914          s,
+ 1915          mode);
+ 1916      return;
+ 1917    }

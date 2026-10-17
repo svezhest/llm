@@ -1,5 +1,5 @@
 """Prefill quantized matmul on Apple GPUs without NAX (M1/M2): MLX's own
-qmm_t with 64-row tiles.
+qmm_t with 64-row tiles (and MLX's 32-row tile for a short last one).
 
 On these GPUs mx.quantized_matmul runs a transposed qmm with 32x32 output
 tiles (BM = BN = BK = 32, 2x2 simdgroups of 16x16). For prefill-sized row
@@ -18,9 +18,18 @@ per (bits, group size), on a module and row count where MLX surely runs
 qmm_t; a key it cannot check that way, or that differs (e.g. an mlx bump
 that changes qmm_t), stays off.
 
+Mixed last tile (2026-10-17): when M % 64 leaves <= 32 rows, the last row of
+threadgroups runs the 32-row tile (MLX's own 32x32x32, 2x2 simdgroups of
+16x16) instead of a half-empty 64-row one, so the padding never exceeds
+MLX's and every M >= 64 where MLX runs qmm_t takes the kernel (before, M in
+(64k, 64k + 32] below ~512 rows went to quantized_matmul: x0.8-0.9 there).
+Short slabs, 9B 8-bit, slab-weighted GEMM time vs quantized_matmul: x1.11-1.20
+at M = 96 / 160 / 288 / 400 / 416, +3.5-6% over the old kernel at 544 / 600 /
+800, equal at multiples of 64 (docs/perf/2026-10-17/pfqmm_short_slabs.md).
+
 Used for fp16 x / scales / biases, affine quantization with bits in
 {3,4,5,6,8} and group size 64 (the tested ones), K % 32 == 0, N % 32 == 0,
-x of shape (1, ..., 1, M, K) (row-contiguous as MLX sees it). Everything
+x of shape (1, ..., 1, M, K) (row-contiguous as MLX sees it), M >= 64. Everything
 else goes to mx.quantized_matmul unchanged. QWEN_FP16=0 (bf16 scales)
 leaves it off.
 
@@ -42,23 +51,35 @@ BM, BK, BN = 64, 32, 32
 BITS = (3, 4, 5, 6, 8)          # 2-bit / other group sizes: untested, left to MLX
 GROUPS = (64,)
 TEST_MIN_ROWS, TEST_MAX_ROWS = 256, 4096   # the load self-test's row range
+MIN_ROWS = 64                 # below: MLX's own 32-row tiles (or qmv / split-K); <= ~5% to gain there
+# self-test row offsets past a multiple of 64: full tiles, a last 32-row tile
+# (ragged, full) and a last ragged 64-row tile
+TEST_TAILS = (0, 8, 32, 40)
 
 _SRC = r"""
   constexpr int BK_padded = BK + 16 / sizeof(T);
   threadgroup T Xs[BM * BK_padded];
   threadgroup T Ws[BN * BK_padded];
-  pf_qmm_t<T, GS, BITS, BM, BK, BN>(w, scales, biases, x, y, Xs, Ws, dims[0], dims[1], dims[2],
-      threadgroup_position_in_grid, simdgroup_index_in_threadgroup, thread_index_in_simdgroup);
+  const int M = dims[0], K = dims[1], N = dims[2];
+  const int y_row = int(threadgroup_position_in_grid.y) * BM;
+  const int y_col = int(threadgroup_position_in_grid.x) * BN;
+  if (M - y_row <= BM / 2) {      // the last tile, <= 32 rows left: MLX's own 32-row tile
+    pf_qmm_t<T, GS, BITS, BM / 2, BK, BN>(w, scales, biases, x, y, Xs, Ws, M, K, N, y_row, y_col,
+        simdgroup_index_in_threadgroup, thread_index_in_simdgroup);
+  } else {
+    pf_qmm_t<T, GS, BITS, BM, BK, BN>(w, scales, biases, x, y, Xs, Ws, M, K, N, y_row, y_col,
+        simdgroup_index_in_threadgroup, thread_index_in_simdgroup);
+  }
 """
 
 # mlx 0.32.3 kernels/quantized.h qmm_t_impl (aligned N, K % BK == 0, WM = WN = 2),
-# with the dimensions as plain ints.
+# with the dimensions as plain ints and the tile origin passed in.
 _IMPL = r"""
 template <typename T, int group_size, int bits, int BM, int BK, int BN>
 METAL_FUNC void pf_qmm_t(
     const device uint32_t* w, const device T* scales, const device T* biases,
     const device T* x, device T* y, threadgroup T* Xs, threadgroup T* Ws,
-    int M, int K, int N, uint3 tid, uint simd_gid, uint simd_lid) {
+    int M, int K, int N, int y_row, int y_col, uint simd_gid, uint simd_lid) {
   constexpr int WM = 2;
   constexpr int WN = 2;
   constexpr int pack_factor = get_pack_factor<bits, 8>();
@@ -69,8 +90,6 @@ METAL_FUNC void pf_qmm_t(
   using loader_w_t = QuantizedBlockLoader<T, BN, BK, BK_padded, 1, WM * WN * SIMD_SIZE, group_size, bits>;
   const int K_w = K * bytes_per_pack / pack_factor;
   const int K_g = K / group_size;
-  const int y_row = tid.y * BM;
-  const int y_col = tid.x * BN;
   auto wl = (const device uint8_t*)w;
   x += y_row * static_cast<int64_t>(K);
   wl += y_col * K_w;
@@ -160,7 +179,7 @@ def _kernel(bits: int, gs: int):
                 consts = (f"using T = half;\n  constexpr int BM = {BM}, BK = {BK}, BN = {BN}, "
                           f"BITS = {bits}, GS = {gs};\n")
                 k = _KERNELS[key] = mx.fast.metal_kernel(
-                    name=f"pfqmm_b{bits}_g{gs}_{BM}x{BK}x{BN}",
+                    name=f"pfqmm_b{bits}_g{gs}_{BM}x{BK}x{BN}_mix",
                     input_names=["w", "scales", "biases", "x", "dims"], output_names=["y"],
                     source=consts + _SRC, header=_header())
     return k
@@ -188,7 +207,7 @@ def pfqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, bits: in
 def _mlx_uses_qmm(M: int, K: int, N: int, gs: int) -> bool:
     """mlx QuantizedMatmul::eval_gpu (transposed, non-batched) takes qmm_t for
     these rows: not a qmv (M below the vector limit, which is <= 33 on every
-    device; `_use` needs M >= 128 anyway) and not split-K (qmm_splitk: split = 512 // 32x32 tiles, capped
+    device; `_use` needs M >= MIN_ROWS = 64 anyway) and not split-K (qmm_splitk: split = 512 // 32x32 tiles, capped
     by K's groups and K % (split * group) == 0, qmm when it ends <= 1)."""
     if M < 32:
         return False
@@ -212,9 +231,9 @@ def supported(m) -> bool:
 
 
 def _use(m, x) -> bool:
-    """fp16 rows that MLX would run through qmm_t, and not so few past a
-    multiple of 64 that the half-empty last tile eats the gain (64-row tiles
-    are x1.10-1.14 per row; M = 96 is x0.8)."""
+    """fp16 rows, >= MIN_ROWS of them, that MLX would run through qmm_t. The
+    last tile is never padded past MLX's own (32-row tile when <= 32 rows
+    are left), so no padding rule is needed."""
     if x.dtype != mx.float16 or x.ndim < 2:
         return False
     K = x.shape[-1]
@@ -223,8 +242,7 @@ def _use(m, x) -> bool:
         # leading dims > 1: MLX may see a non-row-contiguous x and run a
         # batched qmm / qmv by shape[-2] instead of the qmm_t mirrored here
         return False
-    return (M >= 128 and -(-M // 64) * 64 <= 1.06 * (-(-M // 32) * 32)
-            and _mlx_uses_qmm(M, K, m["weight"].shape[0], m.group_size))
+    return M >= MIN_ROWS and _mlx_uses_qmm(M, K, m["weight"].shape[0], m.group_size)
 
 
 ACTIVE = True                 # runtime switch (in-process A/B); install() sets the modules up
@@ -246,20 +264,21 @@ def enabled() -> bool:
 def _test_rows(K: int, N: int, gs: int) -> int | None:
     """Rows at which the load self-test can compare against qmm_t: the
     smallest multiple of 64 in [TEST_MIN_ROWS, TEST_MAX_ROWS] where MLX runs
-    qmm_t (no split-K) both there and 8 rows further (a ragged tile); None
-    when this shape never does in that range."""
+    qmm_t (no split-K) there and at every TEST_TAILS offset further (the
+    last-tile kinds); None when this shape never does in that range."""
     for M in range(TEST_MIN_ROWS, TEST_MAX_ROWS + 1, 64):
-        if _mlx_uses_qmm(M, K, N, gs) and _mlx_uses_qmm(M + 8, K, N, gs):
+        if all(_mlx_uses_qmm(M + t, K, N, gs) for t in TEST_TAILS):
             return M
     return None
 
 
 def _selftest(m, M: int) -> str | None:
     """None when the kernel matches mx.quantized_matmul bit for bit on this
-    module at M rows (a full 64-row tile) and M + 8 (a ragged one), else why
-    not. M must be one where MLX runs qmm_t (`_test_rows`): never vacuous."""
+    module at M rows (full 64-row tiles), M + 8 / M + 32 (a last 32-row tile,
+    ragged / full) and M + 40 (a last ragged 64-row tile), else why not. M
+    must be one where MLX runs qmm_t (`_test_rows`): never vacuous."""
     N, K = m["weight"].shape[0], m["weight"].shape[1] * 32 // m.bits
-    for rows in (M, M + 8):
+    for rows in (M + t for t in TEST_TAILS):
         if not _mlx_uses_qmm(rows, K, N, m.group_size):
             raise ValueError(f"self-test at {rows} rows: MLX would not run qmm_t (K={K} N={N})")
         x = (mx.random.normal((1, rows, K), key=mx.random.key(rows)) * 0.5).astype(mx.float16)
@@ -311,7 +330,7 @@ def install(model) -> int:
         except Exception as e:  # noqa: BLE001 — no headers / compile error: stay on qmm
             why = f"{type(e).__name__}: {str(e)[:300]}"
         status[(bits, gs)] = ("failed", why) if why else (
-            "tested", f"{n} K={K} N={N} M={M}/{M + 8}")
+            "tested", f"{n} K={K} N={N} M={'/'.join(str(M + t) for t in TEST_TAILS)}")
     covered = []
     for key, ms in by_key.items():
         if status[key][0] == "tested":
@@ -325,7 +344,7 @@ def install(model) -> int:
         (log.info if st == "tested" else log.warning)(
             "pfqmm %d-bit g%d: %s, %d modules %s (%s)", bits, gs, st, len(by_key[(bits, gs)]),
             "on" if st == "tested" else "left on quantized_matmul", detail)
-    log.info("pfqmm: %d modules on the 64-row prefill qmm (%s)", len(covered),
+    log.info("pfqmm: %d modules on the 64-row prefill qmm, >= %d rows (%s)", len(covered), MIN_ROWS,
              ", ".join(f"{b}-bit g{g} {st}" for (b, g), (st, _) in sorted(status.items())))
     return len(covered)
 
