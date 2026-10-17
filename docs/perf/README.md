@@ -37,6 +37,18 @@ distilled version; these are the evidence.
   `design/packed_prefill.md` (varlen/packed prefill feasibility: no-go), sims `evict_sim.py`,
   `chain_ckpts_sim.py`; reviews `reviews/chain_evict.md`, `chain_evict_fixes.md`, `rattn.md`.
 
+- `2026-10-17/` — follow-ups on the agentic load: `REPORT-appworld-run-1017.md` (the user's
+  second AppWorld run: 8 → 6 processes, the 115K episode, swap, cross-version divergence),
+  `reply_kv_gpu.md` (the cache keeps the decoded reply's KV, `QWEN_PROMPT_CACHE_REPLY`, default on:
+  top-1 99.88 % / KL 5.8e-5 vs cold, −21 % prefilled tokens, +6.5 % requests/min; raw
+  `raw/reply_kv_*`), `replay_batch1.md` (determinism costs: `QWEN_MAX_BATCH=2` byte-identical
+  replies at −11 % requests/min, B=1 −22 %; two B=16 runs share 77 % of replies), `slabs.md`
+  (slab histogram and cost on the agentic load: a third of slabs are 1–8 tokens at ~100 ms each,
+  merging them ≈ +2 %), `pfqmm_short_slabs.md` (mixed last tile: GEMMs ×1.08–1.19 on 64–416-row
+  slabs, bit-identical), designs `design/reply_kv.md`, `design/partial_store.md` (store on cancel
+  mid-prefill, chain policy for long fresh entries), `design/packed_prefill.md`; reviews under
+  `reviews/`.
+
 Tools live in `scripts/perf/` (`prof/` in-process profilers and A/B scripts run from
 `src/worker` with its venv, `microbench/` kernel-level microbenchmarks and the batching
 prototype, `final/` the end-to-end driver + table builders). Scripts that write files use
