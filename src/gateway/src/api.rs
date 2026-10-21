@@ -69,6 +69,64 @@ fn usage_json(u: &pb::Usage) -> Value {
     })
 }
 
+/// A log-probability as JSON: the f32's shortest decimal (what the worker computed,
+/// without the f64 widening's noise digits); a non-finite value (never from the
+/// worker's fp32 log-softmax of raw logits) is null.
+fn lp_json(x: f32) -> Value {
+    if !x.is_finite() {
+        return Value::Null;
+    }
+    x.to_string().parse::<f64>().map_or(Value::Null, Value::from)
+}
+
+/// OpenAI's `logprobs.content` entries: one per generated token, in order (reasoning,
+/// answer and the final EOS alike); `bytes` = the UTF-8 of `token` (the worker's
+/// `decode([id])`, so a token that is part of a multi-byte character shows U+FFFD).
+fn content_logprobs_json(lp: &[pb::TokenLogprob]) -> Vec<Value> {
+    lp.iter()
+        .map(|t| {
+            let top: Vec<Value> = t.top.iter()
+                .map(|x| json!({"token": x.token, "logprob": lp_json(x.logprob),
+                                "bytes": x.token.as_bytes()}))
+                .collect();
+            json!({"token": t.token, "logprob": lp_json(t.logprob), "bytes": t.token.as_bytes(),
+                   "top_logprobs": top})
+        })
+        .collect()
+}
+
+/// Teacher forcing over the prompt: `prompt_logprobs` (one entry per prompt token, null
+/// where it was not scored: below `first` — position 0, and up to the depth of a
+/// prompt-cache hit) and `prompt_logprobs_messages` (per assistant span [start, end):
+/// how many of its positions were scored and the sum of their log p; null sum when
+/// none was).
+fn prompt_logprobs_json(p: &pb::PromptLogprobs) -> (Value, Value) {
+    let n = p.tokens.len();
+    let first = p.first as usize;
+    let at = |i: usize| i.checked_sub(first).and_then(|k| p.logprobs.get(k)).copied();
+    let positions: Vec<Value> = p.tokens.iter().enumerate()
+        .map(|(i, t)| match at(i) {
+            Some(lp) => json!({"token": t.token, "token_id": t.token_id, "logprob": lp_json(lp)}),
+            None => Value::Null,
+        })
+        .collect();
+    let spans: Vec<Value> = p.spans.iter()
+        .map(|s| {
+            let (a, b) = (s.start as usize, (s.end as usize).min(n));
+            let scored: Vec<f32> = (a..b.max(a)).filter_map(at).collect();
+            let sum = if scored.is_empty() {
+                Value::Null
+            } else {
+                Value::from(scored.iter().map(|&x| f64::from(x)).sum::<f64>())
+            };
+            json!({"message": s.message, "role": "assistant", "start": s.start, "end": s.end,
+                   "tokens": s.end.saturating_sub(s.start), "scored": scored.len(),
+                   "logprob": sum})
+        })
+        .collect();
+    (Value::Array(positions), Value::Array(spans))
+}
+
 fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -76,8 +134,10 @@ fn now_unix() -> u64 {
 /// What the answer shows besides the generation itself.
 #[derive(Clone, Copy)]
 struct Show {
-    reasoning: bool, // include_reasoning (vLLM; default true)
-    usage: bool,     // stream_options.include_usage
+    reasoning: bool,       // include_reasoning (vLLM; default true)
+    usage: bool,           // stream_options.include_usage
+    logprobs: bool,        // logprobs: true -> choices[].logprobs.content
+    prompt_logprobs: bool, // prompt_logprobs -> prompt_logprobs + prompt_logprobs_messages
 }
 
 // ---- handlers -------------------------------------------------------------
@@ -172,6 +232,8 @@ pub async fn chat_completions(State(st): State<AppState>, body: Bytes) -> Respon
         show: Show {
             reasoning: req.include_reasoning.unwrap_or(true),
             usage: req.stream_options.as_ref().is_some_and(|o| o.include_usage),
+            logprobs: req.logprobs_on(),
+            prompt_logprobs: req.prompt_logprobs_on(),
         },
         t0,
         admit,
@@ -340,7 +402,7 @@ async fn stream_response(
         if let Some(j) = &st.journal {
             let mut resp = acc.response(&id, &model, created, show);
             resp["stream"] = json!(true);
-            j.write(&id, &body, resp);
+            j.write(&id, &body, for_journal(resp));
         }
         yield Ok(SseEvent::default().data("[DONE]"));
     };
@@ -348,6 +410,28 @@ async fn stream_response(
     // Comment lines while nothing else is sent (waiting for a slot, a long prefill) so
     // clients and proxies do not time the stream out; OpenAI clients skip them.
     Sse::new(body).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("keep-alive"))
+}
+
+/// The journal keeps a response without its per-token log-probabilities (a 30K-token
+/// prompt is ~2 MB of `prompt_logprobs`, a 4K answer with top_logprobs 20 several MB of
+/// `logprobs.content`, and attribution runs send thousands): `prompt_logprobs` becomes
+/// `prompt_logprobs_positions` = its length, `choices[0].logprobs` becomes
+/// `{"tokens": n, "logprob": sum}`; the per-message sums stay.
+fn for_journal(mut resp: Value) -> Value {
+    let Some(o) = resp.as_object_mut() else { return resp };
+    if let Some(Value::Array(a)) = o.get("prompt_logprobs") {
+        let n = a.len();
+        o.remove("prompt_logprobs");
+        o.insert("prompt_logprobs_positions".into(), json!(n));
+    }
+    let lp = o.get_mut("choices").and_then(|c| c.get_mut(0)).and_then(|c| c.get_mut("logprobs"));
+    if let Some(lp) = lp {
+        if let Some(Value::Array(a)) = lp.get("content") {
+            let sum: f64 = a.iter().filter_map(|t| t["logprob"].as_f64()).sum();
+            *lp = json!({"tokens": a.len(), "logprob": sum});
+        }
+    }
+    resp
 }
 
 /// An error frame in the stream; `busy` (the worker refused for load) carries 503.
@@ -368,26 +452,64 @@ fn event_to_sse(
     t0: &Instant,
     show: Show,
 ) -> Vec<SseEvent> {
+    event_chunks(id, model, created, ev, ttft_done, t0, show)
+        .into_iter()
+        .map(|body| SseEvent::default().data(body.to_string()))
+        .collect()
+}
+
+/// The JSON bodies of `event_to_sse`'s frames.
+fn event_chunks(
+    id: &str,
+    model: &str,
+    created: u64,
+    ev: pb::Event,
+    ttft_done: &mut bool,
+    t0: &Instant,
+    show: Show,
+) -> Vec<Value> {
     let Some(kind) = ev.kind else { return vec![] };
     match kind {
         pb::event::Kind::Start(_) => {
-            vec![chunk_frame(id, model, created, json!({"role": "assistant", "content": ""}), None)]
+            vec![chunk_json(id, model, created, json!({"role": "assistant", "content": ""}), None)]
         }
         pb::event::Kind::Token(t) => {
             if !*ttft_done {
                 metrics::histogram!("qwen_ttft_seconds").record(t0.elapsed().as_secs_f64());
                 *ttft_done = true;
             }
-            metrics::counter!("qwen_tokens_generated_total").increment(1);
+            if !t.text.is_empty() {
+                metrics::counter!("qwen_tokens_generated_total").increment(1);
+            }
+            // `lp` is not aligned with `text`: the tokens read since the previous event.
+            // A chunk that carries only log-probabilities (a held-back piece, the EOS,
+            // hidden reasoning) has an empty delta.
+            let lp = (show.logprobs && !t.lp.is_empty()).then(|| content_logprobs_json(&t.lp));
             let delta = if !t.thinking {
-                json!({"content": t.text})
-            } else if show.reasoning {
+                if t.text.is_empty() && lp.is_some() { json!({}) } else { json!({"content": t.text}) }
+            } else if show.reasoning && !t.text.is_empty() {
                 // vLLM >= 0.2x names it `reasoning`; `reasoning_content` is the older name
                 json!({"reasoning": t.text, "reasoning_content": t.text})
+            } else if lp.is_some() {
+                json!({})
             } else {
                 return vec![];
             };
-            vec![chunk_frame(id, model, created, delta, None)]
+            let mut body = chunk_json(id, model, created, delta, None);
+            if let Some(lp) = lp {
+                body["choices"][0]["logprobs"] = json!({"content": lp});
+            }
+            vec![body]
+        }
+        pb::event::Kind::PromptLogprobs(p) => {
+            if !show.prompt_logprobs {
+                return vec![];
+            }
+            let (positions, spans) = prompt_logprobs_json(&p);
+            vec![json!({
+                "id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+                "choices": [], "prompt_logprobs": positions, "prompt_logprobs_messages": spans,
+            })]
         }
         pb::event::Kind::Done(d) => {
             let delta = if d.tool_calls.is_empty() {
@@ -395,20 +517,18 @@ fn event_to_sse(
             } else {
                 json!({ "tool_calls": tool_calls_json(&d.tool_calls) })
             };
-            let mut out = vec![chunk_frame(id, model, created, delta, Some(&d.finish))];
+            let mut out = vec![chunk_json(id, model, created, delta, Some(&d.finish))];
             if show.usage {
-                let body = json!({
+                out.push(json!({
                     "id": id, "object": "chat.completion.chunk", "created": created, "model": model,
                     "choices": [], "usage": usage_json(&d.usage.unwrap_or_default()),
-                });
-                out.push(SseEvent::default().data(body.to_string()));
+                }));
             }
             out
         }
         pb::event::Kind::Error(e) => {
             metrics::counter!("qwen_errors_total", "kind" => e.kind.clone()).increment(1);
-            vec![SseEvent::default().data(
-                json!({"error": {"message": e.msg, "type": e.kind, "code": 500}}).to_string())]
+            vec![json!({"error": {"message": e.msg, "type": e.kind, "code": 500}})]
         }
     }
 }
@@ -430,16 +550,16 @@ fn on_done(id: &str, worker_id: &str, d: &pb::Done, waited: Duration) {
           tool_calls = d.tool_calls.len(), "done");
 }
 
-fn chunk_frame(id: &str, model: &str, created: u64, delta: Value, finish: Option<&str>) -> SseEvent {
-    let body = json!({
+fn chunk_json(id: &str, model: &str, created: u64, delta: Value, finish: Option<&str>) -> Value {
+    json!({
         "id": id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
         "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-    });
-    SseEvent::default().data(body.to_string())
+    })
 }
+
 
 async fn json_response(st: AppState, job: Job) -> Response {
     let Job { id, pbreq, body, show, t0, admit } = job;
@@ -482,7 +602,7 @@ async fn json_response(st: AppState, job: Job) -> Response {
     let model = acc.model.clone().unwrap_or_else(|| st.worker_model.clone());
     let out = acc.response(&id, &model, created, show);
     if let Some(j) = &st.journal {
-        j.write(&id, &body, out.clone());
+        j.write(&id, &body, for_journal(out.clone()));
     }
     if let Some((kind, msg)) = &acc.err {
         if kind == "busy" {
@@ -513,6 +633,8 @@ struct Acc {
     tool_calls: Vec<pb::ToolCall>,
     err: Option<(String, String)>,
     model: Option<String>,
+    lp: Vec<pb::TokenLogprob>,           // every Token event's `lp`, in order
+    prompt: Option<pb::PromptLogprobs>,  // the PromptLogprobs event (before Done)
 }
 
 impl Acc {
@@ -524,7 +646,9 @@ impl Acc {
             Some(pb::event::Kind::Token(t)) => {
                 if t.thinking { self.reasoning.push_str(&t.text); }
                 else { self.content.push_str(&t.text); }
+                self.lp.extend(t.lp.iter().cloned());
             }
+            Some(pb::event::Kind::PromptLogprobs(p)) => { self.prompt = Some(p.clone()); }
             Some(pb::event::Kind::Done(d)) => {
                 self.tool_calls = d.tool_calls.clone();
                 self.finish = Some(d.finish.clone());
@@ -556,15 +680,29 @@ impl Acc {
             msg.insert("reasoning".into(), json!(self.reasoning));
             msg.insert("reasoning_content".into(), json!(self.reasoning));
         }
-        json!({
+        // OpenAI: `logprobs` is always in the choice, null unless asked for
+        let logprobs = if show.logprobs {
+            json!({"content": content_logprobs_json(&self.lp)})
+        } else {
+            Value::Null
+        };
+        let mut out = json!({
             "id": id,
             "object": "chat.completion",
             "created": created,
             "model": model,
-            "choices": [{"index": 0, "message": Value::Object(msg),
+            "choices": [{"index": 0, "message": Value::Object(msg), "logprobs": logprobs,
                          "finish_reason": self.finish.as_deref().unwrap_or("stop")}],
             "usage": usage_json(&self.usage),
-        })
+        });
+        if show.prompt_logprobs {
+            // null pair: a worker that sent no PromptLogprobs event (older than the field)
+            let (positions, spans) = self.prompt.as_ref().map(prompt_logprobs_json)
+                .unwrap_or((Value::Null, Value::Null));
+            out["prompt_logprobs"] = positions;
+            out["prompt_logprobs_messages"] = spans;
+        }
+        out
     }
 }
 
@@ -621,5 +759,171 @@ mod tests {
         // an older worker (no field): 0, the object is always there (as vLLM)
         let old = usage_json(&pb::Usage::default());
         assert_eq!(old["prompt_tokens_details"], json!({"cached_tokens": 0}));
+    }
+
+    fn tl(id: u32, token: &str, logprob: f32, top: &[(u32, &str, f32)]) -> pb::TokenLogprob {
+        pb::TokenLogprob {
+            token_id: id, token: token.into(), logprob,
+            top: top.iter().map(|&(token_id, t, logprob)| pb::TopLogprob {
+                token_id, token: t.into(), logprob }).collect(),
+        }
+    }
+
+    fn ev(kind: pb::event::Kind) -> pb::Event {
+        pb::Event { id: "w".into(), kind: Some(kind) }
+    }
+
+    fn token(text: &str, thinking: bool, lp: Vec<pb::TokenLogprob>) -> pb::Event {
+        ev(pb::event::Kind::Token(pb::Token { text: text.into(), thinking, lp }))
+    }
+
+    fn done(finish: &str) -> pb::Event {
+        ev(pb::event::Kind::Done(pb::Done { finish: finish.into(), usage: None, tool_calls: vec![] }))
+    }
+
+    /// 8 prompt tokens, scored from position 3 (a cache hit at depth 2); spans [1, 4) (partly
+    /// below `first`) and [5, 8) (all scored).
+    fn prompt_ev() -> pb::Event {
+        let toks = ["<a>", "b", "c", "d", "e", "f", "g", "<|im_end|>"];
+        ev(pb::event::Kind::PromptLogprobs(pb::PromptLogprobs {
+            first: 3,
+            tokens: toks.iter().enumerate().map(|(i, t)| tl(i as u32 + 10, t, 0.0, &[])).collect(),
+            logprobs: vec![-0.5, -1.25, -2.0, -0.25, -0.125],
+            spans: vec![pb::Span { message: 1, start: 1, end: 4 },
+                        pb::Span { message: 3, start: 5, end: 8 },
+                        pb::Span { message: 5, start: 0, end: 2 }],
+        }))
+    }
+
+    const ALL: Show = Show { reasoning: true, usage: false, logprobs: true, prompt_logprobs: true };
+    const NONE: Show = Show { reasoning: true, usage: false, logprobs: false, prompt_logprobs: false };
+
+    #[test]
+    fn lp_json_is_the_f32_decimal() {
+        assert_eq!(lp_json(-2.3), json!(-2.3));
+        assert_eq!(lp_json(-0.0001), json!(-0.0001));
+        assert_eq!(lp_json(f32::NEG_INFINITY), Value::Null);
+        assert_eq!(lp_json(f32::NAN), Value::Null);
+    }
+
+    #[test]
+    fn acc_collects_logprobs() {
+        let mut acc = Acc::default();
+        for e in [
+            ev(pb::event::Kind::Start(pb::Start { role: "assistant".into(), model: "m".into() })),
+            token("hm", true, vec![tl(1, "hm", -0.5, &[(1, "hm", -0.5), (2, "ok", -1.5)])]),
+            token("Hé", false, vec![tl(3, "H", -0.25, &[]), tl(4, "é", -1.0, &[])]),
+            token("", false, vec![tl(5, "<|im_end|>", -0.125, &[])]),
+            prompt_ev(),
+            done("stop"),
+        ] {
+            acc.add(&e);
+        }
+        let out = acc.response("id", "m", 0, ALL);
+        let c = &out["choices"][0];
+        assert_eq!(c["message"]["content"], json!("Hé"));
+        assert_eq!(c["logprobs"], json!({"content": [
+            {"token": "hm", "logprob": -0.5, "bytes": [104, 109], "top_logprobs": [
+                {"token": "hm", "logprob": -0.5, "bytes": [104, 109]},
+                {"token": "ok", "logprob": -1.5, "bytes": [111, 107]}]},
+            {"token": "H", "logprob": -0.25, "bytes": [72], "top_logprobs": []},
+            {"token": "é", "logprob": -1.0, "bytes": [195, 169], "top_logprobs": []},
+            {"token": "<|im_end|>", "logprob": -0.125, "bytes": "<|im_end|>".as_bytes(),
+             "top_logprobs": []},
+        ]}));
+        assert_eq!(out["prompt_logprobs"], json!([
+            null, null, null,
+            {"token": "d", "token_id": 13, "logprob": -0.5},
+            {"token": "e", "token_id": 14, "logprob": -1.25},
+            {"token": "f", "token_id": 15, "logprob": -2.0},
+            {"token": "g", "token_id": 16, "logprob": -0.25},
+            {"token": "<|im_end|>", "token_id": 17, "logprob": -0.125},
+        ]));
+        assert_eq!(out["prompt_logprobs_messages"], json!([
+            // [1, 4): positions 1, 2 below first -> 1 of 3 scored
+            {"message": 1, "role": "assistant", "start": 1, "end": 4, "tokens": 3, "scored": 1,
+             "logprob": -0.5},
+            {"message": 3, "role": "assistant", "start": 5, "end": 8, "tokens": 3, "scored": 3,
+             "logprob": -2.375},
+            // nothing scored: a null sum, not 0
+            {"message": 5, "role": "assistant", "start": 0, "end": 2, "tokens": 2, "scored": 0,
+             "logprob": null},
+        ]));
+        // the journal drops the per-position array, keeps the sums
+        let j = for_journal(out.clone());
+        assert!(j.get("prompt_logprobs").is_none());
+        assert_eq!(j["prompt_logprobs_positions"], json!(8));
+        assert_eq!(j["prompt_logprobs_messages"], out["prompt_logprobs_messages"]);
+        assert_eq!(j["choices"][0]["logprobs"], json!({"tokens": 4, "logprob": -1.875}));
+        assert_eq!(j["choices"][0]["message"], out["choices"][0]["message"]);
+
+        // not asked for: logprobs null (OpenAI), no prompt keys
+        let plain = acc.response("id", "m", 0, NONE);
+        assert_eq!(plain["choices"][0]["logprobs"], Value::Null);
+        assert!(plain.get("prompt_logprobs").is_none() && plain.get("prompt_logprobs_messages").is_none());
+        assert_eq!(for_journal(plain.clone()), plain);
+    }
+
+    #[test]
+    fn prefill_only_answer() {
+        // max_tokens 0: no Token events, PromptLogprobs then Done(length)
+        let mut acc = Acc::default();
+        acc.add(&prompt_ev());
+        acc.add(&done("length"));
+        let out = acc.response("id", "m", 0, ALL);
+        assert_eq!(out["choices"][0]["finish_reason"], json!("length"));
+        assert_eq!(out["choices"][0]["message"]["content"], json!(""));
+        assert_eq!(out["choices"][0]["logprobs"], json!({"content": []}));
+        assert_eq!(out["prompt_logprobs"].as_array().unwrap().len(), 8);
+        // asked for, but the worker sent no event: null, not missing
+        let mut old = Acc::default();
+        old.add(&done("length"));
+        let out = old.response("id", "m", 0, ALL);
+        assert_eq!((&out["prompt_logprobs"], &out["prompt_logprobs_messages"]), (&Value::Null, &Value::Null));
+    }
+
+    fn sse(ev: pb::Event, show: Show) -> Vec<Value> {
+        let mut ttft = true;
+        event_chunks("id", "m", 0, ev, &mut ttft, &Instant::now(), show)
+    }
+
+    #[test]
+    fn sse_chunks_carry_logprobs() {
+        let lp = || vec![tl(3, "H", -0.25, &[(3, "H", -0.25)])];
+        // text + lp: one chunk, logprobs beside the delta
+        let c = sse(token("H", false, lp()), ALL);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0]["choices"][0]["delta"], json!({"content": "H"}));
+        assert_eq!(c[0]["choices"][0]["logprobs"], json!({"content": [
+            {"token": "H", "logprob": -0.25, "bytes": [72],
+             "top_logprobs": [{"token": "H", "logprob": -0.25, "bytes": [72]}]}]}));
+        assert_eq!(c[0]["choices"][0]["finish_reason"], Value::Null);
+        // not asked for: the chunk as before, no logprobs key
+        let c = sse(token("H", false, lp()), NONE);
+        assert_eq!(c[0]["choices"][0], json!({"index": 0, "delta": {"content": "H"}, "finish_reason": null}));
+        // lp with no text (the EOS, a held-back piece): emitted with an empty delta
+        let c = sse(token("", false, lp()), ALL);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0]["choices"][0]["delta"], json!({}));
+        assert_eq!(c[0]["choices"][0]["logprobs"]["content"][0]["token"], json!("H"));
+        // hidden reasoning (include_reasoning false) still reports its tokens' logprobs
+        let hidden = Show { reasoning: false, ..ALL };
+        let c = sse(token("hm", true, lp()), hidden);
+        assert_eq!(c[0]["choices"][0]["delta"], json!({}));
+        assert!(sse(token("hm", true, lp()), Show { reasoning: false, ..NONE }).is_empty());
+        let c = sse(token("hm", true, lp()), ALL);
+        assert_eq!(c[0]["choices"][0]["delta"], json!({"reasoning": "hm", "reasoning_content": "hm"}));
+        // the prompt event: its own chunk with no choices; nothing when not asked for
+        let c = sse(prompt_ev(), ALL);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0]["choices"], json!([]));
+        assert_eq!(c[0]["object"], json!("chat.completion.chunk"));
+        assert_eq!(c[0]["prompt_logprobs"].as_array().unwrap().len(), 8);
+        assert_eq!(c[0]["prompt_logprobs"][2], Value::Null);
+        assert_eq!(c[0]["prompt_logprobs_messages"][1]["logprob"], json!(-2.375));
+        assert!(sse(prompt_ev(), NONE).is_empty());
+        // the finish chunk is unchanged
+        let c = sse(done("length"), ALL);
+        assert_eq!(c[0]["choices"][0], json!({"index": 0, "delta": {}, "finish_reason": "length"}));
     }
 }

@@ -113,7 +113,8 @@ cannot do what vLLM does it says so with a 400 instead of ignoring the field.
   0.01. `presence_penalty` / `frequency_penalty` are additive over all generated
   tokens, `repetition_penalty` multiplicative over prompt + output. Ranges as vLLM
   (400 otherwise): temperature [0, 2], top_p (0, 1] (`top_p: 0` is a 400), top_k ≥ -1,
-  min_p [0, 1], presence/frequency [-2, 2], repetition > 0, max_tokens ≥ 1. A request
+  min_p [0, 1], presence/frequency [-2, 2], repetition > 0, max_tokens ≥ 1 (0 only with
+  `prompt_logprobs`, see **Log-probabilities**). A request
   that omits a field gets the worker env default (`GATEWAY_OPENAI_DEFAULTS=1`: vLLM's
   defaults — T 1, top_p 1, top_k 0, min_p 0, penalties 0 / 1). `seed` makes a sampled
   request reproducible (`-1` = none).
@@ -167,7 +168,8 @@ cannot do what vLLM does it says so with a 400 instead of ignoring the field.
   `stream_options.include_usage` adds the final usage chunk (`choices: []`). A worker
   lost mid-answer is an error frame + `[DONE]` (counted as an error), or a 502 without
   streaming — never a truncated 200.
-- **400 instead of silence**: `n` > 1, `logit_bias`, `logprobs` / `top_logprobs`, legacy
+- **400 instead of silence**: `n` > 1, `logit_bias`, `top_logprobs` > 20, `prompt_logprobs`
+  other than true/false/0/1, legacy
   `functions` / `function_call`, content parts other than text / image, images on a
   text-only checkpoint, roles the template rejects, `response_format.json_schema`
   without `name`, a `tool_choice` object whose `type` is not `"function"`, and every
@@ -219,6 +221,97 @@ calling tools (that is its choice, not a grammar fault). An unknown type or a sc
 that does not compile is a 400, streaming included. Grammar requests skip DFlash
 (logged). Cost: ~0.2 ms of CPU per token, no step-ahead in the decode loop — 9B
 31 → 30 tok/s.
+
+**Log-probabilities** (`logprobs`, `top_logprobs`, `prompt_logprobs`, `prompt_cache`;
+design: `docs/perf/2026-10-21/design/logprobs.md`). All values are *raw*: fp32 `logit −
+logsumexp` of the model's logits before penalties, temperature, grammar or token masks
+(vLLM's `logprobs_mode=raw_logprobs`), so they do not depend on the sampler settings.
+
+| field | type | meaning | 400 |
+|---|---|---|---|
+| `logprobs` | bool | log p of every generated token: reasoning, answer and the final EOS / stop token (listed although its text is not in `content`) | — |
+| `top_logprobs` | int 0..20 | + the k most likely tokens per step, descending; needs `logprobs: true` | `top_logprobs must be between 0 and 20, got N.` / ``when using `top_logprobs`, `logprobs` must be set to true.`` |
+| `prompt_logprobs` | `true`/`false`/`0`/`1`/null | teacher forcing: log p of every prompt token given the tokens before it, computed in the prefill. As vLLM's int: `0` and `1` are **on** (vLLM's int is the top-k per position beside the token's own log p; we return only the own one), `false`/null off | `prompt_logprobs: only true/false/0/1 are supported (top-k over the prompt is not)`; with images: the worker's 400 (text-only) |
+| `max_tokens` / `max_completion_tokens` | int | `0` = prefill only, allowed only with `prompt_logprobs` on: no decode step, `finish_reason: "length"`, `completion_tokens: 0`, `content: ""`; the prompt is stored in the prompt cache as after a generation | `max_tokens must be at least 1, got 0.` (vLLM's) without `prompt_logprobs` |
+| `prompt_cache` | `true`/`false`/`"off"`/`"read"` (extension) | `true`/absent: normal. `false` or `"off"`: no prompt-cache lookup (cold prefill: every position scored), the entry is still stored. `"read"`: lookup as normal, nothing stored | `prompt_cache must be true, false, "off" or "read"` |
+
+`prompt_logprobs` also works with `stream: true` (vLLM refuses that) and costs an extra
+`lm_head` over every prefill row (~+10 % prefill FLOPs), only for requests that ask.
+**Attribution workflow** (one recorded trace, many edited variants): send the baseline
+with `prompt_cache: false` (cold, every position scored, and it is stored), then every
+variant with `prompt_cache: "read"` — each resumes from the baseline's entry up to its
+first edit and stores nothing, so thousands of variants neither evict the baseline nor
+churn the cache with their tails. A variant's unscored positions (before its hit
+depth) are the baseline's values there (causality).
+
+Response (non-streaming):
+```json
+{"choices": [{"index": 0, "message": {...}, "finish_reason": "stop",
+              "logprobs": {"content": [
+                {"token": "Hi", "logprob": -0.031, "bytes": [72, 105],
+                 "top_logprobs": [{"token": "Hi", "logprob": -0.031, "bytes": [72, 105]},
+                                  {"token": "Hello", "logprob": -3.6, "bytes": [72, 101, 108, 108, 111]}]},
+                {"token": "<|im_end|>", "logprob": -0.002, "bytes": [...], "top_logprobs": []}]}}],
+ "prompt_logprobs": [null, null, {"token": "user", "token_id": 846, "logprob": -2.3}, ...],
+ "prompt_logprobs_messages": [{"message": 3, "role": "assistant", "start": 1200, "end": 1500,
+                               "tokens": 300, "scored": 300, "logprob": -45.2}],
+ "usage": {...}}
+```
+- `choices[0].logprobs` is OpenAI's shape; `null` when `logprobs` was not asked for.
+  `token` is the tokenizer's `decode([id])` of one token and `bytes` the UTF-8 of that
+  string, as vLLM: lossy for a token holding part of a multi-byte character (CJK, emoji
+  split across tokens) — it shows U+FFFD (`[239, 191, 189]`), so joining `bytes` does
+  not rebuild such characters.
+- `prompt_logprobs` (only when asked for) has one entry per prompt token (the rendered
+  chat template, as `usage.prompt_tokens` counts it); `null` where a position was not
+  scored, i.e. every position ≤ `usage.prompt_tokens_details.cached_tokens`: position 0
+  on a cold prefill (nothing before it), up to the hit depth on a prompt-cache hit (the
+  cache keeps no logits, not even of its last position). Positions past that are a
+  cold prefill's values (causality, same slabs: bit-exact) — except for a hit through a
+  stored reply (`QWEN_PROMPT_CACHE_REPLY=1`), whose KV came from decode kernels (the
+  batched-decode numerics class; `QWEN_PROMPT_CACHE_REPLY=0` keeps hits bit-exact).
+  The shape differs from vLLM's (a `{token_id: {logprob, rank, decoded_token}}` dict
+  per position).
+- `prompt_logprobs_messages`: one entry per `assistant` message of the request
+  (`message` = its index in `messages`). `[start, end)` = the token positions the model
+  *generated* for it: after `<|im_start|>assistant\n` and the template's `<think>`
+  pre-open — with empty reasoning the whole `<think>\n\n</think>\n\n` header is
+  skipped (the prompt of a thinking-off generation), with reasoning only `<think>\n`
+  (reasoning + `\n</think>\n\n` + content were generated) — through its `<|im_end|>`
+  inclusive. `tokens = end − start`; `scored` = how many of those positions have a value
+  (fewer than `tokens` when a cache hit reaches into the span); `logprob` = the sum
+  over the scored ones (`null` when none is). The rule excludes only the template's
+  pre-open, so a span can hold fewer tokens than the model generated: a thinking-on
+  reply whose reasoning is sent back empty renders as the thinking-off header (the
+  model's own `\n</think>\n\n` is not scored), and templates that drop the think block
+  of earlier turns (27B / 35B: assistant turns before the last user message) leave
+  only the content, scored in a context the model never saw. The per-token
+  `prompt_logprobs` list is authoritative.
+
+Streaming: a chunk's `choices[0].logprobs.content` holds the tokens read since the
+previous chunk — **not aligned** with the chunk's text delta (stop-string hold-back,
+multi-byte characters, the reasoning split); a chunk may carry logprobs with an empty
+`delta: {}` (the final EOS, a held-back piece, reasoning hidden by `include_reasoning:
+false`). Concatenated over the stream they are the `content` list above. The prompt
+log-probabilities come as one extra chunk with `"choices": []` and the top-level
+`prompt_logprobs` + `prompt_logprobs_messages`, just before the finish chunk. The
+journal (`GATEWAY_JOURNAL`) keeps `prompt_logprobs_messages` but replaces the
+per-position array by `prompt_logprobs_positions` (its length) and
+`choices[0].logprobs` by `{"tokens": n, "logprob": sum}`.
+
+Numerics: for an answer generated at temperature 0 (presence penalty 0), the
+teacher-forced sum over its span (the same messages + that answer as the last
+assistant message, `add_generation_prompt: false`, `max_tokens: 0`) equals the sum of
+its generation `logprobs`, EOS included, up to kernel rounding: the prefill scores
+positions with M-row matmuls (pfqmm / qmm, fused SDPA) where decode used 1-row qmv,
+so expect small per-token differences, not bit equality. Under batched decode with
+B ≥ 3 rows the generation-side values are in the mrqmm numerics class (top-1 ≥ 99.7 %,
+KL ~1e-5 vs solo) and depend on the batch; `QWEN_MAX_BATCH=1` makes them
+reproducible. At temperature 0 the drawn token is usually `top_logprobs[0]` but not
+always: the greedy argmax runs in the model dtype (fp16) and `top_logprobs` is sorted
+in fp32, so on a near-tie the drawn token can be `top_logprobs[1]` (or two equal
+values come in the other order) — do not assert it. Requests with neither flag run
+exactly the same graph as before.
 
 Quick CLI (no gateway): `uv run python chat.py "Привет!" --model weights/ornith10-9b-mlx-8bit`.
 

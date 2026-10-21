@@ -5,6 +5,9 @@
 //! only be insignificant whitespace, so the line stays one line and the JSON stays the same).
 //! `response` is the chat.completion object; for streamed requests it is assembled from
 //! the chunks and carries `"stream": true`. Errors are logged as `{"error": ...}`.
+//! A `prompt_logprobs` answer is kept without its per-position array (MBs on long
+//! prompts): `prompt_logprobs_positions` = its length, the per-message sums stay
+//! (`api::for_journal`).
 //!
 //! Lines are formatted and written by one writer thread fed through a channel, so the
 //! request path never blocks on the file; the channel keeps the order of `write` calls.

@@ -58,6 +58,10 @@ pub struct ChatRequest {
     pub logprobs: Option<bool>,
     #[serde(default, deserialize_with = "lax_i64")]
     pub top_logprobs: Option<i64>,
+    // vLLM's int = top-k per prompt position beside the token's own log p (0 = the own
+    // one only); here only true/false/0/1, none of them with a top-k (validate)
+    #[serde(default)]
+    pub prompt_logprobs: Option<Value>,
     pub logit_bias: Option<Map<String, Value>>,
     pub tools: Option<Vec<Value>>,
     pub tool_choice: Option<Value>,
@@ -89,6 +93,41 @@ pub struct ChatRequest {
     // one, `thinking_budget` = thinking_token_budget with 0 meaning unlimited.
     pub enable_thinking: Option<bool>,
     pub thinking_budget: Option<u32>,
+    // Extension: true / absent = normal; false or "off" = no prompt-cache lookup (a cold
+    // prefill: every prompt position scored by prompt_logprobs), the entry still stored;
+    // "read" = lookup as normal, nothing stored (validate)
+    #[serde(default)]
+    pub prompt_cache: Option<Value>,
+}
+
+impl ChatRequest {
+    /// `prompt_logprobs` on: true, or vLLM's int 0 / 1 (0 = each prompt token's own log p,
+    /// 1 = + the top-1, which we do not add); null / false = off. Other values are
+    /// refused by `validate`.
+    pub fn prompt_logprobs_on(&self) -> bool {
+        match &self.prompt_logprobs {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Number(_)) => true,
+            _ => false,
+        }
+    }
+
+    /// `Params.prompt_cache`: "" (true / absent), "off" (false / "off") or "read";
+    /// `None` = not one of those (`validate` refuses it).
+    pub fn prompt_cache_mode(&self) -> Option<&'static str> {
+        match &self.prompt_cache {
+            None | Some(Value::Null | Value::Bool(true)) => Some(""),
+            Some(Value::Bool(false)) => Some("off"),
+            Some(Value::String(s)) if s == "off" => Some("off"),
+            Some(Value::String(s)) if s == "read" => Some("read"),
+            _ => None,
+        }
+    }
+
+    /// `logprobs: true`.
+    pub fn logprobs_on(&self) -> bool {
+        self.logprobs == Some(true)
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -159,6 +198,7 @@ const HANDLED: &[&str] = &[
     "session_id", "enable_thinking", "thinking_budget", "request_id", "min_tokens",
     "stop_token_ids", "ignore_eos", "bad_words", "allowed_token_ids",
     "include_stop_str_in_output", "add_generation_prompt", "continue_final_message",
+    "prompt_logprobs", "prompt_cache",
     // no effect here: skip_special_tokens / spaces_between_special_tokens (vLLM's qwen3
     // parser forces skip_special_tokens off itself), cache_salt (the prompt cache never
     // changes an answer and is not shared between tenants)
@@ -173,7 +213,7 @@ fn unsupported_default(name: &str) -> Option<Value> {
         "watermarking" => json!(true),
         "length_penalty" | "stream_interval" => json!(1),
         "routed_experts_prompt_start" => json!(0),
-        "truncate_prompt_tokens" | "truncation_side" | "prompt_logprobs" | "logprob_token_ids"
+        "truncate_prompt_tokens" | "truncation_side" | "logprob_token_ids"
         | "documents" | "chat_template" | "media_io_kwargs"
         | "mm_processor_kwargs" | "structured_outputs"
         | "return_tokens_as_token_ids" | "return_token_ids" | "return_prompt_text"
@@ -224,6 +264,8 @@ pub const MAX_STOP: usize = 64;
 pub const MAX_STOP_TOKEN_IDS: usize = 1024;
 pub const MAX_BAD_WORDS: usize = 1024;
 pub const MAX_ALLOWED_TOKEN_IDS: usize = 1 << 18;
+/// top_logprobs per generated token (OpenAI's cap; vLLM's default max_logprobs).
+pub const MAX_TOP_LOGPROBS: i64 = 20;
 
 fn cap<T>(name: &'static str, v: &[T], max: usize) -> Result<(), BadRequest> {
     if v.len() > max {
@@ -272,8 +314,18 @@ pub fn validate(r: &ChatRequest) -> Result<(), BadRequest> {
             return bad(format!("min_p must be in [0, 1], got {m}."), "min_p");
         }
     }
+    match &r.prompt_logprobs {
+        None | Some(Value::Null | Value::Bool(_)) => {}
+        Some(Value::Number(n)) if matches!(n.as_f64(), Some(x) if x == 0.0 || x == 1.0) => {}
+        Some(_) => return bad("prompt_logprobs: only true/false/0/1 are supported (top-k over the \
+                               prompt is not)", "prompt_logprobs"),
+    }
+    if r.prompt_cache_mode().is_none() {
+        return bad("prompt_cache must be true, false, \"off\" or \"read\"", "prompt_cache");
+    }
     if let Some(m) = r.max_completion_tokens.or(r.max_tokens) {
-        if m < 1 {
+        // 0 = prefill only (teacher forcing): only with prompt_logprobs
+        if m < 1 && !(m == 0 && r.prompt_logprobs_on()) {
             return bad(format!("max_tokens must be at least 1, got {m}."), "max_tokens");
         }
     }
@@ -284,12 +336,14 @@ pub fn validate(r: &ChatRequest) -> Result<(), BadRequest> {
         return bad("logit_bias is not supported by this server", "logit_bias");
     }
     if let Some(t) = r.top_logprobs {
-        if t != 0 && r.logprobs != Some(true) {
+        // OpenAI's range; vLLM's default max_logprobs is 20 too (its -1 = whole vocab: no)
+        if !(0..=MAX_TOP_LOGPROBS).contains(&t) {
+            return bad(format!("top_logprobs must be between 0 and {MAX_TOP_LOGPROBS}, got {t}."),
+                       "top_logprobs");
+        }
+        if t != 0 && !r.logprobs_on() {
             return bad("when using `top_logprobs`, `logprobs` must be set to true.", "top_logprobs");
         }
-    }
-    if r.logprobs == Some(true) {
-        return bad("logprobs are not supported by this server", "logprobs");
     }
     if let Some(m) = r.min_tokens {
         if m < 0 {
@@ -610,6 +664,12 @@ pub fn to_pb(id: &str, r: &ChatRequest) -> Result<pb::Request, BadRequest> {
             // continue_final_message implies no generation prompt
             add_generation_prompt: r.add_generation_prompt.or(r.continue_final_message.then_some(false)),
             continue_final_message: r.continue_final_message,
+            logprobs: r.logprobs_on(),
+            // in range (validate); without logprobs it is 0 there too
+            top_logprobs: if r.logprobs_on() { r.top_logprobs.unwrap_or(0).clamp(0, MAX_TOP_LOGPROBS) as u32 }
+                          else { 0 },
+            prompt_logprobs: r.prompt_logprobs_on(),
+            prompt_cache: r.prompt_cache_mode().unwrap_or_default().to_string(),   // checked (validate)
         }),
     })
 }
@@ -660,7 +720,7 @@ mod tests {
     fn vllm_validation() {
         for bad in [
             json!({"top_p": 0}), json!({"temperature": 2.5}), json!({"max_tokens": 0}),
-            json!({"n": 2}), json!({"logit_bias": {"1": 5}}), json!({"logprobs": true}),
+            json!({"n": 2}), json!({"logit_bias": {"1": 5}}), json!({"top_logprobs": 2}),
             json!({"top_k": -2}), json!({"presence_penalty": 3}), json!({"repetition_penalty": 0}),
             json!({"stop": [""]}), json!({"functions": []}), json!({"echo": true}),
             json!({"stream_options": {"include_usage": true}}), json!({"tools": []}),
@@ -682,9 +742,93 @@ mod tests {
             json!({"tool_choice": "none"}), json!({"seed": -1}),
             json!({"tools": [{"type": "function", "function": {"name": "f"}}],
                    "tool_choice": {"type": "function", "function": {"name": "f"}}}),
+            json!({"logprobs": true}), json!({"logprobs": true, "top_logprobs": 20}),
+            json!({"prompt_logprobs": true, "max_tokens": 0, "prompt_cache": false}),
         ] {
             assert!(req(good.clone()).is_ok(), "{good}");
         }
+    }
+
+    fn err(extra: Value) -> (String, Option<&'static str>) {
+        let mut body = json!({"messages": [{"role": "user", "content": "hi"}]});
+        body.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        check_fields(body.as_object().unwrap()).map_err(|e| e.msg).unwrap();
+        let r: ChatRequest = serde_json::from_value(body).unwrap();
+        let e = validate(&r).err().unwrap_or_else(|| panic!("{extra} passed"));
+        (e.msg, e.param)
+    }
+
+    #[test]
+    fn logprobs_validation() {
+        // max_tokens 0 = prefill only, and only with prompt_logprobs (else vLLM's message)
+        for good in [
+            json!({"prompt_logprobs": true, "max_tokens": 0}),
+            json!({"prompt_logprobs": 1, "max_completion_tokens": 0}),
+            json!({"prompt_logprobs": 0, "max_tokens": 0}),
+            json!({"prompt_logprobs": true}), json!({"prompt_logprobs": false}),
+            json!({"prompt_logprobs": 0}), json!({"prompt_logprobs": null}),
+            json!({"prompt_logprobs": true, "max_tokens": 0, "min_tokens": 0}),
+            json!({"logprobs": true, "top_logprobs": 0}), json!({"logprobs": false}),
+            json!({"logprobs": true, "top_logprobs": "5"}),
+            json!({"prompt_cache": false}), json!({"prompt_cache": true}),
+            json!({"prompt_cache": "off"}), json!({"prompt_cache": "read"}),
+            json!({"prompt_cache": null}),
+            json!({"prompt_logprobs": true, "stream": true}),
+        ] {
+            assert!(req(good.clone()).is_ok(), "{good}");
+        }
+        let at_least_1 = "max_tokens must be at least 1, got 0.".to_string();
+        assert_eq!(err(json!({"max_tokens": 0})), (at_least_1.clone(), Some("max_tokens")));
+        assert_eq!(err(json!({"max_tokens": 0, "prompt_logprobs": false})),
+                   (at_least_1.clone(), Some("max_tokens")));
+        assert_eq!(err(json!({"max_completion_tokens": 0, "prompt_logprobs": null})),
+                   (at_least_1, Some("max_tokens")));
+        assert_eq!(err(json!({"max_tokens": -1, "prompt_logprobs": true})).1, Some("max_tokens"));
+        // min_tokens still bounded by max_tokens
+        assert_eq!(err(json!({"max_tokens": 0, "prompt_logprobs": true, "min_tokens": 1})).1,
+                   Some("min_tokens"));
+        let only = "prompt_logprobs: only true/false/0/1 are supported (top-k over the prompt is not)"
+            .to_string();
+        for v in [json!(2), json!(5), json!(20), json!(-1), json!(0.5), json!("true"), json!([1])] {
+            assert_eq!(err(json!({"prompt_logprobs": v})), (only.clone(), Some("prompt_logprobs")), "{v}");
+        }
+        let needs = "when using `top_logprobs`, `logprobs` must be set to true.".to_string();
+        assert_eq!(err(json!({"top_logprobs": 3})), (needs.clone(), Some("top_logprobs")));
+        assert_eq!(err(json!({"top_logprobs": 3, "logprobs": false})), (needs, Some("top_logprobs")));
+        for t in [21, -1] {
+            assert_eq!(err(json!({"logprobs": true, "top_logprobs": t})),
+                       (format!("top_logprobs must be between 0 and 20, got {t}."), Some("top_logprobs")));
+        }
+        // still unsupported
+        assert!(req(json!({"echo": true})).is_err());
+        let pc = "prompt_cache must be true, false, \"off\" or \"read\"".to_string();
+        for v in [json!("no"), json!("true"), json!(""), json!("READ"), json!(0), json!({})] {
+            assert_eq!(err(json!({"prompt_cache": v})), (pc.clone(), Some("prompt_cache")), "{v}");
+        }
+    }
+
+    #[test]
+    fn logprobs_params() {
+        let p = |extra: Value| to_pb("x", &req(extra).ok().unwrap()).ok().unwrap().params.unwrap();
+        let off = p(json!({}));
+        assert!(!off.logprobs && off.top_logprobs == 0 && !off.prompt_logprobs);
+        assert_eq!(off.prompt_cache, "");
+        assert_eq!(off.max_tokens, None);
+        let on = p(json!({"logprobs": true, "top_logprobs": 5, "prompt_logprobs": 1,
+                          "max_tokens": 0, "prompt_cache": false}));
+        assert!(on.logprobs && on.prompt_logprobs);
+        assert_eq!((on.top_logprobs, on.prompt_cache.as_str(), on.max_tokens), (5, "off", Some(0)));
+        // vLLM's 0 = on (the token's own log p only)
+        assert!(p(json!({"prompt_logprobs": 0, "max_tokens": 0})).prompt_logprobs);
+        assert!(!p(json!({"prompt_logprobs": false})).prompt_logprobs);
+        assert!(!p(json!({"prompt_logprobs": null})).prompt_logprobs);
+        for (v, mode) in [(json!(true), ""), (json!(null), ""), (json!(false), "off"),
+                          (json!("off"), "off"), (json!("read"), "read")] {
+            assert_eq!(p(json!({"prompt_cache": v.clone()})).prompt_cache, mode, "{v}");
+        }
+        // top_logprobs 0 without logprobs is fine and sends nothing
+        let z = p(json!({"top_logprobs": 0, "prompt_cache": true}));
+        assert_eq!((z.logprobs, z.top_logprobs, z.prompt_cache.as_str()), (false, 0, ""));
     }
 
     #[test]
