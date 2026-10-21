@@ -653,6 +653,32 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   top_p → draw (`make_sampler`, per-request key). Greedy stays argmax of
   `logits - logsumexp` in the model dtype — byte-identical to the old path. The old
   512-token presence window is gone (vLLM has none).
+- **Log-probabilities (2026-10-22, `docs/perf/2026-10-21/design/logprobs.md`, review
+  `reviews/logprobs.md`)**: `logprobs` / `top_logprobs` (≤ 20) per generated token (reasoning,
+  answer and the final EOS / stop token; raw logits before penalties / temperature, fp32
+  `logit − logsumexp`, built in `_step` on the same `async_eval` as the token and read after
+  `r.y.item()` only for rows that asked — the off path adds no op) and `prompt_logprobs`
+  (teacher forcing: the prefill keeps `return_hidden`'s post-norm hidden state and runs
+  `lm_head` in `QWEN_LOGPROBS_CHUNK` (256) row chunks, fp32 log-softmax of the next prompt
+  token; ~+10–12 % of a slab's FLOPs, only for such requests). Scored positions
+  `[start + 1, n)`: position 0 never, nothing at or below the cache resume point (its logits
+  are not kept) — `prompt_cache: false`/`"off"` = no lookup (cold, every position; still
+  stored), `"read"` = lookup, nothing stored (variants of one baseline); the lookup for
+  prompt_logprobs is over `ids[:-1]` so the last token is always scored. `max_tokens: 0`
+  (only with prompt_logprobs) ends the row inside `_prefill` after the store (`length`, no
+  `_join`, no decode step; the entry = prompt[:-1] as a generation's). Spans
+  (`_assistant_spans`): the k-th `<|im_start|>assistant` block ↔ the k-th assistant message,
+  matched from the end on a count mismatch (logged); `[start, end)` = after the header + the
+  template's `<think>` pre-open ([`<think>`, `\n\n`, `</think>`, `\n\n`] = thinking off,
+  [`<think>`, `\n`] = on) through `<|im_end|>`. The Ornith template renders a history
+  assistant message exactly as generation prompt + reply (tested on the real tokenizer), so
+  teacher-forced sums equal generation logprobs up to prefill-vs-decode kernel rounding
+  (CPU 8-bit fp16: ≤ 3e-3 per token). Wire: `Token.lp` (not aligned with `text`; an empty
+  Token may carry the EOS's lp), one `PromptLogprobs` event before Done; gateway: OpenAI
+  `choices[0].logprobs` (always present, null when off), top-level `prompt_logprobs` (null
+  where not scored) + `prompt_logprobs_messages` (per span: tokens / scored / logprob sum),
+  journal keeps only counts and sums. DFlash never takes such requests. Tests
+  `tests/test_logprobs.py`; real-model check `scripts/perf/logprobs/check_teacher_forcing.py`.
 - **Structured output / constrained tools** = **llguidance** (already an mlx-vlm
   dependency; Metal bitmask kernel; no grammar compile step, mask ~0.05–0.2 ms on the
   248K vocab; best JSON Schema coverage). `_Guide` masks logits before the sampler, so
@@ -742,6 +768,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_SDPA_FUSED` | worker | `1` — force MLX's fused SDPA for fp16-KV prefill slabs ≥ 512 over ≥ 32K keys (per call ×0.89 at 2048 × 32K, ×0.6–0.7 at 64K+; 64K prefill −3…5%, −1.3 GB peak) |
 | `QWEN_GDN_FAST` | worker | `0` — `mx.fast.gated_delta_update` for prefill slabs (×1.02 per slab; rounds the decay to fp16: KL 0.013 on 8K real tokens — rejected) |
 | `QWEN_VERIFY_EXACT_MAX_T` | worker | `8` — DFlash verify blocks ≤ this use mlx-vlm's exact verify kernels (DFlash == greedy), longer ones `quantized_matmul`; 0 = never, 16 = every adaptive block (the drafter's block_size 16; slower; a `QWEN_DRAFT_BLOCK` > 16 still has longer blocks on `quantized_matmul`); empty = default |
+| `QWEN_LOGPROBS_CHUNK` | worker | `256` — rows per `lm_head` chunk when scoring a prompt (`prompt_logprobs`): 256 × 248K × 6 B ≈ 0.38 GB transient |
 | `QWEN_GEN_SLOTS` | worker | `max(2·max_batch, 8)` — concurrent Generate RPCs, beyond = `RESOURCE_EXHAUSTED`; gRPC threads = slots + 8 (replaces `QWEN_GRPC_THREADS`) |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` (run under sudo) |
 
