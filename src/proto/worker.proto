@@ -56,6 +56,19 @@ message Params {
   bool include_stop_str_in_output = 24;
   optional bool add_generation_prompt = 25;  // absent = true
   bool continue_final_message = 26;
+  // Log-probabilities (raw logits, before penalties / temperature, fp32 log-softmax).
+  // logprobs: every generated token (EOS included) comes with its log p in Token.lp;
+  // top_logprobs: + the k most likely tokens at that step (0 = none; needs logprobs).
+  bool logprobs = 27;
+  uint32 top_logprobs = 28;
+  // prompt_logprobs (teacher forcing): log p of every prompt token computed in the
+  // prefill, sent as one PromptLogprobs event before Done; with it max_tokens may be
+  // 0 (prefill only: no decode step, finish "length", no Token events).
+  bool prompt_logprobs = 29;
+  // "" = normal; "off" = no lookup (cold prefill: every prompt position scored),
+  // the entry is still stored; "read" = lookup, but nothing stored (attribution
+  // variants of one baseline: their tails would only churn the cache).
+  string prompt_cache = 30;
 }
 
 // A function/tool call the model decided to make. `arguments` is a JSON string.
@@ -63,10 +76,39 @@ message ToolCall { string id = 1; string name = 2; string arguments = 3; }
 
 message Event {
   string id = 1;
-  oneof kind { Start start = 2; Token token = 3; Done done = 4; Error error = 5; }
+  oneof kind { Start start = 2; Token token = 3; Done done = 4; Error error = 5;
+               PromptLogprobs prompt_logprobs = 6; }
 }
 message Start { string role = 1; string model = 2; }   // model: id of the loaded model
-message Token { string text = 1; bool thinking = 2; }   // thinking=true while inside <think>
+// Token.text is a piece of detokenized text (not one token: stop-string hold-back,
+// UTF-8 completion, the <think> split). `lp`: the log-probabilities of the tokens the
+// scheduler read since the previous Token event (Params.logprobs), in order — they
+// are NOT aligned with `text`; concatenated over the stream they cover every generated
+// token (reasoning, answer and the final EOS / stop token alike). A Token event may
+// carry `lp` with an empty `text` (a held-back piece, the EOS).
+message Token { string text = 1; bool thinking = 2; repeated TokenLogprob lp = 3; }
+message TokenLogprob {
+  uint32 token_id = 1; string token = 2;   // token: tokenizer.decode([id])
+  float logprob = 3;
+  repeated TopLogprob top = 4;             // Params.top_logprobs most likely, descending
+}
+message TopLogprob { uint32 token_id = 1; string token = 2; float logprob = 3; }
+// Params.prompt_logprobs: the prompt's tokens and their log p. `tokens` has one entry
+// per prompt token; `logprobs[i]` is log p of prompt token `first + i` given the tokens
+// before it, for first + i < len(tokens): positions below `first` were not scored
+// (position 0 never; a prompt-cache hit resumed at first - 1, whose logits are not
+// kept). `spans`: the assistant messages' generated spans (see the design doc).
+message PromptLogprobs {
+  uint32 first = 1;
+  repeated TokenLogprob tokens = 2;        // token_id + token for every prompt position; logprob unused
+  repeated float logprobs = 3;
+  repeated Span spans = 4;
+}
+// One assistant message of the request: `message` its index in Request.messages;
+// [start, end) the token positions the model generated for it: after the
+// `<|im_start|>assistant\n` header and the template's `<think>` pre-open, through
+// its `<|im_end|>` inclusive.
+message Span { uint32 message = 1; uint32 start = 2; uint32 end = 3; }
 message Done  { string finish = 1; Usage usage = 2; repeated ToolCall tool_calls = 3; }
 message Error { string kind = 1; string msg = 2; }
 message Usage {

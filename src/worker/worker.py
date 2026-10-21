@@ -2296,11 +2296,153 @@ def _gdn_split(gdn, row, row_cache):
         row_cache[i].cache = [a[row:row + 1] for a in c.cache]
 
 
+# --- log-probabilities (Params.logprobs / top_logprobs / prompt_logprobs) ----
+# Raw: the model's own logits, before penalties / temperature / masks (vLLM
+# logprobs_mode=raw_logprobs), as fp32 logit - logsumexp. prompt_logprobs runs
+# lm_head over a prefill slab's final hidden states in chunks of this many rows
+# (the transient is chunk x vocab x (2 + 4) bytes: ~0.38 GB at 256 x 248K).
+LOGPROBS_CHUNK = max(1, int(os.environ.get("QWEN_LOGPROBS_CHUNK", "256")))
+MAX_TOP_LOGPROBS = 20                     # vLLM's default max_logprobs
+
+
+def _lm_head(lm, h):
+    """Logits of final hidden states `h`: LanguageModel.__call__'s own last
+    step (mlx-vlm 0.7.6 qwen3_5 / qwen3_5_moe: `out` = the model's output after
+    its final norm, which return_hidden appends as hidden_states[-1], goes
+    through embed_tokens.as_linear when the embeddings are tied, else lm_head)."""
+    if lm.args.tie_word_embeddings:
+        return lm.model.embed_tokens.as_linear(h)
+    return lm.lm_head(h)
+
+
+def _score(lm, h, targets, chunk=None):
+    """Teacher forcing over a prefill slab: h (1, n, H) final hidden states,
+    targets (1, n) the token after each position -> [log p(target_j)] (floats).
+    lm_head in chunks of `chunk` rows, each evaluated before the next is built
+    (the vocab-wide logits never exist for the whole slab)."""
+    chunk = chunk or LOGPROBS_CHUNK
+    n, out = h.shape[1], []
+    for a in range(0, n, chunk):
+        b = min(a + chunk, n)
+        lg = _lm_head(lm, h[:, a:b])
+        lse = mx.logsumexp(lg.astype(mx.float32), axis=-1)
+        tgt = mx.take_along_axis(lg, targets[:, a:b, None], axis=-1)[..., 0]
+        lp = tgt.astype(mx.float32) - lse
+        mx.eval(lp)
+        out += lp[0].tolist()
+    return out
+
+
+def _token_logprobs(x, y, k, keep=False):
+    """A decode step's raw logits x (1, V) and its token y (1,) -> lazy
+    (log p of y (1, 1), top-k ids (1, k), their log p (1, k), the whole
+    log-softmax row when `keep` (a forced token may replace y) else None);
+    no top when k == 0. Built inside the step (the same async_eval as y)."""
+    x = x.astype(mx.float32)
+    lp = x - mx.logsumexp(x, axis=-1, keepdims=True)
+    got = mx.take_along_axis(lp, y.reshape(1, 1), axis=-1)
+    idx = vals = None
+    k = min(k, lp.shape[-1])
+    if k > 0:
+        idx = mx.argpartition(-lp, kth=k - 1, axis=-1)[:, :k]
+        vals = mx.take_along_axis(lp, idx, axis=-1)
+        # sorted in fp32; the greedy draw is an argmax in the model dtype
+        # (fp16 on the GPU): on a near-tie the drawn token can be top[1]
+        order = mx.argsort(-vals, axis=-1)
+        idx = mx.take_along_axis(idx, order, axis=-1)
+        vals = mx.take_along_axis(vals, order, axis=-1)
+    return got, idx, vals, lp if keep else None
+
+
+def _forced_logprobs(lp, tok):
+    """The step's logprobs with a forced token (reasoning budget) instead of
+    the drawn one: its log p from the kept row, queued now."""
+    got = lp[3][:, tok:tok + 1]
+    mx.async_eval(got)
+    return got, lp[1], lp[2], None
+
+
+def _read_logprobs(lp):
+    """A row's evaluated step logprobs -> (log p, [(id, log p)] top, best first)."""
+    got, idx, vals, _ = lp
+    top = list(zip(idx[0].tolist(), vals[0].tolist())) if idx is not None else []
+    return got.item(), top
+
+
+def _wants(req, flag):
+    """A pb.Params flag of the request (False without Params: tests' bare _Req)."""
+    return bool(getattr(req.p, flag, False))
+
+
+PROMPT_CACHE_MODES = ("", "off", "read")
+
+
+def _cache_mode(req):
+    """Params.prompt_cache: "" normal; "off": no lookup (a cold prefill, every
+    prompt position scored), the entry is still stored; "read": the lookup as
+    usual, nothing stored (no prefill entry, no partial store on a cancel or
+    failure, no reply KV): attribution variants of one baseline leave the
+    cache as they found it."""
+    return getattr(req.p, "prompt_cache", "") or ""
+
+
+def _assistant_spans(ids, roles, hdr, skips, im_end, gen=False):
+    """The token spans the model generated for each assistant message ->
+    [(message index, start, end)]. A block is `hdr` = <|im_start|> assistant
+    \n; then the first of `skips` it starts with ([<think>, \n\n, </think>,
+    \n\n]: empty reasoning = the generation prompt with thinking off; then
+    [<think>, \n]: thinking on, the reasoning is generated) is the prompt's
+    too; `end` = its <|im_end|> + 1 (unterminated: the end of the ids). The
+    k-th block from the end is the k-th assistant message from the end of
+    `roles`; `gen`: the prompt ends with the generation prompt's header (an
+    unterminated last block with no message: dropped). A count mismatch
+    (message text holding the literal <|im_start|>assistant markup: an
+    echoed transcript, few-shot examples; usually before the real turns) is
+    logged and matched from the end: the latest messages keep their spans."""
+    blocks, n = [], len(ids)
+    for i in range(n - 1):
+        if ids[i] != hdr[0] or ids[i + 1] != hdr[1]:
+            continue
+        s = i + 2
+        if ids[s:s + len(hdr) - 2] == list(hdr[2:]):
+            s += len(hdr) - 2
+        for sk in skips:
+            if sk and ids[s:s + len(sk)] == list(sk):
+                s += len(sk)
+                break
+        e = next((j + 1 for j in range(s, n) if ids[j] == im_end), None)
+        blocks.append((s, e))
+    msgs = [k for k, r in enumerate(roles) if r == "assistant"]
+    if gen and blocks and blocks[-1][1] is None:
+        blocks.pop()                            # the generation prompt's header
+    if len(blocks) != len(msgs):
+        log.warning("prompt_logprobs: %d assistant blocks in the prompt, %d assistant messages: "
+                    "matched from the end", len(blocks), len(msgs))
+    pairs = list(zip(reversed(msgs), reversed(blocks)))[::-1]
+    return [(k, s, n if e is None else e) for k, (s, e) in pairs]
+
+
+def _span_tokens(tok, im_start):
+    """_assistant_spans' tokens for a tokenizer: the assistant header and the
+    two forms of the generation prompt's <think> pre-open (thinking off: an
+    empty reasoning block; on: <think>\n, the reasoning is generated), and
+    <|im_end|>. Ornith / Qwen3.5: [<|im_start|>, assistant, \n], [<think>,
+    \n\n, </think>, \n\n], [<think>, \n] (tests/test_logprobs.py checks the
+    real tokenizer and template). None: no such header."""
+    hdr = list(tok.encode("<|im_start|>assistant\n", add_special_tokens=False))
+    if len(hdr) < 2 or hdr[0] != im_start:
+        return None
+    skips = [list(tok.encode(x, add_special_tokens=False))
+             for x in (f"{THINK_OPEN}\n\n{THINK_CLOSE}\n\n", f"{THINK_OPEN}\n")]
+    return hdr, skips, tok.convert_tokens_to_ids("<|im_end|>")
+
+
 @dataclasses.dataclass(eq=False)
 class _Req:
     """A generation as the handler thread hands it to the scheduler (built
     without MLX). The scheduler answers on `out`: ("tok", id, shown) per output
-    token (shown False: an ignored EOS, not text), then ("done", finish) or
+    token (shown False: an ignored EOS, not text; with Params.logprobs a 4th
+    item (log p, [(id, log p)] top)), then ("done", finish) or
     ("error", kind, msg). `cancel` (Cancel RPC, a dropped stream, the handler's
     stop-string hit) evicts the request wherever it is."""
     id: str
@@ -2332,6 +2474,11 @@ class _Req:
     active: int = 0
     pool: int = 0
     batch_mean: float = 0.0
+    # Params.prompt_logprobs: (first scored position, [log p of ids[first:]]),
+    # set when the prefill ends; Params.logprobs: (id, log p, top) of the
+    # stop token a "stop" finish ended on (no "tok" event carries it)
+    plp: tuple | None = None
+    stop_lp: tuple | None = None
 
     @property
     def prompt_tokens(self):
@@ -2366,6 +2513,11 @@ class _Row:
         self.entry = None                           # weakref to the entry its prefill stored
         self.plan = None                            # (the prompt's slab ends, protected ckpts)
         self.why = None                             # finish reason (_finish)
+        # Params.logprobs: top_logprobs (0..20), else None (no logprobs op in the step)
+        self.lpk = (min(int(req.p.top_logprobs), MAX_TOP_LOGPROBS)
+                    if _wants(req, "logprobs") else None)
+        self.lp = None                              # logprobs of y (lazy, _token_logprobs)
+        self.lp_next = None                         # ... of the step just queued
 
     @property
     def sync(self):
@@ -2734,9 +2886,22 @@ class _Scheduler:
             e = m[1]()
             if e is not None and any(e is x for x in pc.entries):
                 return e, m[2]
-        e, depth = pc.peek(req.ids, self._ends(req))
+        look = self._lookup_ids(req)
+        if look is None:
+            return None, 0
+        e, depth = pc.peek(look, self._ends(req))
         req.peeked = (pc.version, weakref.ref(e) if e is not None else None, depth)
         return e, depth
+
+    @staticmethod
+    def _lookup_ids(req):
+        """The ids a prompt-cache lookup matches, None: no lookup
+        (prompt_cache "off"). A prompt_logprobs request resumes at most at
+        len - 2, so its last token is always scored (an exact repeat would
+        resume at len - 1, prefilling nothing)."""
+        if _cache_mode(req) == "off":
+            return None
+        return req.ids[:-1] if _wants(req, "prompt_logprobs") else req.ids
 
     def _wanted(self):
         """The entries the requests next in line would resume from at least
@@ -2798,6 +2963,11 @@ class _Scheduler:
         if (self.eng.draft is None or req.images or req.thinking is not None
                 or not (greedy or DRAFT_SAMPLING)):
             return False
+        if row.lpk is not None or _wants(req, "prompt_logprobs"):
+            # the DFlash loop computes neither (its prefill skips the logits,
+            # its verify rows are drafts): plain prefill + decoding
+            log.info("logprobs: speculative decoding off for this request")
+            return False
         if req.guide is not None or req.ctl.active:
             # DFlash drafts are not grammar-masked: the verify rows would each
             # need a mask over the draft prefix. Plain decoding instead.
@@ -2832,7 +3002,20 @@ class _Scheduler:
         use_cache = PROMPT_CACHE and not req.images
         bounds = self._bounds(req)
         ends = self._ends(req)
-        parent, reused, split = eng._pcache.lookup(ids, ends) if use_cache else (None, 0, 0)
+        look = self._lookup_ids(req)
+        skip = use_cache and look is None
+        # prompt_cache "read": a lookup as usual, nothing stored at the end
+        # (no checkpoints taken, no reply KV, no partial store)
+        keeps = use_cache and _cache_mode(req) != "read"
+        if skip:
+            # prompt_cache "off": a cold prefill (every position scored);
+            # the closest entry's common prefix still places the divergence
+            # checkpoint (no hit / miss counted, no clock tick)
+            parent, reused, split = None, 0, eng._pcache._scan(ids, ends)[2]
+        elif use_cache:
+            parent, reused, split = eng._pcache.lookup(look, ends)
+        else:
+            parent, reused, split = None, 0, 0
         inherit = None
         if parent is not None:
             # the first update's size: restore pre-sizes the buffer for it
@@ -2854,13 +3037,16 @@ class _Scheduler:
         else:
             cache = make_prompt_cache(lm)
             input_ids = _vision_arrays(req.vision)["input_ids"] if req.images else mx.array([ids])
-            if use_cache:
+            if skip:
+                log.info("id=%s prompt cache lookup skipped (prompt_cache=off; common prefix "
+                         "%d, %d entries)", req.id, split, len(eng._pcache.entries))
+            elif use_cache:
                 log.info("id=%s prompt cache MISS (common prefix %d, %d entries)",
                          req.id, split, len(eng._pcache.entries))
         req.reused = reused
         row.cached = reused > 0
         keep, protect, ckpts = set(), set(), {}
-        if use_cache:
+        if keeps:
             end = len(ids) - 1
 
             def below(c):                       # the closest slab end at or below c
@@ -2957,7 +3143,12 @@ class _Scheduler:
             nonlocal inherit
             row.parent = None
             try:
-                if (use_cache and (upto is None or upto > reused)
+                if not keeps:
+                    if use_cache:
+                        log.info("id=%s prompt cache: read-only (prompt_cache=read), nothing "
+                                 "stored (reused=%d%s)", req.id, reused,
+                                 "" if upto is None else f", {why} at {upto}/{len(ids)}")
+                elif ((upto is None or upto > reused)
                         and all(getattr(c, "keys", 1) is not None for c in cache)):
                     store(cache, upto, why)
             finally:
@@ -3056,6 +3247,11 @@ class _Scheduler:
             vision_pos = deltas = None
             lm._position_ids = None
         pos = start if pixel_values is None else int(cache[lm.model.fa_idx].offset)
+        # prompt_logprobs (text only: Check refuses images): the slab's final
+        # hidden states (return_hidden) through lm_head in chunks after the
+        # slab's cache eval; row j's target is the token after it. Without it
+        # the forward is exactly the one below (skip_logits, no hidden).
+        scored = [] if _wants(req, "prompt_logprobs") and pixel_values is None else None
         # A text prefill that stops early (cancel; a failure outside the
         # forward) stores the prefix it holds, prompt[:pos] with pos the last
         # completed slab's end, once it prefilled a slab past `start`
@@ -3078,14 +3274,21 @@ class _Scheduler:
                 # skip_logits: no lm_head over the slab (248K vocab = ~12% of
                 # the per-token FLOPs); only the cache matters here.
                 intact = False                  # the forward moves every cache's offset
-                lm(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n], cache=cache,
-                   skip_logits=True, **kwargs)
+                if scored is None:
+                    lm(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n], cache=cache,
+                       skip_logits=True, **kwargs)
+                else:
+                    hid = lm(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n], cache=cache,
+                             skip_logits=True, return_hidden=True, **kwargs).hidden_states[-1]
                 self.quantize(cache)
                 mx.eval([c.state for c in cache])
                 pos += n
                 intact = True
                 if pos in cuts:
                     on_ckpt(pos, cache)
+                if scored is not None:
+                    scored += _score(lm, hid, input_ids[:, 1:n + 1])
+                    hid = None
                 inputs_embeds = inputs_embeds[:, n:]
                 input_ids = input_ids[:, n:]
                 if CLEAR_CACHE:
@@ -3106,7 +3309,18 @@ class _Scheduler:
             self._finish(row, "cancelled")
             return
         on_prefilled(cache)
+        if scored is not None:
+            # positions start + 1 .. len - 1 (the last slab scored the last token)
+            assert len(scored) == len(req.ids) - 1 - start, (len(scored), len(req.ids), start)
+            req.plp = (start + 1, scored)
         row.pos = pos
+        if req.max_tokens == 0:
+            # prefill only (prompt_logprobs): it ends here, never joins the
+            # batch (no GDN restack, no cascade group, no reply KV); the
+            # entry was stored above as a generation's would be
+            self._finish(row, "length")
+            self._slab_done(time.time() - seg)
+            return
         if deltas is not None:
             row.delta = int(deltas.reshape(-1)[0].item())
         row.y = mx.array(req.ids[-1:])
@@ -4009,6 +4223,7 @@ class _Scheduler:
             logits = [lg[i:i + 1] for i in range(B)]
         nxt = []
         pend = []                                   # (index in nxt, row, logits): drawn together
+        want = []                                   # (index in nxt, row, raw logits): logprobs rows
         for r, x in zip(rows, logits):
             r.pos += 1
             self._regrow(r)
@@ -4016,6 +4231,8 @@ class _Scheduler:
                 nxt.append(None)
                 continue
             r.req.steps, r.req.rows_sum = r.req.steps + 1, r.req.rows_sum + B
+            if r.lpk is not None:
+                want.append((len(nxt), r, x))
             try:
                 if B > 1 and r.req.guide is None:
                     pend.append((len(nxt), r, self._logits(r, x)))
@@ -4030,7 +4247,16 @@ class _Scheduler:
                              on_error=lambda i, e: self._fail(pend[i][1], e))
             for (j, _, _), y in zip(pend, ys):
                 nxt[j] = y
-        mx.async_eval([y for y in nxt if y is not None])
+        outs = [y for y in nxt if y is not None]
+        for j, r, x in want:
+            # raw logprobs of the drawn token (+ top-k): built here, queued
+            # with the tokens (never an op on the step's outputs later);
+            # read after the token, only for these rows
+            r.lp_next = None
+            if nxt[j] is not None and not r.done:
+                r.lp_next = _token_logprobs(x, nxt[j], r.lpk, keep=r.req.thinking is not None)
+                outs += [a for a in r.lp_next[:3] if a is not None]
+        mx.async_eval(outs)
         self.log_rows += B
         return nxt
 
@@ -4081,7 +4307,9 @@ class _Scheduler:
         # for it too: the GPU then idled while the host built the next step
         # (measured −5…12% step time at B = 8/16, step_profile).
         toks = [r.y.item() for r in live]
-        for r, tok in zip(live, toks):
+        # logprobs rows only: evaluated with their token's step (no new op)
+        lps = [_read_logprobs(r.lp) if r.lp is not None else None for r in live]
+        for r, tok, lpi in zip(live, toks, lps):
             req = r.req
             if r.fed is not None:                   # in feed order (the EOS too: _store_reply)
                 r.fed.append(tok)
@@ -4091,13 +4319,17 @@ class _Scheduler:
                 why = req.ctl.stop(tok) if req.ctl.active else (
                     "stop" if self.eng.stopping(tok) else None)
                 if why == "stop":
+                    if lpi is not None:             # the stop token's log p (no "tok" event)
+                        req.stop_lp = (tok, *lpi)
                     self._finish(r, "stop")
                     continue
                 if not ahead:
                     if req.guide is not None:
                         req.guide.consume(tok)
                     req.ctl.history.append(tok)
-                req.out.put(("tok", tok, why != "skip"))   # an ignored EOS is not text
+                # an ignored EOS is not text
+                req.out.put(("tok", tok, why != "skip") if lpi is None
+                            else ("tok", tok, why != "skip", lpi))
                 r.n += 1
             except Exception as e:  # noqa: BLE001 — e.g. grammar rejected the token
                 self._fail(r, e)
@@ -4111,6 +4343,10 @@ class _Scheduler:
                 # KV cache stays consistent)
                 forced = r.req.thinking.pop_forced_token_id() if r.req.thinking is not None else None
                 r.y = y if forced is None else mx.array([forced], dtype=y.dtype)
+                if r.lpk is not None:
+                    lp, r.lp_next = r.lp_next, None
+                    r.lp = (lp if forced is None or lp is None
+                            else _forced_logprobs(lp, forced))
                 r.first = False
         self.steps += 1
         self.failures = 0                       # consecutive failed decode steps
@@ -4149,6 +4385,8 @@ class Engine:
         self._cancels_lock = threading.Lock()
         self._pcache = _PrefixCache()
         self.draft = None
+        self._span_tokens = None        # (header, think pre-opens, <|im_end|>): _assistant_spans
+        self._tok_str = {}              # id -> tokenizer.decode([id]) (logprobs; vocab-bounded)
 
     def load(self):
         from mlx_vlm import load
@@ -4207,6 +4445,10 @@ class Engine:
         # first user message by it); None: unknown, assume a system message
         role = list(_tok.encode("<|im_start|>user", add_special_tokens=False))
         self._im_user = role[1] if len(role) == 2 and role[0] == self._im_start else None
+        self._span_tokens = _span_tokens(_tok, self._im_start)
+        if self._span_tokens is None:
+            log.warning("no <|im_start|>assistant header in the vocab: prompt_logprobs "
+                        "without spans")
         tpl = getattr(self.processor, "chat_template", None) or getattr(_tok, "chat_template", "") or ""
         import jinja2
         import jinja2.meta
@@ -4346,6 +4588,19 @@ class Engine:
         if images and "vision_config" not in self.config:
             raise _Reject("invalid_request", f"{self.model_id} is a text-only checkpoint: "
                           "image inputs are not supported")
+        if p.prompt_logprobs and images:
+            raise _Reject("invalid_request", "prompt_logprobs is not supported with image inputs")
+        if p.HasField("max_tokens") and p.max_tokens == 0 and not p.prompt_logprobs:
+            raise _Reject("invalid_request", "max_tokens must be at least 1, got 0 "
+                          "(0 = prefill only, with prompt_logprobs)")
+        if p.prompt_cache not in PROMPT_CACHE_MODES:
+            raise _Reject("invalid_request", f"prompt_cache must be one of \"\", \"off\", "
+                          f"\"read\", got {p.prompt_cache!r}")
+        if p.top_logprobs and not p.logprobs:
+            raise _Reject("invalid_request", "top_logprobs needs logprobs")
+        if p.top_logprobs > MAX_TOP_LOGPROBS:
+            raise _Reject("invalid_request", f"top_logprobs must be at most {MAX_TOP_LOGPROBS}, "
+                          f"got {p.top_logprobs}")
         # the ids index vocab-sized masks, and MLX indexing has no bounds check
         for name in ("allowed_token_ids", "stop_token_ids"):
             if any(t >= self.vocab for t in getattr(p, name)):
@@ -4448,6 +4703,45 @@ class Engine:
         if "images" in inputs:
             inputs["pixel_values"] = inputs.pop("images")
         return {k: np.array(v) if isinstance(v, mx.array) else v for k, v in inputs.items()}
+
+    # --- log-probabilities (handler thread) ---------------------------------------
+    def _token_strs(self, ids):
+        """tokenizer.decode([id]) for each id (memoized)."""
+        memo = self._tok_str
+        miss = list({i for i in ids if i not in memo})
+        if miss:
+            tok = getattr(self.processor, "tokenizer", self.processor)
+            bd = getattr(tok, "batch_decode", None)
+            strs = bd([[i] for i in miss]) if bd is not None else [tok.decode([i]) for i in miss]
+            memo.update(zip(miss, strs))
+        return [memo[i] for i in ids]
+
+    def _token_logprob(self, tok, lp, top):
+        """A generated token's log p (+ top) -> pb.TokenLogprob."""
+        strs = self._token_strs([tok] + [t for t, _ in top])
+        return pb.TokenLogprob(token_id=tok, token=strs[0], logprob=lp,
+                               top=[pb.TopLogprob(token_id=t, token=x, logprob=v)
+                                    for (t, v), x in zip(top, strs[1:])])
+
+    def _prompt_logprobs(self, req, r):
+        """The PromptLogprobs event: every prompt token, the log p of
+        positions first..len-1 (the scheduler's prefill) and the assistant
+        messages' spans."""
+        first, lps = r.plp
+        ids = r.ids
+        p = req.params
+        gen = ((not p.HasField("add_generation_prompt") or p.add_generation_prompt)
+               and not p.continue_final_message)
+        spans = (_assistant_spans(ids, [m.role for m in req.messages], *self._span_tokens, gen=gen)
+                 if self._span_tokens else [])
+        log.info("id=%s prompt_logprobs: scored=[%d, %d) of %d spans=%d chunk=%d", req.id,
+                 first, len(ids), len(ids), len(spans), LOGPROBS_CHUNK)
+        return pb.Event(id=req.id, prompt_logprobs=pb.PromptLogprobs(
+            first=first,
+            tokens=[pb.TokenLogprob(token_id=i, token=x)
+                    for i, x in zip(ids, self._token_strs(ids))],
+            logprobs=lps,
+            spans=[pb.Span(message=k, start=a, end=b) for k, a, b in spans]))
 
     # --- generation (gRPC handler thread) ----------------------------------------
     def _event(self, r):
@@ -4557,11 +4851,19 @@ class Engine:
             stop = _StopFilter(list(p.stop), keep=p.include_stop_str_in_output)
             answer_buf = []   # tools mode: buffer answer tokens, parse at the end
             cut = []          # no tools: a <tool_call> in the answer was seen
+            lp_pend = []      # logprobs: pb.TokenLogprob read since the last Token event
+
+            def token(text, thinking):
+                # the next Token event carries the logprobs read so far (not
+                # aligned with its text; possibly with an empty text)
+                ev = pb.Event(id=req.id, token=pb.Token(text=text, thinking=thinking, lp=lp_pend))
+                lp_pend.clear()
+                return ev
 
             def split(text):
                 think_part, ans_part = state.feed(text)
                 if think_part:
-                    yield pb.Event(id=req.id, token=pb.Token(text=think_part, thinking=True))
+                    yield token(think_part, True)
                 if ans_part and not tools and not cut and TOOL_OPEN in ans_part:
                     # vLLM's parser runs without tools too: the call and all text
                     # after it leave the answer (tool_calls are not returned)
@@ -4575,7 +4877,7 @@ class Engine:
                         # Don't stream raw answer (may contain <tool_call> XML); buffer it.
                         answer_buf.append(ans_part)
                     else:
-                        yield pb.Event(id=req.id, token=pb.Token(text=ans_part, thinking=False))
+                        yield token(ans_part, False)
 
             ttft_ms = 0
             while True:
@@ -4599,6 +4901,8 @@ class Engine:
                     if ev[2]:                         # an ignored EOS is not text
                         detok.add_token(tok)
                     text = detok.last_segment
+                    if len(ev) > 3:                   # Params.logprobs
+                        lp_pend.append(self._token_logprob(tok, *ev[3]))
                 if cancel_ev.is_set():
                     if not ended:
                         self._drain(r)
@@ -4611,6 +4915,10 @@ class Engine:
                 # vLLM: stop strings apply to the whole output, reasoning included,
                 # and only once min_tokens are out
                 yield from split(stop.feed(text) if state.gen_tokens > p.min_tokens else text)
+                if lp_pend:
+                    # no text went out for it (held back, buffered, an ignored
+                    # EOS): the logprobs go now, on an empty Token
+                    yield token("", state.in_thinking)
                 if stop.hit:
                     cancel_ev.set()                   # the scheduler evicts the row
                     if not ended:
@@ -4621,6 +4929,10 @@ class Engine:
                     break
             if not stop.hit:
                 yield from split(stop.flush())
+                if finish == "stop" and r.stop_lp is not None:
+                    # the EOS / stop token the row ended on (a stop string's
+                    # hit cuts what follows it, this token included)
+                    lp_pend.append(self._token_logprob(*r.stop_lp))
 
             gen_s = time.time() - r.t0 - ttft_ms / 1000
             tps = state.gen_tokens / gen_s if gen_s > 0 else 0.0
@@ -4647,11 +4959,15 @@ class Engine:
                              req.id, len(calls))
                     calls = calls[:1]
                 if content:
-                    yield pb.Event(id=req.id, token=pb.Token(text=content, thinking=False))
+                    yield token(content, False)
                 # vLLM: auto -> "tool_calls" whenever a call was parsed (even at the
                 # length limit); required -> only instead of "stop"; named keeps it
                 if calls and (choice == "auto" or (choice == "required" and finish == "stop")):
                     finish = "tool_calls"
+            if lp_pend:
+                yield token("", False)
+            if p.prompt_logprobs and r.plp is not None:
+                yield self._prompt_logprobs(req, r)
             yield _done(r, finish, state, ttft_ms, calls, tps)
         except Exception as e:  # noqa: BLE001 — map any failure to a wire Error
             log.exception("generation failed: %s", req.id)
