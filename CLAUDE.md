@@ -678,7 +678,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   `choices[0].logprobs` (always present, null when off), top-level `prompt_logprobs` (null
   where not scored) + `prompt_logprobs_messages` (per span: tokens / scored / logprob sum),
   journal keeps only counts and sums. DFlash never takes such requests. Tests
-  `tests/test_logprobs.py`; real-model check `scripts/perf/logprobs/check_teacher_forcing.py`.
+  `tests/test_logprobs.py`; real-model check `scripts/perf/logprobs/check_teacher_forcing.py` (9B, 2026-10-22,
+  `docs/perf/2026-10-21/logprobs_check_real.json`: 5 AppWorld calls, generation byte-equal with the flags
+  off, |Σtf − Σgen| ≤ 0.019 nat on 23–50 tokens, hit == cold values, 9.5–12.4K cold scored in 28–38 s).
 - **Structured output / constrained tools** = **llguidance** (already an mlx-vlm
   dependency; Metal bitmask kernel; no grammar compile step, mask ~0.05–0.2 ms on the
   248K vocab; best JSON Schema coverage). `_Guide` masks logits before the sampler, so

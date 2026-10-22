@@ -1,0 +1,217 @@
+[
+ {
+  "file": "/Users/user/Projects/appworld/experiments/outputs/ornith9b_react_train/tasks/07b42fd_1/logs/lm_calls.jsonl",
+  "call": "128b381f55664da193b27f79b275dd69",
+  "prompt_tokens": 12373,
+  "gen_tokens": 46,
+  "gen_sum": -3.4267521092899997,
+  "gen_eq_off": true,
+  "gen_eq_recorded": true,
+  "tf_span": {
+   "message": 49,
+   "role": "assistant",
+   "start": 12373,
+   "end": 12419,
+   "tokens": 46,
+   "scored": 46,
+   "logprob": -3.4252848625183105
+  },
+  "tf_sum": -3.4252848625183105,
+  "d_tf_gen": 0.0014672467716891902,
+  "tf_scored_full": true,
+  "hit_first": 12288,
+  "hit_cached": 12287,
+  "hit_values_equal": true,
+  "hit_span": {
+   "message": 49,
+   "role": "assistant",
+   "start": 12373,
+   "end": 12419,
+   "tokens": 46,
+   "scored": 46,
+   "logprob": -3.4252848625183105
+  },
+  "var_cached": 0,
+  "var_sum": -3.347804546356201,
+  "d_var": 0.07748031616210938,
+  "t": {
+   "gen": 24.185544967651367,
+   "gen_off": 1.3848791122436523,
+   "tf": 28.021913290023804,
+   "hit": 0.4569559097290039,
+   "var": 30.22760510444641
+  }
+ },
+ {
+  "file": "/Users/user/Projects/appworld/experiments/outputs/ornith9b_react_train/tasks/07b42fd_1/logs/lm_calls.jsonl",
+  "call": "4d22989ec0374a49ab181349dddd0d92",
+  "prompt_tokens": 12447,
+  "gen_tokens": 48,
+  "gen_sum": -2.75920153607,
+  "gen_eq_off": true,
+  "gen_eq_recorded": true,
+  "tf_span": {
+   "message": 51,
+   "role": "assistant",
+   "start": 12447,
+   "end": 12495,
+   "tokens": 48,
+   "scored": 48,
+   "logprob": -2.746133327484131
+  },
+  "tf_sum": -2.746133327484131,
+  "d_tf_gen": 0.013068208585869101,
+  "tf_scored_full": true,
+  "hit_first": 12288,
+  "hit_cached": 12287,
+  "hit_values_equal": true,
+  "hit_span": {
+   "message": 51,
+   "role": "assistant",
+   "start": 12447,
+   "end": 12495,
+   "tokens": 48,
+   "scored": 48,
+   "logprob": -2.746133327484131
+  },
+  "var_cached": 0,
+  "var_sum": -3.1582021713256836,
+  "d_var": -0.41206884384155273,
+  "t": {
+   "gen": 1.8007328510284424,
+   "gen_off": 1.440821647644043,
+   "tf": 30.308423042297363,
+   "hit": 0.6173818111419678,
+   "var": 30.933501958847046
+  }
+ },
+ {
+  "file": "/Users/user/Projects/appworld/experiments/outputs/ornith9b_react_train/tasks/07b42fd_2/logs/lm_calls.jsonl",
+  "call": "d36e1a1915d741dd9a1bade86a0478a9",
+  "prompt_tokens": 11750,
+  "gen_tokens": 50,
+  "gen_sum": -3.14524316966,
+  "gen_eq_off": true,
+  "gen_eq_recorded": true,
+  "tf_span": {
+   "message": 47,
+   "role": "assistant",
+   "start": 11750,
+   "end": 11800,
+   "tokens": 50,
+   "scored": 50,
+   "logprob": -3.1452183723449707
+  },
+  "tf_sum": -3.1452183723449707,
+  "d_tf_gen": 2.479731502935678e-05,
+  "tf_scored_full": true,
+  "hit_first": 11559,
+  "hit_cached": 11558,
+  "hit_values_equal": true,
+  "hit_span": {
+   "message": 47,
+   "role": "assistant",
+   "start": 11750,
+   "end": 11800,
+   "tokens": 50,
+   "scored": 50,
+   "logprob": -3.1452183723449707
+  },
+  "var_cached": 0,
+  "var_sum": -3.0178728103637695,
+  "d_var": 0.12734556198120117,
+  "t": {
+   "gen": 26.851516723632812,
+   "gen_off": 1.4897150993347168,
+   "tf": 32.499606132507324,
+   "hit": 0.7826671600341797,
+   "var": 34.674094915390015
+  }
+ },
+ {
+  "file": "/Users/user/Projects/appworld/experiments/outputs/ornith9b_react_train/tasks/07b42fd_2/logs/lm_calls.jsonl",
+  "call": "56db329885a6461db4e9e3b947d3e9d0",
+  "prompt_tokens": 11902,
+  "gen_tokens": 23,
+  "gen_sum": -3.04896115326,
+  "gen_eq_off": true,
+  "gen_eq_recorded": true,
+  "tf_span": {
+   "message": 49,
+   "role": "assistant",
+   "start": 11902,
+   "end": 11925,
+   "tokens": 23,
+   "scored": 23,
+   "logprob": -3.0303993225097656
+  },
+  "tf_sum": -3.0303993225097656,
+  "d_tf_gen": 0.01856183075023443,
+  "tf_scored_full": true,
+  "hit_first": 11896,
+  "hit_cached": 11895,
+  "hit_values_equal": true,
+  "hit_span": {
+   "message": 49,
+   "role": "assistant",
+   "start": 11902,
+   "end": 11925,
+   "tokens": 23,
+   "scored": 23,
+   "logprob": -3.0303993225097656
+  },
+  "var_cached": 0,
+  "var_sum": -3.631228446960449,
+  "d_var": -0.6008291244506836,
+  "t": {
+   "gen": 1.7794630527496338,
+   "gen_off": 0.7374482154846191,
+   "tf": 38.10597229003906,
+   "hit": 0.20153117179870605,
+   "var": 38.9042649269104
+  }
+ },
+ {
+  "file": "/Users/user/Projects/appworld/experiments/outputs/ornith9b_react_train/tasks/07b42fd_3/logs/lm_calls.jsonl",
+  "call": "d732c5f5232d4497ac5daf3b85da4e13",
+  "prompt_tokens": 9515,
+  "gen_tokens": 49,
+  "gen_sum": -1.62590599421,
+  "gen_eq_off": true,
+  "gen_eq_recorded": true,
+  "tf_span": {
+   "message": 49,
+   "role": "assistant",
+   "start": 9515,
+   "end": 9564,
+   "tokens": 49,
+   "scored": 49,
+   "logprob": -1.6236376762390137
+  },
+  "tf_sum": -1.6236376762390137,
+  "d_tf_gen": 0.0022683179709863666,
+  "tf_scored_full": true,
+  "hit_first": 9509,
+  "hit_cached": 9508,
+  "hit_values_equal": true,
+  "hit_span": {
+   "message": 49,
+   "role": "assistant",
+   "start": 9515,
+   "end": 9564,
+   "tokens": 49,
+   "scored": 49,
+   "logprob": -1.6236376762390137
+  },
+  "var_cached": 0,
+  "var_sum": -1.5708107948303223,
+  "d_var": 0.052826881408691406,
+  "t": {
+   "gen": 28.098092794418335,
+   "gen_off": 1.661747932434082,
+   "tf": 32.41975498199463,
+   "hit": 0.29810214042663574,
+   "var": 31.471619129180908
+  }
+ }
+]
