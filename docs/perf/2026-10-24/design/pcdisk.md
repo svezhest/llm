@@ -263,7 +263,10 @@ mean a gateway change as well; that is left to the integrator.
 | `test_load_while_rows_decode` | the head waits for its load while a row decodes |
 | `test_wait_bound_and_abandoned_load` | the `WAIT_S` bound, and the idle pass frees an abandoned load |
 
-Full suite (`pytest -q --ignore tests/test_mrqmm.py`): see the commit / report.
+Full suite (`pytest -q --ignore tests/test_mrqmm.py`, 2026-10-24): 359 passed, 49 skipped,
+9.5 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
+device, came back bit-exact (zero-copy views and loader-thread `mx.array` on Metal); it was not
+a speed measurement.
 
 ## GPU plan
 
