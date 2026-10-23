@@ -2244,6 +2244,15 @@ def _gdn_row_bytes(lm):
     return n
 
 
+def _weight_bytes(lm):
+    """Weight bytes a decode step reads: all of the language model but the
+    embedding table (a gather), unless the head is tied to it."""
+    from mlx.utils import tree_flatten
+    params = tree_flatten(lm.parameters())
+    tied = not any(k.startswith("lm_head") for k, _ in params)
+    return sum(v.nbytes for k, v in params if tied or "embed_tokens" not in k)
+
+
 def _gdn_zero(layer, dtype):
     """The state Qwen3_5GatedDeltaNet starts from (a 1-token prompt has none yet)."""
     la = layer.linear_attn
@@ -2611,6 +2620,11 @@ class _Scheduler:
         self.wired = None
         self.hdtype = None
         self.log_at, self.log_steps, self.log_rows = time.time(), 0, 0
+        # per log window: wall time of decode / prefill ticks, decode bytes
+        # (weights + KV + recurrent state per step: the bandwidth floor)
+        self.log_dec = self.log_pf = 0.0
+        self.log_bytes = 0
+        self.w_bytes = _weight_bytes(self.lm)
         self.thread = None
         self.closed = None              # (kind, msg) once the scheduler stopped or died
         self.stopping = False
@@ -2743,10 +2757,17 @@ class _Scheduler:
             r.out.put(("done", "cancelled"))
         if self.task is None and self.waiting:
             self._admit()
+        t = time.time()
         if self.task is not None and (not self.rows or time.time() >= self.resume):
             self._advance()
+            self.log_pf += time.time() - t
         elif self.rows:
+            steps = self.steps
+            moved = self._step_bytes(self.rows)
             self._iterate()
+            if self.steps != steps:
+                self.log_dec += time.time() - t
+                self.log_bytes += moved
         if self.clear:
             # a finished long row's KV and prefill buffers go back to the pool
             if CLEAR_CACHE:
@@ -2764,6 +2785,16 @@ class _Scheduler:
         # +5%: a KVCache grows by concatenating 256-token steps; the recurrent
         # state twice: the queued step's output exists beside its input
         return int(kv * 1.05) + 2 * self.gdn_row + (8 << 20)
+
+    def _step_bytes(self, rows):
+        """Bytes a decode step over `rows` must read at least: the weights
+        once, every row's KV, its recurrent state read and written."""
+        start, kv = self.kv["quantized_kv_start"], 0
+        for r in rows:
+            n = r.pos
+            kv += (start * self.kv_fp16 + (n - start) * self.kv_q
+                   if self.kv["kv_bits"] and n >= start else n * self.kv_fp16)
+        return self.w_bytes + kv + 2 * len(rows) * self.gdn_row
 
     def _tokens(self, req):
         return len(req.ids) + min(req.max_tokens, RESERVE_TOKENS)
@@ -4360,14 +4391,24 @@ class _Scheduler:
             return
         steps = self.steps - self.log_steps
         if steps or self.rows or self.waiting or self.task:
+            # rows / waiting / prefilling: at this moment; the rest over the
+            # window. step_ms = decode ticks' wall time per step (the step-ahead
+            # makes it the GPU's step time), gbps = the bytes a step must read
+            # (_step_bytes) over it; prefill_s / decode_s = the window's split
             log.info("batch: rows=%d waiting=%d prefilling=%s steps/s=%.1f mean_rows=%.2f "
+                     "step_ms=%.1f gbps=%.0f decode_s=%.1f prefill_s=%.1f "
                      "reserved=%.2f/%.2fGiB pcache=%.2fGiB active=%.2fGiB groups=%d grouped=%d",
                      len(self.rows), len(self.waiting),
                      self.task_row.req.id if self.task_row is not None else "-",
                      steps / (now - self.log_at), self.log_rows / steps if steps else 0.0,
+                     1e3 * self.log_dec / steps if steps else 0.0,
+                     self.log_bytes / self.log_dec / 1e9 if self.log_dec else 0.0,
+                     self.log_dec, self.log_pf,
                      self.reserved / GIB, self.budget / GIB, self.eng._pcache.bytes / GIB,
                      mx.get_active_memory() / GIB, self.n_groups, self.n_grouped)
         self.log_at, self.log_steps, self.log_rows = now, self.steps, 0
+        self.log_dec = self.log_pf = 0.0
+        self.log_bytes = 0
 
 
 class Engine:

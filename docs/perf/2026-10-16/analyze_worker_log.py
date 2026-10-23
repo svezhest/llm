@@ -18,7 +18,10 @@ for line in open(path, errors="replace"):
     if msg.startswith("batch: rows="):
         d = dict(kv.split("=", 1) for kv in msg[len("batch: "):].split() if "=" in kv)
         B.append((ts, int(d["rows"]), int(d["waiting"]), d["prefilling"] != "-", float(d["steps/s"]), float(d["mean_rows"]),
-                  float(d["pcache"].rstrip("GiB")), float(d["active"].rstrip("GiB"))))
+                  float(d["pcache"].rstrip("GiB")), float(d["active"].rstrip("GiB")),
+                  # since 2026-10-24: decode-tick wall per step, bandwidth, window split
+                  float(d.get("step_ms", "nan")), float(d.get("gbps", "nan")),
+                  float(d.get("decode_s", "nan")), float(d.get("prefill_s", "nan"))))
         continue
     mm = re.match(r"id=(\S+) (.*)", msg)
     if not mm: continue
@@ -73,5 +76,14 @@ for rows in range(0, 17):
     for pf in (False, True):
         xs = [b[4] for b in B if b[1] == rows and b[3] == pf]
         if xs: print(f"  rows={rows:>2} prefilling={'y' if pf else 'n'}: ticks={len(xs)} steps/s mean={st.mean(xs):.2f}")
+S = [b for b in B if b[8] == b[8] and b[10] > 0]          # windows with the new fields and decode
+if S:
+    print("\ndecode step (decode ticks only; step_ms = wall per step, gbps = bytes a step must read / wall):")
+    for rows in range(1, 17):
+        xs = [b for b in S if round(b[5]) == rows]
+        if xs: print(f"  mean_rows≈{rows:>2}: windows={len(xs)} step_ms p50={q([b[8] for b in xs],.5):.1f} "
+                     f"gbps p50={q([b[9] for b in xs],.5):.0f}")
+    tot = sum(b[10] + b[11] for b in S)
+    print(f"window time: decode {100*sum(b[10] for b in S)/tot:.0f}% / prefill {100*sum(b[11] for b in S)/tot:.0f}% of busy")
 print(f"ticks with prefill in progress: {100*sum(b[3] for b in B)/len(B):.0f}%;  waiting>0: {100*sum(b[2]>0 for b in B)/len(B):.0f}%;  mean rows {st.mean(b[1] for b in B):.2f}")
 print(f"pcache GiB max {max(b[6] for b in B):.2f}, active GiB max {max(b[7] for b in B):.2f}")
