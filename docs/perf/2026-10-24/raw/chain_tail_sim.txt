@@ -1,0 +1,168 @@
+
+== dist=appworld user0=300 CHAIN_TAIL=4096  turns=30 seeds=[1, 2]  (turns >= 3: n=54)
+  prompt L mean 18243, last message mean/p50/p90     773    523   2059
+  states/entry mean 5.26 (max 7), 9B MB/entry mean 869, states MB mean 271
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next           803    592   2068         0      0      0
+  regen           34      7    159        33      6    158
+  edit@0.25      860    648   2151       274    218    600
+  edit@0.5       860    648   2151       467    354   1115
+  edit@0.75      860    648   2151       659    518   1629
+  edit@0.95      746    618   1330       700    552   1258
+  back2         3472   1550  10290      3079   1143  10072
+
+== dist=appworld user0=300 CHAIN_TAIL=2048  turns=30 seeds=[1, 2]  (turns >= 3: n=54)
+  prompt L mean 18243, last message mean/p50/p90     773    523   2059
+  states/entry mean 4.35 (max 6), 9B MB/entry mean 823, states MB mean 224
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next           803    592   2068         0      0      0
+  regen           34      7    159        33      6    158
+  edit@0.25      860    648   2151       274    218    600
+  edit@0.5       860    648   2151       467    354   1115
+  edit@0.75      860    648   2151       659    518   1629
+  edit@0.95      746    618   1330       700    552   1258
+  back2         9336   8688  19616      8943   8586  19400
+
+== dist=appworld user0=300 CHAIN_TAIL=0  turns=30 seeds=[1, 2]  (turns >= 3: n=54)
+  prompt L mean 18243, last message mean/p50/p90     773    523   2059
+  states/entry mean 3.93 (max 5), 9B MB/entry mean 801, states MB mean 202
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next           803    592   2068         0      0      0
+  regen           34      7    159        33      6    158
+  edit@0.25      860    648   2151       274    218    600
+  edit@0.5       860    648   2151       467    354   1115
+  edit@0.75      860    648   2151       659    518   1629
+  edit@0.95      784    618   1383       738    586   1311
+  back2        11820  12742  21010     11427  12084  20059
+
+== dist=appworld user0=8000 CHAIN_TAIL=4096  turns=30 seeds=[1, 2]  (turns >= 3: n=54)
+  prompt L mean 25658, last message mean/p50/p90     773    523   2059
+  states/entry mean 8.09 (max 10), 9B MB/entry mean 1264, states MB mean 417
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next           828    600   2068         0      0      0
+  regen           42      7    150        41      6    149
+  edit@0.25      830    600   2151       244    198    559
+  edit@0.5       830    600   2151       437    348   1090
+  edit@0.75      793    600   1684       592    458   1264
+  edit@0.95      755    583   1383       709    555   1311
+  back2         3559   1806  11012      3166   1290  10719
+  sib@0.25      8008   8008   8008      2001   2001   2001
+  sib@0.5       5960   5960   5960      1953   1953   1953
+  sib@0.75      3912   3912   3912      1905   1905   1905
+  sib@0.95      1864   1864   1864      1457   1457   1457
+
+== dist=appworld user0=8000 CHAIN_TAIL=2048  turns=30 seeds=[1, 2]  (turns >= 3: n=54)
+  prompt L mean 25658, last message mean/p50/p90     773    523   2059
+  states/entry mean 7.26 (max 9), 9B MB/entry mean 1221, states MB mean 374
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next           828    600   2068         0      0      0
+  regen           42      7    150        41      6    149
+  edit@0.25      830    600   2151       244    198    559
+  edit@0.5       830    600   2151       437    348   1090
+  edit@0.75      793    600   1684       592    458   1264
+  edit@0.95      755    583   1383       709    555   1311
+  back2        10193  10183  21430      9800   9602  21043
+  sib@0.25      8008   8008   8008      2001   2001   2001
+  sib@0.5       5960   5960   5960      1953   1953   1953
+  sib@0.75      3912   3912   3912      1905   1905   1905
+  sib@0.95      1864   1864   1864      1457   1457   1457
+
+== dist=appworld user0=8000 CHAIN_TAIL=0  turns=30 seeds=[1, 2]  (turns >= 3: n=54)
+  prompt L mean 25658, last message mean/p50/p90     773    523   2059
+  states/entry mean 6.93 (max 8), 9B MB/entry mean 1204, states MB mean 357
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next           828    600   2068         0      0      0
+  regen           42      7    150        41      6    149
+  edit@0.25      830    600   2151       244    198    559
+  edit@0.5       830    600   2151       437    348   1090
+  edit@0.75      830    600   2151       630    472   1621
+  edit@0.95      793    583   1684       747    555   1594
+  back2        13155  14074  22276     12762  13430  21317
+  sib@0.25      8008   8008   8008      2001   2001   2001
+  sib@0.5       5960   5960   5960      1953   1953   1953
+  sib@0.75      3912   3912   3912      1905   1905   1905
+  sib@0.95      1864   1864   1864      1457   1457   1457
+
+== dist=long user0=300 CHAIN_TAIL=4096  turns=10 seeds=[1, 2]  (turns >= 3: n=14)
+  prompt L mean 36906, last message mean/p50/p90    5810   5981   7971
+  states/entry mean 5.50 (max 6), 9B MB/entry mean 1493, states MB mean 283
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next          5828   5990   8051         0      0      0
+  regen           52      7    205        51      6    204
+  edit@0.25     5913   6094   8051      1549   1602   2066
+  edit@0.5      4583   3973   8051      1672   1110   4059
+  edit@0.75     2648   2320   3887      1188    936   2012
+  edit@0.95     1955   2036   2454      1657   1748   2206
+  back2        20870  21944  34565     18303  19430  30744
+
+== dist=long user0=300 CHAIN_TAIL=2048  turns=10 seeds=[1, 2]  (turns >= 3: n=14)
+  prompt L mean 36906, last message mean/p50/p90    5810   5981   7971
+  states/entry mean 4.50 (max 5), 9B MB/entry mean 1441, states MB mean 232
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next          5828   5990   8051         0      0      0
+  regen           52      7    205        51      6    204
+  edit@0.25     5913   6094   8051      1549   1602   2066
+  edit@0.5      5767   6094   8051      2855   3098   4059
+  edit@0.75     5328   5868   8051      3868   4408   6051
+  edit@0.95     3649   2227   7059      3351   2033   6700
+  back2        20870  21944  34565     18303  19430  30744
+
+== dist=long user0=300 CHAIN_TAIL=0  turns=10 seeds=[1, 2]  (turns >= 3: n=14)
+  prompt L mean 36906, last message mean/p50/p90    5810   5981   7971
+  states/entry mean 4.00 (max 4), 9B MB/entry mean 1415, states MB mean 206
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next          5828   5990   8051         0      0      0
+  regen           52      7    205        51      6    204
+  edit@0.25     5913   6094   8051      1549   1602   2066
+  edit@0.5      5913   6094   8051      3001   3098   4059
+  edit@0.75     5913   6094   8051      4454   4592   6051
+  edit@0.95     5913   6094   8051      5615   5788   7645
+  back2        20870  21944  34565     18303  19430  30744
+
+== dist=long user0=8000 CHAIN_TAIL=4096  turns=10 seeds=[1, 2]  (turns >= 3: n=14)
+  prompt L mean 44470, last message mean/p50/p90    5810   5981   7971
+  states/entry mean 8.36 (max 9), 9B MB/entry mean 1892, states MB mean 430
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next          5871   6071   8117         0      0      0
+  regen           43      7    119        42      6    118
+  edit@0.25     5887   6147   8117      1523   1633   2056
+  edit@0.5      5460   5918   8117      2548   2992   4075
+  edit@0.75     2681   2550   3902      1221   1128   1998
+  edit@0.95     1883   1980   2718      1585   1628   2329
+  back2        22368  23484  35873     19801  20970  32052
+  sib@0.25      8008   8008   8008      2001   2001   2001
+  sib@0.5       5960   5960   5960      1953   1953   1953
+  sib@0.75      3912   3912   3912      1905   1905   1905
+  sib@0.95      1864   1864   1864      1457   1457   1457
+
+== dist=long user0=8000 CHAIN_TAIL=2048  turns=10 seeds=[1, 2]  (turns >= 3: n=14)
+  prompt L mean 44470, last message mean/p50/p90    5810   5981   7971
+  states/entry mean 7.64 (max 8), 9B MB/entry mean 1855, states MB mean 394
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next          5871   6071   8117         0      0      0
+  regen           43      7    119        42      6    118
+  edit@0.25     5887   6147   8117      1523   1633   2056
+  edit@0.5      5753   6147   8117      2841   3136   4075
+  edit@0.75     5161   5746   8117      3702   4322   6094
+  edit@0.95     2882   1980   6219      2584   1628   5906
+  back2        22368  23484  35873     19801  20970  32052
+  sib@0.25      8008   8008   8008      2001   2001   2001
+  sib@0.5       5960   5960   5960      1953   1953   1953
+  sib@0.75      3912   3912   3912      1905   1905   1905
+  sib@0.95      1864   1864   1864      1457   1457   1457
+
+== dist=long user0=8000 CHAIN_TAIL=0  turns=10 seeds=[1, 2]  (turns >= 3: n=14)
+  prompt L mean 44470, last message mean/p50/p90    5810   5981   7971
+  states/entry mean 7.00 (max 7), 9B MB/entry mean 1822, states MB mean 360
+  probe           replay mean/p50/p90      lost mean/p50/p90   (tokens)
+  next          5871   6071   8117         0      0      0
+  regen           43      7    119        42      6    118
+  edit@0.25     5887   6147   8117      1523   1633   2056
+  edit@0.5      5887   6147   8117      2975   3136   4075
+  edit@0.75     5887   6147   8117      4427   4638   6094
+  edit@0.95     5887   6147   8117      5589   5840   7710
+  back2        22368  23484  35873     19801  20970  32052
+  sib@0.25      8008   8008   8008      2001   2001   2001
+  sib@0.5       5960   5960   5960      1953   1953   1953
+  sib@0.75      3912   3912   3912      1905   1905   1905
+  sib@0.95      1864   1864   1864      1457   1457   1457

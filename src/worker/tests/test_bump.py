@@ -25,6 +25,7 @@ def _render_kwargs(monkeypatch, template_vars, ctk=None):
     eng = types.SimpleNamespace(config={"vision_config": {}}, vocab=512, _template_vars=template_vars,
                                 _developer=False, grammar_for=lambda p: None, processor=None,
                                 model_id="m")
+    eng._chat_inputs = lambda req, quiet=False: worker.Engine._chat_inputs(eng, req, quiet)
     p = pb.Params(chat_template_kwargs_json=json.dumps(ctk) if ctk is not None else "")
     req = pb.Request(id="r", params=p, messages=[pb.Message(role="user", content="hi")])
     worker.Engine._render(eng, req, [])
