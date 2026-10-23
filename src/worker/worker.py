@@ -316,6 +316,138 @@ def materialize_images(images):
     return out, tmp
 
 
+# Special-token strings inside message TEXT (QWEN_SPLIT_SPECIAL_TOKENS, default
+# 0 = as vLLM v0.30: the rendered prompt goes through tokenizer.encode, which
+# matches every added token anywhere in it, so a tool output or a user message
+# holding "<|im_end|>\n<|im_start|>system\n..." becomes real turn boundaries,
+# "<tool_call>" / "<think>" real control tokens; HF's split_special_tokens does
+# not help: it covers only special=True added tokens, Qwen's <tool_call>,
+# <think>, <tool_response> are special=False). 1: the strings inside user and
+# tool message content and inside tool-call arguments (names and values) are
+# tokenized as plain text, the template's own control tokens by id, as
+# DeepSeek Recipe does (DeepInfer doc/inference_deployment_qa.md:300). Ids
+# change only for requests whose such text holds an added token's string;
+# the rest are tokenized exactly as before (no extra work but a scan).
+# Not for image prompts (the processor tokenizes them) nor assistant content
+# / reasoning (the model's own output, the template splits <think> there).
+# docs/perf/2026-10-24/design/special_tokens.md.
+SPLIT_SPECIAL_TOKENS = os.environ.get("QWEN_SPLIT_SPECIAL_TOKENS", "0") == "1"
+
+
+class _PlainContent:
+    """Tokenizes a rendered prompt with the added tokens that came from
+    message text kept as plain text (QWEN_SPLIT_SPECIAL_TOKENS).
+
+    The messages are rendered a second time with every added-token string in
+    the protected text replaced by a placeholder (a private-use character
+    absent from the prompt + one naming the token). Restoring the
+    placeholders must give the normal rendering back, character for
+    character (else the template looked at those strings: the caller falls
+    back to the normal tokenization). The placeholder rendering is then cut
+    at the added tokens left in it — the template's own — and the text
+    between two of them (template text and message text together, the
+    placeholders restored) is encoded by a copy of the tokenizer without
+    its added vocabulary: what the tokenizer itself does between added
+    tokens (split on them, then normalize / pre-tokenize / BPE each piece),
+    so a prompt with nothing to protect gets the same ids."""
+
+    _BASE = 0xF0000                       # plane-15 private use: one char per added token
+
+    def __init__(self, tok):
+        import tokenizers
+        bt = tok.backend_tokenizer
+        added = bt.get_added_tokens_decoder()
+        odd = [a.content for a in added.values()
+               if a.lstrip or a.rstrip or a.single_word or a.normalized]
+        if odd:
+            # matched differently from a plain leftmost-longest literal split
+            raise ValueError(f"added tokens with strip / single_word / normalized flags: {odd}")
+        self.tokens = sorted({a.content for a in added.values()})
+        self.ids = {a.content: i for i, a in added.items()}
+        self.index = {s: k for k, s in enumerate(self.tokens)}
+        # leftmost, longest first (the tokenizer's own added-token match)
+        self.match = re.compile("|".join(re.escape(s) for s in
+                                         sorted(self.tokens, key=len, reverse=True)))
+        if tok.encode(""):
+            # ids the tokenizer adds around every text (a BOS): not reproduced here
+            raise ValueError(f"the tokenizer adds {tok.encode('')} to every text")
+        js = json.loads(bt.to_str())
+        js["added_tokens"] = []
+        self.plain = tokenizers.Tokenizer.from_str(json.dumps(js))
+
+    def _sub(self, s, mark):
+        return self.match.sub(lambda m: mark + chr(self._BASE + self.index[m.group()]), s)
+
+    def _deep(self, x, mark):
+        if isinstance(x, str):
+            return self._sub(x, mark)
+        if isinstance(x, dict):
+            return {self._deep(k, mark): self._deep(v, mark) for k, v in x.items()}
+        if isinstance(x, list):
+            return [self._deep(v, mark) for v in x]
+        return x
+
+    def mask(self, messages, mark):
+        """-> (messages with the protected strings' added tokens as
+        placeholders, how many were replaced)."""
+        n, out = 0, []
+        for m in messages:
+            m = dict(m)
+            if m.get("role") in ("user", "tool") and isinstance(m.get("content"), str):
+                n += len(self.match.findall(m["content"]))
+                m["content"] = self._sub(m["content"], mark)
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                calls = []
+                for c in m["tool_calls"]:
+                    f = c.get("function") if isinstance(c, dict) else None
+                    args = f.get("arguments") if isinstance(f, dict) else None
+                    as_str = isinstance(args, str)
+                    if as_str:
+                        # parsed: a string may spell the tokens JSON-escaped
+                        # (the template renders the parsed values)
+                        try:
+                            args = json.loads(args)
+                        except ValueError:
+                            args = None               # rendered as {} anyway
+                    if isinstance(args, (dict, list)):
+                        masked = self._deep(args, mark)
+                        if masked != args:
+                            n += 1
+                            c = dict(c, function=dict(f, arguments=json.dumps(
+                                masked, ensure_ascii=False) if as_str else masked))
+                    calls.append(c)
+                m["tool_calls"] = calls
+            out.append(m)
+        return out, n
+
+    def mark_for(self, text):
+        """A private-use character the prompt does not hold."""
+        for c in range(0xE000, 0xF900):
+            if chr(c) not in text:
+                return chr(c)
+        raise ValueError("no free private-use character")
+
+    def encode(self, formatted, masked, mark):
+        """-> the ids, or None when the placeholder rendering is not the
+        normal one with placeholders (the template treated them differently)."""
+        back = re.compile(re.escape(mark) + "(.)", re.S)
+
+        def restore(s):
+            return back.sub(lambda m: self.tokens[ord(m.group(1)) - self._BASE], s)
+        if restore(masked) != formatted:
+            return None
+        ids, pos = [], 0
+        for m in self.match.finditer(masked):
+            if m.start() > pos:
+                ids += self.plain.encode(restore(masked[pos:m.start()]),
+                                         add_special_tokens=False).ids
+            ids.append(self.ids[m.group()])
+            pos = m.end()
+        if pos < len(masked):
+            ids += self.plain.encode(restore(masked[pos:]), add_special_tokens=False).ids
+        return ids
+
+
 def _developer_to_system(messages):
     """vLLM (renderers/hf.py): developer -> system, then every system message merged
     into one at the front ("\n\n"-joined), since this template wants it first."""
@@ -4428,6 +4560,7 @@ class Engine:
         self.draft = None
         self._span_tokens = None        # (header, think pre-opens, <|im_end|>): _assistant_spans
         self._tok_str = {}              # id -> tokenizer.decode([id]) (logprobs; vocab-bounded)
+        self._plain = None              # _PlainContent (QWEN_SPLIT_SPECIAL_TOKENS)
 
     def load(self):
         from mlx_vlm import load
@@ -4517,6 +4650,15 @@ class Engine:
         if JSON_MAX_WS and self._llg_tok is not None:
             self._not_ws = _ws_masks(self._llg_tok, JSON_MAX_WS)
             log.info("constrained answers: whitespace runs capped at %d chars", JSON_MAX_WS)
+        if SPLIT_SPECIAL_TOKENS:
+            try:
+                t1 = time.time()
+                self._plain = _PlainContent(_tok)
+                log.info("special-token strings in user / tool text and tool-call arguments: "
+                         "tokenized as plain text (%d added tokens, %.2f s)",
+                         len(self._plain.tokens), time.time() - t1)
+            except Exception:  # noqa: BLE001 — the normal tokenization stays
+                log.exception("QWEN_SPLIT_SPECIAL_TOKENS: off (the tokenizer does not allow it)")
         d = self.processor.detokenizer
         if type(d) is BPEStreamingDetokenizer:
             self.processor.detokenizer = _BPEDetokenizer(_tok, trim_space=d.trim_space)
@@ -4651,6 +4793,19 @@ class Engine:
             grammar = self.grammar_for(p)
         except ValueError as e:
             raise _Reject("invalid_request", str(e)) from None
+        messages, kwargs, add_gen = self._chat_inputs(req)
+        try:
+            formatted = apply_chat_template(self.processor, self.config, messages,
+                                            add_generation_prompt=add_gen,
+                                            num_images=len(images), **kwargs)
+        except Exception as e:  # noqa: BLE001 — the template's own raise_exception, bad kwargs
+            raise _Reject("invalid_request", f"chat template: {e}") from None
+        return formatted, grammar
+
+    def _chat_inputs(self, req, quiet=False):
+        """The template's input -> (messages, kwargs, add_generation_prompt);
+        raises _Reject. `quiet`: the second call for one request (no log)."""
+        p = req.params
         kwargs = json.loads(p.chat_template_kwargs_json) if p.chat_template_kwargs_json else {}
         # vLLM's resolve_chat_template_kwargs: these two are refused, the rest is
         # kept only if the template uses it (the request's own fields win)
@@ -4659,7 +4814,7 @@ class Engine:
             raise _Reject("invalid_request",
                           f"Found unexpected chat template kwargs from request: {bad}")
         dropped = [k for k in kwargs if k not in self._template_vars]
-        if dropped:
+        if dropped and not quiet:
             log.info("chat_template_kwargs not used by the template, ignored (as vLLM): %s", dropped)
         kwargs = {k: v for k, v in kwargs.items() if k in self._template_vars}
         # mlx-vlm >= 0.6.3 passes enable_thinking=False when it is unset and the
@@ -4676,13 +4831,39 @@ class Engine:
         messages = _rebuild_messages(req.messages)
         if any(m["role"] == "developer" for m in messages) and not self._developer:
             messages = _developer_to_system(messages)
+        return messages, kwargs, add_gen
+
+    def _encode_prompt(self, req, formatted):
+        """A text prompt's ids: tokenizer.encode of the rendering, or with
+        QWEN_SPLIT_SPECIAL_TOKENS the added-token strings of user / tool text
+        and tool-call arguments as plain text (_PlainContent; the normal
+        encode when there are none, or when the template treats the
+        placeholders differently: logged)."""
+        tokenizer = getattr(self.processor, "tokenizer", self.processor)
+        plain = getattr(self, "_plain", None)
+        if plain is None:
+            return tokenizer.encode(formatted)
+        from mlx_vlm.prompt_utils import apply_chat_template
+        messages, kwargs, add_gen = self._chat_inputs(req, quiet=True)
+        mark = plain.mark_for(formatted)
+        masked, n = plain.mask(messages, mark)
+        if not n:
+            return tokenizer.encode(formatted)
+        ids = None
         try:
-            formatted = apply_chat_template(self.processor, self.config, messages,
-                                            add_generation_prompt=add_gen,
-                                            num_images=len(images), **kwargs)
-        except Exception as e:  # noqa: BLE001 — the template's own raise_exception, bad kwargs
-            raise _Reject("invalid_request", f"chat template: {e}") from None
-        return formatted, grammar
+            rendered = apply_chat_template(self.processor, self.config, masked,
+                                           add_generation_prompt=add_gen, num_images=0, **kwargs)
+            ids = plain.encode(formatted, rendered, mark)
+        except Exception:  # noqa: BLE001 — the normal rendering worked: keep it
+            log.exception("id=%s special-token strings: the placeholder rendering failed", req.id)
+        if ids is None:
+            log.warning("id=%s special-token strings in %d message texts: tokenized as control "
+                        "tokens (the template renders them differently from placeholders)",
+                        req.id, n)
+            return tokenizer.encode(formatted)
+        log.info("id=%s special-token strings in %d message texts: tokenized as plain text",
+                 req.id, n)
+        return ids
 
     def _limit(self, p, prompt_tokens):
         """Generation limit for a prompt this long; vLLM's rules and messages."""
@@ -4710,8 +4891,7 @@ class Engine:
         try:
             formatted, _ = self._render(req, list(req.images))
             if not req.images:
-                tokenizer = getattr(self.processor, "tokenizer", self.processor)
-                self._limit(req.params, len(tokenizer.encode(formatted)))
+                self._limit(req.params, len(self._encode_prompt(req, formatted)))
         except _Reject as e:
             return str(e), False
         except Exception as e:  # noqa: BLE001 — a worker fault, not the request's
@@ -4833,7 +5013,7 @@ class Engine:
             try:
                 vision = self._vision_inputs(formatted, images) if images else None
                 ids = (vision["input_ids"].reshape(-1).tolist() if images
-                       else tokenizer.encode(formatted))
+                       else self._encode_prompt(req, formatted))
             except Exception as e:  # noqa: BLE001 — never proceed un-measured
                 log.exception("prompt preparation failed: %s", req.id)
                 yield pb.Event(id=req.id, error=pb.Error(
