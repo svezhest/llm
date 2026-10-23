@@ -142,7 +142,7 @@ exact (qmv per row).
 - Results (2026-10-24, this machine, GPU shared):
   - `test_batch_invariant_metal.py`: 14 passed;
   - `test_mrqmm.py`: 139 passed, 1 skipped;
-  - CPU suite: see the report.
+  - CPU suite (`--ignore tests/test_mrqmm.py`): 443 passed, 63 skipped (7 min 20 s).
 
 ## GPU plan
 
