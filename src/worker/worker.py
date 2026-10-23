@@ -46,6 +46,7 @@ from mlx_vlm.tokenizer_utils import (BPEStreamingDetokenizer, _remove_space,
                                      make_streaming_detokenizer)
 
 import cascade
+import pcdisk
 import worker_pb2 as pb
 import worker_pb2_grpc as pb_grpc
 
@@ -998,6 +999,7 @@ class _PrefixCache:
         self.hits = self.misses = self.evictions = 0
         self.seq = 0                    # lookups + stores so far (the eviction order's round clock)
         self.version = 0                # bumped when entries are added (peek memos)
+        self.disk = None                # pcdisk.DiskTier (QWEN_PROMPT_CACHE_DISK): evictions go there
 
     def bytes_of(self, entries):
         """Unique bytes of a subset of the entries."""
@@ -1143,6 +1145,38 @@ class _PrefixCache:
         self.entries.remove(e)
         self.evictions += 1
         self._recount(added=False)
+        if self.disk is not None:                     # written at the end of the tick
+            self.disk.offer(e)
+        return True
+
+    def insert(self, new, limit=None, wanted=(), spare=()):
+        """Add an entry loaded from disk (QWEN_PROMPT_CACHE_DISK) as store
+        adds a new one -> False when it was not kept: alone (beside the
+        `spare` entries) over `limit`, the batch's headroom; else others are
+        evicted (victim order, `wanted` last) down to QWEN_PROMPT_CACHE_GB
+        and `limit`, the newest staying alone if over. It absorbs nothing
+        (it was an entry of this cache: the store that made it absorbed its
+        older turns) and is used now (a waiting request resumes from it)."""
+        stays = [s for s in spare if any(s is e for e in self.entries)]
+        if limit is not None and self.bytes_of([new, *stays]) > limit:
+            return False
+        budget = PROMPT_CACHE_GB * GIB
+        if callable(wanted):
+            cap = budget if limit is None else min(budget, limit)
+            try:
+                wanted = wanted() if self.entries and self.bytes_of(self.entries + [new]) > cap \
+                    else ()
+            except Exception:  # noqa: BLE001 — costs the order only
+                log.exception("prompt cache: the waiting requests' entries are unknown; "
+                              "evicting without sparing them")
+                wanted = ()
+        new.used, new.seq = time.time(), self.seq
+        self.entries.append(new)
+        self._recount()
+        for cap in (budget, limit):
+            while cap is not None and len(self.entries) > 1 and self.bytes > cap and \
+                    self.evict(keep=(new, *spare), wanted=wanted):
+                pass
         return True
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
@@ -2475,6 +2509,7 @@ class _Req:
     bounds: list | None = None                  # _bounds(ids) (memoized: _Scheduler._bounds)
     keep_since: float | None = None             # first blocked by the entry it would resume from
     peeked: tuple | None = None                 # (cache version, weakref to the entry, depth)
+    disk: object = None                         # pcdisk.Want (QWEN_PROMPT_CACHE_DISK)
     steps: int = 0                              # decode steps (DFlash: rounds) taken
     rows_sum: int = 0                           # sum of the batch sizes of those steps
     # snapshot taken on the scheduler when the request ends (before anything
@@ -2656,6 +2691,12 @@ class _Scheduler:
                 return
         req.out.put(("error", *self.closed))
 
+    def wake(self):
+        """Another thread freed MLX memory (pcdisk's writer, its views
+        gone): an idle loop runs _idle again (the buffer pool cleared)."""
+        with self.cv:
+            self.cv.notify()
+
     def stop(self, timeout=10.0):
         """Stop after the current tick; everything left gets Error(shutdown).
         -> False when the tick did not end within `timeout`."""
@@ -2743,6 +2784,10 @@ class _Scheduler:
         wired, self.wired = self.wired, None       # never retried if __exit__ raises
         if wired is not None:
             wired.__exit__(None, None, None)
+        disk = self.eng._pcache.disk
+        if disk is not None:                        # a load finished for no one waiting: freed
+            for job in disk.done():
+                self._disk_insert(disk, job)
         if CLEAR_CACHE:
             mx.clear_cache()
 
@@ -2755,7 +2800,9 @@ class _Scheduler:
                 self.waiting.remove(r)
         for r in gone:
             r.out.put(("done", "cancelled"))
-        if self.task is None and self.waiting:
+        disk = self.eng._pcache.disk            # QWEN_PROMPT_CACHE_DISK (None: off)
+        hold = disk is not None and self._disk_tick(disk)
+        if self.task is None and self.waiting and not hold:
             self._admit()
         t = time.time()
         if self.task is not None and (not self.rows or time.time() >= self.resume):
@@ -2773,6 +2820,8 @@ class _Scheduler:
             if CLEAR_CACHE:
                 mx.clear_cache()
             self.clear = False
+        if disk is not None:
+            disk.flush()                        # this tick's evictions to the writer (views made here)
         self._log()
 
     def _bytes(self, n):
@@ -3736,6 +3785,106 @@ class _Scheduler:
                  len(pc.entries), pc.bytes / 1e6, len(covered), len(new.chain))
         return new, covered
 
+    # --- prompt cache on disk (QWEN_PROMPT_CACHE_DISK, pcdisk.py) -----------------
+    def _disk_tick(self, disk):
+        """Before admission (tick): the loads that finished go into the RAM
+        cache (for a request still waiting, else dropped); a load starts for
+        the first of the next max_batch waiting requests whose deepest hit is
+        on disk at least a slab deeper than in RAM (one load at a time: the
+        SSD is the bottleneck) -> True while the head of the queue waits for
+        its own load, at most pcdisk.WAIT_S (decode runs meanwhile; with
+        nothing else to do the thread waits on the load 5 ms per tick rather
+        than spinning). Never raises: a failure costs the load only."""
+        try:
+            for job in disk.done():
+                self._disk_insert(disk, job)
+            with self.cv:
+                reqs = list(itertools.islice(self.waiting, self.max_batch))
+            if reqs and not disk.busy():
+                for req in reqs:
+                    if self._disk_want(disk, req):
+                        break
+            if self.task is not None or not reqs:
+                return False
+            w = reqs[0].disk
+            job = w.job if w is not None else None
+            if job is None or job.taken or time.time() - w.t0 > pcdisk.WAIT_S:
+                return False
+            if not self.rows:
+                job.done.wait(0.005)
+            return True
+        except Exception:  # noqa: BLE001 — the queue goes on without the disk tier
+            log.exception("prompt cache disk: load step failed")
+            return False
+
+    def _disk_want(self, disk, req):
+        """Start loading req's deepest disk hit when it beats its RAM hit by
+        at least a slab (PREFILL_STEP) and fits: beside the batch (budget +
+        prefill reserve - reserved, as a store) and in memory now (the live
+        check of _fits) -> True: started. The peeks are memoized on req.disk
+        until either cache changes (versions)."""
+        if req.images:
+            return False
+        look = self._lookup_ids(req)
+        if look is None:                        # prompt_cache "off"
+            return False
+        w = req.disk
+        if w is None:
+            w = req.disk = pcdisk.Want()
+        if w.job is not None:                   # one load per request
+            return False
+        pc = self.eng._pcache
+        key = (disk.version, pc.version)
+        if w.key != key:
+            if w.ids is None:
+                w.ids = np.asarray(look, dtype=np.int32)
+            w.dent, w.depth = disk.peek(w.ids, self._ends(req))
+            w.ram = self._peek(req)[1]
+            w.key = key
+        if w.dent is None or w.depth < w.ram + PREFILL_STEP:
+            return False
+        need = disk.cost(w.dent, pc.entries)
+        live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
+        if (need > self.budget + self.prefill_reserve - self.reserved
+                or live + need + self.prefill_reserve > self.cap):
+            return False
+        w.job, w.t0 = disk.load(w.dent, pc.entries, req), time.time()
+        if w.job is None:                       # gone from disk since the peek: peek again
+            w.key = None
+            return False
+        log.info("id=%s prompt cache disk: loading an entry of %d tokens (%.1f MB to read) for a "
+                 "%d-token hit (%d in RAM)", req.id, w.dent.L, need / 1e6, w.depth, w.ram)
+        return True
+
+    def _disk_insert(self, disk, job):
+        """A finished load into the RAM cache (pc.insert: its budget checks,
+        the running prefill's parent spared) when its request still waits;
+        not kept, it is simply dropped (its arrays freed here)."""
+        req = job.req()
+        with self.cv:
+            waiting = req is not None and any(r is req for r in self.waiting)
+        if not waiting:
+            disk.discard(job)
+            log.info("prompt cache disk: a loaded entry of %d tokens dropped: its request no "
+                     "longer waits", job.dent.L)
+            return
+        e = disk.finish(job)
+        if e is None:
+            return
+        pc = self.eng._pcache
+        task = self.task_row
+        spare = (task.parent,) if task is not None and task.parent is not None else ()
+        if pc.insert(e, limit=self.budget + self.prefill_reserve - self.reserved,
+                     wanted=self._wanted, spare=spare):
+            disk.hits += 1
+            log.info("id=%s prompt cache disk: entry of %d tokens loaded (%.1f MB read in %.0f "
+                     "ms; %d entries, %.1f MB total)", req.id, len(e.ids), job.nbytes / 1e6,
+                     job.ms, len(pc.entries), pc.bytes / 1e6)
+        else:
+            disk.discards += 1
+            log.info("id=%s prompt cache disk: loaded entry of %d tokens not kept: over the "
+                     "batch's headroom", req.id, len(e.ids))
+
     def _compact(self):
         self._drop_done()
         # a group whose tidy failed ended its rows: drop them, and tidy the
@@ -4569,9 +4718,49 @@ class Engine:
                  f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
                  f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
         log.info("cascade attention (QWEN_CASCADE): %s", self.sched.cascade_state())
+        if PROMPT_CACHE and pcdisk.DIR:
+            try:
+                disk = pcdisk.DiskTier(pcdisk.DIR, pcdisk.GB * GIB, self._disk_key(),
+                                       seg_cls=_Seg, entry_cls=_Entry, keep=pcdisk.KEEP)
+                disk.on_drained = self.sched.wake
+                self._pcache.disk = disk
+                log.info("prompt cache disk (QWEN_PROMPT_CACHE_DISK): %s, %.1f GiB, %s, entries "
+                         ">= %d tokens, writer queue %.1f GiB, head waits <= %.0f s", pcdisk.DIR,
+                         pcdisk.GB, "kept across runs when the key matches" if pcdisk.KEEP
+                         else "cleared at start", disk.min_tokens, disk.queue_bytes / GIB,
+                         pcdisk.WAIT_S)
+            except Exception:  # noqa: BLE001 — the RAM cache works without it
+                log.exception("prompt cache disk: off (%s unusable)", pcdisk.DIR)
         self.sched.start()
         self.ready = True
         log.info("model loaded in %d ms", self.load_ms)
+
+    def _disk_key(self):
+        """What the cached bits depend on (pcdisk validity key): the weights,
+        the numerics knobs as resolved, every QWEN_* knob but the sizing /
+        prompt-cache ones, the library versions and this code. A disk
+        directory whose key differs is cleared at start."""
+        import importlib.metadata
+        here = os.path.dirname(os.path.abspath(__file__))
+        src = hashlib.sha256()
+        for f in ("worker.py", "pfqmm.py", "mrqmm.py", "cascade.py", "pcdisk.py"):
+            p = os.path.join(here, f)
+            if os.path.exists(p):
+                with open(p, "rb") as fh:
+                    src.update(fh.read())
+        weights = sorted((n, os.path.getsize(os.path.join(self.model_path, n)))
+                         for n in os.listdir(self.model_path)
+                         if n.endswith((".safetensors", ".json")))
+        free = ("QWEN_PROMPT_CACHE", "QWEN_BATCH_MEM_GB", "QWEN_GEN_SLOTS", "QWEN_WIRED_LIMIT_GB",
+                "QWEN_CACHE_LIMIT_GB", "QWEN_BATCH_RESERVE_TOKENS", "QWEN_BATCH_PREFILL_SHARE")
+        env = {k: v for k, v in os.environ.items()
+               if k.startswith("QWEN_") and not k.startswith(free)}
+        return pcdisk.key_of(
+            format=pcdisk.FORMAT, model=self.model_id, weights=weights, kv=KV_KWARGS, fp16=FP16,
+            slab=[PREFILL_STEP, PREFILL_MIN_STEP, PREFILL_BUDGET, _FIXED_SLAB],
+            sdpa_fused=SDPA_FUSED, gdn_fast=GDN_FAST, gdn_fuse=GDN_FUSE, max_batch=self.max_batch,
+            env=env, mlx=mx.__version__, mlx_vlm=importlib.metadata.version("mlx-vlm"),
+            src=src.hexdigest())
 
     # --- cancellation -----------------------------------------------------
     def cancel(self, req_id: str) -> bool:
