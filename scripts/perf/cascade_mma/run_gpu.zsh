@@ -78,7 +78,8 @@ fi
 
 if [[ $PH == *A* ]]; then
   note "phase A start (agree_mma.py)"
-  (cd $T/src/worker && env $MODEL PERF_OUT=$OUT PYTHONPATH=. $PY $HERE/agree_mma.py > $OUT/A_agree.txt 2>&1)
+  (cd $T/src/worker && env $MODEL AGM_CONTROL_MAX_GB=${AGM_CONTROL_MAX_GB:-6} PERF_OUT=$OUT PYTHONPATH=. \
+     $PY $HERE/agree_mma.py > $OUT/A_agree.txt 2>&1)
   note "phase A end rc=$?: $(grep 'vs_solo\|mma_vs_fp32' $OUT/A_agree.txt | cut -c10-120 | tr '\n' ' ' | cut -c1-900)"
   state
 fi

@@ -4045,10 +4045,11 @@ class _Scheduler:
         self.reserved += g.reserved
         self.groups.append(g)
         self._cascade_count()
-        log.info("cascade: group formed: P=%d, %d rows (%s), %.1f MB (prefix %s + stacks fp32), "
+        log.info("cascade: group formed: P=%d, %d rows (%s), %.1f MB (%s), "
                  "charged %.2f GiB; reserved %.2f -> %.2f GiB",
                  P, len(g.rows), ",".join(r.req.id for r in g.rows), pg.nbytes / 1e6,
-                 ("fp16 " + ("aliased" if pg.aliased else "copied")) if pg.kernel else "fp32",
+                 ("prefix fp16 " + ("aliased" if pg.aliased else "copied") + " + stacks fp32")
+                 if pg.kernel else "prefix + stacks, fp32",
                  g.reserved / GIB, before / GIB, self.reserved / GIB)
 
     def _group_add(self, g, row):
