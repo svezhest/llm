@@ -760,6 +760,34 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # left), self-tested per (bits, group) at load. 9B
 # 2048-token slab, in-process A/B: x1.12 at offset 0, x1.17 at 8K/32K.
 
+# Batch-invariant decode (QWEN_BATCH_INVARIANT, default 0; docs/perf/2026-10-24/
+#   design/batch_invariant.md): a row's logits are the same bits whatever the
+#   batch around it (1..16 rows, any lengths and mix), so a T=0 answer under
+#   load is the answer the request gets alone, without QWEN_MAX_BATCH=1/2.
+#   What depends on B by default, and what the mode does about it:
+#   * mrqmm splits K over 8 simdgroups at <= 8 rows and 4 at 9..16 (another
+#     sum order), and B <= 2 runs MLX's qmv (its own): mrqmm.set_invariant
+#     fixes the split per K and takes 1..16 rows and every 8-bit module (lm_head,
+#     the fused GDN in-projection and narrow layers too); QWEN_MAX_BATCH is
+#     capped at 16 (mrqmm.MAX_ROWS). The cost is mrqmm vs qmv at B = 1 (~3 % of
+#     the step's linears, mrqmm.md) and KS 8 vs 4 at 9..16 rows (within 3 %).
+#   * cascade groups (another attention composition): off.
+#   * DFlash (its verify kernels are not the decode's): not loaded.
+#   Everything else was checked to be per-row already: the B = 1 library call
+#   vs the RowsKV step (same per-row update_and_fetch + SDPA, positions explicit
+#   both ways), norms, RoPE, the stacked GDN conv + recurrence (one threadgroup
+#   per row and head), the logits slice, sample_rows (grouped draw == solo) and
+#   the logprobs (tests/test_batch_invariant*.py). Not covered (logged at load,
+#   mrqmm.uncovered): non-8-bit layers (27B, 35B experts / shared expert /
+#   lm_head; MLX qmv per row up to its threshold, then qmm), MoE expert sorting
+#   from B * top_k >= 64. Prefill was already batch-independent (one request at
+#   a time, slab cuts fixed by _bounds); a 1-token slab now takes mrqmm too.
+#   Not numerics but still run-dependent: a hit through a reply's KV
+#   (QWEN_PROMPT_CACHE_REPLY=1) is not a cold prefill's bits and whether it hits
+#   depends on evictions, so reproducible runs still want REPLY=0; a row that
+#   outgrows the budget ends with "length" (_regrow) depending on its neighbours.
+BATCH_INVARIANT = os.environ.get("QWEN_BATCH_INVARIANT", "0") == "1"
+
 
 def _copy_cache(caches, upto=None, states=None):
     """Fresh cache objects holding the same (immutable) arrays.
@@ -2205,6 +2233,48 @@ def _install_gdn_fuse(lm):
     return n
 
 
+def _invariant_uncovered(lm):
+    """mrqmm.uncovered for the language model, the fused GDN in-projections
+    counted as their one call: on mrqmm (covered: the four modules are never
+    called alone), or on quantized_matmul (one entry per layer)."""
+    import mrqmm
+    skip, out = set(), {}
+    for _, m in lm.named_modules():
+        f = m.__dict__.get("_fused_in")
+        if f is None:
+            continue
+        skip.update(id(m[n]) for n in _GDN_IN)
+        if f[7] is None:
+            k = "fused GDN in-projection on quantized_matmul"
+            out[k] = out.get(k, 0) + 1
+    for k, v in mrqmm.uncovered(lm, skip).items():
+        out[k] = out.get(k, 0) + v
+    return out
+
+
+def _log_invariant(lm, max_batch):
+    """QWEN_BATCH_INVARIANT's load log: what a decode step runs outside the
+    invariant kernel (mrqmm.uncovered), and what still makes runs differ."""
+    if max_batch <= 2:
+        log.info("batch-invariant (QWEN_BATCH_INVARIANT): max_batch %d, per-row qmv "
+                 "(exact as is); DFlash and cascade off", max_batch)
+    else:
+        import mrqmm
+        n = sum(1 for _, m in lm.named_modules() if type(m) is mrqmm.MRQuantizedLinear)
+        miss = _invariant_uncovered(lm)
+        log.info("batch-invariant (QWEN_BATCH_INVARIANT): %d modules on mrqmm for 1..%d rows "
+                 "(K split %d), %d fused GDN in-projections; DFlash and cascade off", n,
+                 mrqmm.MAX_ROWS, mrqmm.INVARIANT_KS, sum(
+                     1 for _, m in lm.named_modules() if "_fused_in" in m.__dict__))
+        if miss:
+            log.warning("batch-invariant: %d modules not covered (%s): rows of B >= 3 through "
+                        "them can differ from the same row alone", sum(miss.values()),
+                        ", ".join(f"{k} x{v}" for k, v in sorted(miss.items())))
+    if PROMPT_CACHE and PROMPT_CACHE_REPLY:
+        log.warning("batch-invariant with QWEN_PROMPT_CACHE_REPLY=1: a hit through a reply's KV "
+                    "is not a cold prefill's bits; reproducible runs want REPLY=0")
+
+
 def _install_fast_paths():
     """QWEN_SDPA_FUSED / QWEN_GDN_FAST / QWEN_VERIFY_EXACT_MAX_T as overrides
     of the qwen3_5 module globals / verifier methods (the MoE model uses the
@@ -2488,6 +2558,11 @@ class _Req:
     # stop token a "stop" finish ended on (no "tok" event carries it)
     plp: tuple | None = None
     stop_lp: tuple | None = None
+    # tools / tests only (not on the wire): the generated tokens to feed
+    # instead of the drawn ones, token k as the k-th input after the prompt
+    # (DeepInfer's golden_token_ids: decode teacher forcing, the logprobs then
+    # those of the forced tokens); past its end the draw goes on as usual
+    golden: list | None = None
 
     @property
     def prompt_tokens(self):
@@ -2991,7 +3066,7 @@ class _Scheduler:
     def _spec_ok(self, row):
         req = row.req
         greedy = req.sampling["temperature"] <= 0 and not row.pen.active
-        if (self.eng.draft is None or req.images or req.thinking is not None
+        if (self.eng.draft is None or BATCH_INVARIANT or req.images or req.thinking is not None
                 or not (greedy or DRAFT_SAMPLING)):
             return False
         if row.lpk is not None or _wants(req, "prompt_logprobs"):
@@ -3746,7 +3821,8 @@ class _Scheduler:
     # --- cascade groups (QWEN_CASCADE; plan Part B) ---------------------------
     def _cascade_on(self, want):
         return bool(want and CASCADE_MIN_ROWS and CASCADE_MIN_PREFIX and PROMPT_CACHE
-                    and self.max_batch >= 3 and self.kv["kv_bits"] is None)
+                    and self.max_batch >= 3 and self.kv["kv_bits"] is None
+                    and not BATCH_INVARIANT)
 
     def cascade_state(self):
         """For the load log: on, or why not."""
@@ -3757,7 +3833,8 @@ class _Scheduler:
                                 ("min rows / prefix 0", not (CASCADE_MIN_ROWS and CASCADE_MIN_PREFIX)),
                                 ("no prompt cache", not PROMPT_CACHE),
                                 ("max_batch < 3", self.max_batch < 3),
-                                ("quantized KV", self.kv["kv_bits"] is not None)) if bad]
+                                ("quantized KV", self.kv["kv_bits"] is not None),
+                                ("QWEN_BATCH_INVARIANT=1", BATCH_INVARIANT)) if bad]
         return "off (" + ", ".join(why) + ")"
 
     def set_cascade(self, on):
@@ -4285,7 +4362,8 @@ class _Scheduler:
             # read after the token, only for these rows
             r.lp_next = None
             if nxt[j] is not None and not r.done:
-                r.lp_next = _token_logprobs(x, nxt[j], r.lpk, keep=r.req.thinking is not None)
+                r.lp_next = _token_logprobs(x, nxt[j], r.lpk, keep=r.req.thinking is not None
+                                            or r.req.golden is not None)
                 outs += [a for a in r.lp_next[:3] if a is not None]
         mx.async_eval(outs)
         self.log_rows += B
@@ -4373,6 +4451,8 @@ class _Scheduler:
                 # Reasoning budget: forces \n</think> as the next input (the
                 # KV cache stays consistent)
                 forced = r.req.thinking.pop_forced_token_id() if r.req.thinking is not None else None
+                if r.req.golden is not None and r.n < len(r.req.golden):
+                    forced = r.req.golden[r.n]          # r.n: tokens before this one
                 r.y = y if forced is None else mx.array([forced], dtype=y.dtype)
                 if r.lpk is not None:
                     lp, r.lp_next = r.lp_next, None
@@ -4449,7 +4529,10 @@ class Engine:
             lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
             mx.eval(lm.parameters())
             log.info("language model cast to float16 (QWEN_FP16=1)")
-        if DRAFT and KV_KWARGS["kv_bits"] is not None:
+        if DRAFT and BATCH_INVARIANT:
+            log.warning("QWEN_DRAFT ignored: QWEN_BATCH_INVARIANT=1 (the verify rounds "
+                        "differently from the batch's decode)")
+        elif DRAFT and KV_KWARGS["kv_bits"] is not None:
             # The spec loop never re-quantizes the cache and rollback trims a
             # quantized cache wrongly; the drafter is only worth it on the 9B,
             # which runs an fp16 cache anyway.
@@ -4553,8 +4636,16 @@ class Engine:
             # which shares lm_head but always calls it with (1, T, K)).
             # Logs its coverage, or "off" for QWEN_MRQMM=0.
             import mrqmm
+            if BATCH_INVARIANT:
+                mrqmm.set_invariant(True)
+                if self.max_batch > mrqmm.MAX_ROWS:
+                    log.warning("QWEN_BATCH_INVARIANT=1: max_batch %d -> %d (mrqmm's rows)",
+                                self.max_batch, mrqmm.MAX_ROWS)
+                    self.max_batch = mrqmm.MAX_ROWS
             mrqmm.install(lm)
         log.info("GDN decode in-projections fused (QWEN_GDN_FUSE): %d layers", _install_gdn_fuse(lm))
+        if BATCH_INVARIANT:
+            _log_invariant(lm, self.max_batch)
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
         reserve = _prefill_reserve(lm.args.num_attention_heads)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
