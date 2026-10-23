@@ -251,11 +251,12 @@ class _Load:
 
 
 class _Write:
-    __slots__ = ("dent", "new", "borrowed", "nbytes", "meta", "L")
+    __slots__ = ("dent", "new", "borrowed", "nbytes", "meta", "L", "covers")
 
-    def __init__(self, dent, new, borrowed, nbytes, meta):
+    def __init__(self, dent, new, borrowed, nbytes, meta, covers=()):
         self.dent, self.new, self.borrowed, self.nbytes, self.meta = dent, new, borrowed, nbytes, meta
         self.L = dent.L
+        self.covers = covers                  # disk entries it makes redundant (dropped once written)
 
 
 class DiskTier:
@@ -497,6 +498,14 @@ class DiskTier:
                     b.refs += 1
                     if not any(b is x for x in new):
                         borrowed.append(b)
+                # older disk entries whose ids are a prefix of this one (the
+                # turn it continued, loaded back and absorbed in RAM): as the
+                # RAM store absorbs them, the new entry stands for them (an
+                # unquantized one stays under a quantized entry: the only
+                # resume point below quantized_kv_start)
+                covers = [x for x in self.entries.values()
+                          if x.L <= L and not (d.quantized and not x.quantized)
+                          and np.array_equal(x.ids, d.ids[:x.L])]
                 self.entries[uid] = d
                 self.pending += nbytes
                 self.queued += 1
@@ -532,7 +541,7 @@ class DiskTier:
                 self.queued -= 1
             raise
         e.disk_uid = uid
-        self._wq.put(_Write(d, jobs, borrowed, nbytes, meta))
+        self._wq.put(_Write(d, jobs, borrowed, nbytes, meta, covers))
 
     def _fit(self, nbytes):
         """Under the lock: delete least recently used entries (written, not
@@ -663,7 +672,11 @@ class DiskTier:
                 self.writes += 1
                 self.write_bytes += written + n
                 self.write_s += time.time() - t
-                over = self._fit(0)                   # the estimate was short: LRU again
+                over = []
+                for x in job.covers:                  # written: the entries it stands for go
+                    if self.entries.get(x.uid) is x and x.state == "ok" and not x.pins:
+                        over += self._drop(x)
+                over += self._fit(0)                  # the estimate was short: LRU again
             self._unlink(over)
             log.info("prompt cache disk: wrote an entry of %d tokens (%.1f MB new, %d blobs "
                      "shared) in %.2f s; %d entries, %.2f GiB on disk", job.L, (written + n) / 1e6,

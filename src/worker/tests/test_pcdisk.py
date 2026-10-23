@@ -199,6 +199,34 @@ def test_shared_blobs_written_once_and_reused_live(dense, small, tmp_path, monke
     assert len(files(tmp_path)) == len(disk.blobs) + 2
 
 
+def test_next_turn_on_a_loaded_entry(dense, small, tmp_path, monkeypatch, caplog):
+    """a[1] resumed from a[0] loaded back from disk and absorbed it in RAM;
+    evicted in its turn, a[1]'s entry writes only what a[0]'s blobs do not
+    hold, and a[0]'s disk entry goes (a[1]'s stands for it, as in RAM)."""
+    a, b = turns(190)
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    disk = pc.disk = tier(tmp_path)
+    play(sched, a, b, monkeypatch, TINY, disk)
+    (e1,) = pc.entries
+    assert e1.ids == a[1][:-1]
+    old = [d for d in disk.entries.values() if d.ids.tolist() == a[0][:-1]]
+    assert len(old) == 1
+    shared = set(old[0].blob_uids())
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    run(sched, [request([IM_START] + prompts([50], 199)[0] + GEN, 2, "c")])
+    assert disk.drain()
+    (line,) = [m for m in caplog.messages if f"wrote an entry of {len(e1.ids)} tokens" in m]
+    assert " 0 blobs shared" not in line
+    d1 = disk.entries[e1.disk_uid]
+    assert shared & set(d1.blob_uids())                     # a[0]'s segment / states reused
+    assert not [d for d in disk.entries.values() if d.ids.tolist() == a[0][:-1]]
+    assert len(files(tmp_path)) == len(disk.blobs) + len(disk.entries)
+    x = request(a[2], 4, "a2")                              # and it serves the next turn
+    assert run(sched, [x])["a2"] == run(scheduler(dense, max_batch=1), [request(a[2], 4, "a2")])["a2"]
+    assert x.reused > len(a[1]) // 2 and disk.stats()["hits"] == 2
+
+
 def test_lru_limit(dense, small, tmp_path, monkeypatch):
     """QWEN_PROMPT_CACHE_DISK_GB: the least recently used entries go, their
     files with them (no orphan blob), bytes == the files' sizes; an entry
@@ -369,6 +397,26 @@ def test_insert_respects_the_headroom(dense, small, monkeypatch):
     assert pc.insert(e1, limit=1 << 40)
     assert pc.entries == [e1] and pc.version > v and pc.evictions == 1
     assert same(pc.restore(e1, len(e1.ids)), Cold(dense)(e1.ids))
+
+
+def test_disk_key(tmp_path, monkeypatch):
+    """Engine._disk_key: stable; moved by the weights and by numerics knobs
+    (any QWEN_* but the sizing / prompt-cache ones), not by those."""
+    (tmp_path / "model.safetensors").write_bytes(b"x" * 10)
+    (tmp_path / "config.json").write_text("{}")
+    eng = worker.Engine(str(tmp_path))
+    eng.max_batch = 16
+    k = eng._disk_key()
+    assert k == eng._disk_key() and len(k) == 64
+    monkeypatch.setenv("QWEN_PROMPT_CACHE_GB", "1")
+    monkeypatch.setenv("QWEN_PROMPT_CACHE_DISK_GB", "7")
+    monkeypatch.setenv("QWEN_BATCH_MEM_GB", "5")
+    assert eng._disk_key() == k
+    monkeypatch.setenv("QWEN_KV_BITS", "8")
+    assert eng._disk_key() != k
+    monkeypatch.delenv("QWEN_KV_BITS")
+    (tmp_path / "model.safetensors").write_bytes(b"x" * 11)
+    assert eng._disk_key() != k
 
 
 def test_reply_entry_through_disk(dense, small, tmp_path, monkeypatch):

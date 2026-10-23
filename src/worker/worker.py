@@ -4725,10 +4725,10 @@ class Engine:
                 disk.on_drained = self.sched.wake
                 self._pcache.disk = disk
                 log.info("prompt cache disk (QWEN_PROMPT_CACHE_DISK): %s, %.1f GiB, %s, entries "
-                         ">= %d tokens, writer queue %.1f GiB, head waits <= %.0f s", pcdisk.DIR,
-                         pcdisk.GB, "kept across runs when the key matches" if pcdisk.KEEP
-                         else "cleared at start", disk.min_tokens, disk.queue_bytes / GIB,
-                         pcdisk.WAIT_S)
+                         ">= %d tokens, writer queue %.1f GiB, head waits <= %.0f s, F_NOCACHE %s",
+                         pcdisk.DIR, pcdisk.GB, "kept across runs when the key matches"
+                         if pcdisk.KEEP else "cleared at start", disk.min_tokens,
+                         disk.queue_bytes / GIB, pcdisk.WAIT_S, pcdisk.NOCACHE)
             except Exception:  # noqa: BLE001 — the RAM cache works without it
                 log.exception("prompt cache disk: off (%s unusable)", pcdisk.DIR)
         self.sched.start()
