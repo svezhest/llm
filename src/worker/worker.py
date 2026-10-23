@@ -19,6 +19,7 @@ import argparse
 import base64
 import bisect
 import collections
+import contextlib
 import dataclasses
 import functools
 import hashlib
@@ -1760,20 +1761,24 @@ def _ws_masks(llg_tok, cap):
 #   for Check / Cancel / Health (see serve()).
 # QWEN_PREFILL_LANE (0 = off): a second, priority prefill for short TEXT
 #   requests. While a prefill runs (the main task: one request, slab by slab,
-#   e.g. a 110K MISS for minutes), the first waiting text request that needs
-#   at most this many slabs from where it would resume (its prompt-cache hit,
-#   else 0) is admitted beside it and prefilled between the main prefill's
-#   slabs (_admit_lane): a 300-token suffix after a 20K hit is ~1 s instead of
-#   a wait for the whole long prefill (the 600 s client timeouts of the 110K
-#   episode, 2026-10-17). It may overtake waiting requests that do not
-#   qualify, only when the budget holds it AND the head of the queue; the
-#   others keep their FIFO order. Same admission rules as any request (budget,
-#   live check, prompt-cache eviction) except it never gives up its hit (a
-#   lane request without it would be a long one). Slab ends are each prompt's
-#   own (_bounds): the main prefill is cut exactly as without the lane.
-#   Recommended 1 (a lane prefill then ends in the tick it starts).
-# QWEN_PREFILL_LANE_BURST (4): lane prefills in a row before the main
-#   prefill gets its next slab (the lane never starves it).
+#   e.g. a 110K MISS for minutes), the first waiting text request with at most
+#   this many tokens to prefill from where it would resume (its prompt-cache
+#   hit, else 0) is admitted beside it (_admit_lane) and prefilled before the
+#   main prefill's next slab: a 300-token suffix after a 20K hit takes ~1 s
+#   instead of a wait for the whole long prefill (the 600 s client timeouts of
+#   the 110K episode, 2026-10-17). Tokens, not slabs: a next turn resumed after
+#   its reply is cut at the new message starts (_bounds), so 300 tokens are
+#   often 2-3 slabs, the first a few tokens long. It may overtake waiting
+#   requests that do not qualify, only when the budget holds it AND the head
+#   of the queue; the others keep their FIFO order. Same admission rules as
+#   any request (budget, live check, prompt-cache eviction) except it never
+#   gives up its hit (without it, it would be a long one). Slab ends are each
+#   prompt's own (_bounds): the main prefill is cut exactly as without the
+#   lane. Recommended: PREFILL_STEP (2048): at most a slab's work per lane
+#   request.
+# QWEN_PREFILL_LANE_BURST (4): lane requests admitted in a row before the
+#   main prefill gets its next slab (a lane request, once admitted, runs to
+#   its end first: <= QWEN_PREFILL_LANE tokens): the lane never starves it.
 PREFILL_LANE = max(0, int(os.environ.get("QWEN_PREFILL_LANE", "0") or "0"))
 PREFILL_LANE_BURST = max(1, int(os.environ.get("QWEN_PREFILL_LANE_BURST", "4") or "4"))
 # QWEN_PREEMPT (0 = off): a row that outgrows the batch's headroom while
@@ -1781,14 +1786,15 @@ PREFILL_LANE_BURST = max(1, int(os.environ.get("QWEN_PREFILL_LANE_BURST", "4") o
 #   call for an agent), at most this many times per request: its KV (prompt +
 #   the tokens it consumed) goes to the prompt cache as a reply-KV entry, the
 #   request goes back to the HEAD of the queue with ids = prompt + generated
-#   and resumes from that entry (one row-length copy of nothing: the entry's
-#   end is the next decode input's position). The client sees one stream: the
+#   and resumes from that entry (nothing to prefill: the entry ends where the
+#   next decode input goes). The victim is the growing row itself (the one
+#   cut today: the other rows are untouched). The client sees one stream: the
 #   handler's detokenizer / stop filter / reasoning split never notice, the
 #   scheduler carries the sampler (its key: the seeded stream continues), the
 #   penalty counts, _Control's counters, the grammar matcher and the thinking
 #   budget (on the request). Not for vision, DFlash, cascade-grouped rows,
-#   prompt_logprobs or prompt_cache "read" requests (they are cut as before);
-#   see _preempt.
+#   prompt_logprobs or prompt_cache "read" / "off" requests (they are cut as
+#   before); see _preempt / _preemptable.
 PREEMPT = max(0, int(os.environ.get("QWEN_PREEMPT", "0") or "0"))
 MAX_BATCH = max(1, int(os.environ.get("QWEN_MAX_BATCH", "16")))
 PREFILL_SHARE = min(1.0, max(0.05, float(os.environ.get("QWEN_BATCH_PREFILL_SHARE", "0.5"))))
@@ -1796,6 +1802,72 @@ BATCH_MEM_GB = float(os.environ.get("QWEN_BATCH_MEM_GB", "0") or "0")
 RESERVE_TOKENS = max(1, int(os.environ.get("QWEN_BATCH_RESERVE_TOKENS", "4096")))
 GEN_SLOTS = int(os.environ.get("QWEN_GEN_SLOTS", "0") or "0")
 SCHED_LOG_S = 10.0
+# QWEN_DEBUG_NO_SYNC=1 (debug / tests; DeepInfer's forbid_cuda_sync): while a
+#   decode step is built (_Scheduler._step, up to its async_eval) every host
+#   wait on the GPU raises -- mx.eval / mx.synchronize, mx.array .item() /
+#   .tolist() / int() / float() / bool() / operator.index(), np.asarray /
+#   np.array of an mx.array. The step-ahead lives on that: one read of a
+#   step's outputs before the next step is queued (the old concatenate +
+#   tolist, found by hand: step_profile.md) and the GPU idles while the host
+#   builds the next one. Only the scheduler thread is checked (handler
+#   threads read numpy from MLX constants); off = no wrapper installed at all.
+DEBUG_NO_SYNC = os.environ.get("QWEN_DEBUG_NO_SYNC", "0") == "1"
+_NO_SYNC = threading.local()
+_NO_SYNC_ON = False                     # the wrappers are installed (once, at first use)
+# mlx-vlm 0.7.6's one-time evals inside a decode forward (each caches its
+# result on first use: a kernel launch probe, the conv weight's fp32 copy):
+# a wait on the first step after load only, not a step-ahead regression
+_NO_SYNC_ALLOW = frozenset({"_qwen3_5_try_launch", "_causal_conv1d_decode"})
+
+
+class SyncInStep(RuntimeError):
+    """QWEN_DEBUG_NO_SYNC: a host wait while a decode step was being built."""
+
+
+def _install_no_sync():
+    """Wrap the waits once: mx.array methods are patchable at class level
+    (nanobind), numpy's buffer-protocol reads are not, so np.asarray /
+    np.array are wrapped as module functions (what `np.` callers see)."""
+    global _NO_SYNC_ON
+    if _NO_SYNC_ON:
+        return
+
+    def guard(name, fn, arg=False):
+        @functools.wraps(fn)
+        def f(*a, **k):
+            if (getattr(_NO_SYNC, "on", False) and (not arg or (a and isinstance(a[0], mx.array)))
+                    and sys._getframe(1).f_code.co_name not in _NO_SYNC_ALLOW):
+                raise SyncInStep(f"QWEN_DEBUG_NO_SYNC: {name} while a decode step is built "
+                                 "(_Scheduler._step, before its async_eval): it waits for the GPU "
+                                 "and breaks the step-ahead")
+            return fn(*a, **k)
+        return f
+    for name in ("eval", "synchronize"):
+        setattr(mx, name, guard(f"mx.{name}()", getattr(mx, name)))
+    for name in ("item", "tolist", "__int__", "__float__", "__bool__", "__index__"):
+        setattr(mx.array, name, guard(f"mx.array.{name}()", getattr(mx.array, name)))
+    np.asarray = guard("np.asarray(mx.array)", np.asarray, arg=True)
+    np.array = guard("np.array(mx.array)", np.array, arg=True)
+    _NO_SYNC_ON = True
+
+
+class _NoSync:
+    def __enter__(self):
+        _install_no_sync()
+        _NO_SYNC.on = True
+
+    def __exit__(self, *exc):
+        _NO_SYNC.on = False
+
+
+_NULL_CTX = contextlib.nullcontext()
+
+
+def _no_sync():
+    """The QWEN_DEBUG_NO_SYNC context for building a step (a no-op when off)."""
+    return _NoSync() if DEBUG_NO_SYNC else _NULL_CTX
+
+
 GIB = 1024**3             # every *_GB knob and the batching logs are in GiB; Usage.peak_gb is 1e9
 SCHED_STALL_S = 300.0     # a tick running this long marks the scheduler wedged (Health: not ready)
 SCHED_MAX_FAILURES = 3    # consecutive failed decode steps before the scheduler gives up
@@ -2662,7 +2734,7 @@ class _Scheduler:
         self.task = None                # generator: the prefill / lone DFlash run in progress
         self.task_row = None
         # QWEN_PREFILL_LANE: the short text prefill running between the main
-        # task's slabs, and how many lane prefills ran since the main one's last slab
+        # task's slabs, and how many were admitted since the main one's last slab
         self.lane = self.lane_row = None
         self.lane_run = 0
         self.resume = 0.0               # prefill waits until then (decode's share)
@@ -2819,8 +2891,7 @@ class _Scheduler:
             if (PREFILL_LANE and self.lane is None and self.waiting and self.task is not None
                     and self.lane_run < PREFILL_LANE_BURST and self.task.__name__ == "_prefill"):
                 self._admit_lane()
-            if self.lane is not None and (self.task is None or self.lane_run < PREFILL_LANE_BURST):
-                self.lane_run += 1
+            if self.lane is not None:
                 self._advance_lane()
             else:
                 self.lane_run = 0
@@ -3095,37 +3166,34 @@ class _Scheduler:
             return None
         return row
 
-    def _lane_slabs(self, req):
-        """Prefill slabs `req` would run if admitted now: from where its
-        prompt-cache lookup would resume (peek: the same scan), to its
-        prompt's end, cut at its own slab ends -> None: never a lane request
-        (vision: its mRoPE positions and image work are the running prefill's
-        kind of state; cancelled)."""
+    def _lane_tokens(self, req):
+        """Tokens `req` would prefill if admitted now: from where its
+        prompt-cache lookup would resume (peek: the same scan) to its
+        prompt's end -> None: never a lane request (vision: image work and
+        positions of their own; cancelled)."""
         if req.images or req.cancel.is_set():
             return None
         e, depth = self._peek(req) if PROMPT_CACHE else (None, 0)
-        start, end = (depth if e is not None else 0), len(req.ids) - 1
-        if end <= start:
-            return 0
-        return 1 + sum(1 for b in self._bounds(req) if start < b < end)
+        return max(0, len(req.ids) - 1 - (depth if e is not None else 0))
 
     def _admit_lane(self):
         """QWEN_PREFILL_LANE: admit the first waiting text request that needs
-        at most PREFILL_LANE prefill slabs, beside the running plain prefill
+        at most PREFILL_LANE prefill tokens, beside the running plain prefill
         (the main task). It overtakes the waiting requests before it only if
         the budget also holds the head's reservation (and its row): the lane
         never makes the head wait longer for memory; the queue keeps its
         order otherwise. Same admission rules as _admit, but its hit is never
         given up (_fits lane=True). Its prefill runs at prefill's next turns
-        (_advance_lane: lane first, up to PREFILL_LANE_BURST in a row), then
-        it joins the batch like any row."""
+        until it ends (_advance_lane: before the main prefill's next slab; up
+        to PREFILL_LANE_BURST lane requests in a row), then it joins the batch
+        like any row."""
         with self.cv:
             cand = list(itertools.islice(self.waiting, self.max_batch))
         if not cand:
             return
         head = cand[0]
         for req in cand:
-            n = self._lane_slabs(req)
+            n = self._lane_tokens(req)
             if n is not None and n <= PREFILL_LANE:
                 break
         else:
@@ -3142,10 +3210,11 @@ class _Scheduler:
         row = self._setup(req)
         if row is None:
             return
-        log.info("id=%s prefill lane: %d slab(s) beside the prefill of id=%s%s", req.id, n,
+        log.info("id=%s prefill lane: %d tokens beside the prefill of id=%s%s", req.id, n,
                  self.task_row.req.id, f", ahead of {cand.index(req)} waiting" if over else "")
         self.lane_row = row
         self.lane = self._prefill(row)
+        self.lane_run += 1
 
     def _spec_ok(self, row):
         req = row.req
@@ -3821,7 +3890,7 @@ class _Scheduler:
         B = 1 too (right after the batch shrank to it, its arrays are still
         _gdn_split's views of the old stack)."""
         try:
-            if row.why not in ("stop", "length") or row.spec or row.req.images:
+            if row.why not in ("stop", "length", "preempted") or row.spec or row.req.images:
                 return None
             if row.group is not None:
                 log.info("id=%s prompt cache reply skipped: in a cascade group (P=%s) when it "
@@ -4514,9 +4583,14 @@ class _Scheduler:
         self._compact()
         if not self.rows:
             return
+        if PREEMPT:
+            self._preempt_rows()
+            if not self.rows:
+                return
         rows = self.rows
         ahead = not any(r.sync for r in rows)
-        nxt = self._step(rows) if ahead else None
+        with _no_sync():
+            nxt = self._step(rows) if ahead else None
         live = [r for r in rows if not r.first and not r.done]
         # item() per row: each token was evaluated by its step's async_eval,
         # so this waits for that step only. Any new op on them (a concatenate
@@ -4553,7 +4627,8 @@ class _Scheduler:
         if not ahead:
             self._compact()
             rows = self.rows
-            nxt = self._step(rows) if rows else []
+            with _no_sync():
+                nxt = self._step(rows) if rows else []
         for r, y in zip(rows, nxt):
             if not r.done:
                 # Reasoning budget: forces \n</think> as the next input (the
@@ -4570,6 +4645,151 @@ class _Scheduler:
         if self.steps % 256 == 0:
             self.clear = True
         self._compact()
+
+    # --- preemption (QWEN_PREEMPT) ------------------------------------------------
+    def _preempt_rows(self):
+        """Before a step: a row whose growth in it would pass the headroom
+        (_regrow ahead=1: the cache gives way first, as in the step) is
+        preempted instead of cut (_preempt); the others are re-accounted one
+        step early (the same numbers _regrow would set in the step). Only
+        rows _preemptable; the rest are cut in _step as before."""
+        ahead = not any(r.sync for r in self.rows)
+        hit = False
+        for i, r in enumerate(self.rows):
+            if r.pos + 1 >= r.tokens and self._preemptable(r) and not self._regrow(r, ahead=1):
+                self._preempt(r, i, ahead)
+                hit = True
+        if hit:
+            self._compact()
+
+    def _preemptable(self, row):
+        """A row that can be resumed exactly where it stops: text, plain
+        prefill (not DFlash), not in a cascade group (its KV is in the
+        group's stack), its consumed tokens tracked (row.fed: the prompt cache
+        on), prompt_cache not "read" / "off" (no store / no lookup), no
+        prompt_logprobs (they belong to the first prefill), y a generated
+        token (not `first`), preempted fewer than QWEN_PREEMPT times, and not
+        alone (a lone row is never cut)."""
+        req = row.req
+        return (req.preempts < PREEMPT and not row.done and not row.first
+                and row.fed is not None and row.group is None and not row.spec
+                and not req.images and not _wants(req, "prompt_logprobs")
+                and _cache_mode(req) == ""          # "off" would not look its entry up
+                and all(hasattr(row.cache[j], "keys") for j in self.fa_layers)
+                and sum(not r.done for r in self.rows) > 1)
+
+    def _preempt(self, row, i, ahead):
+        """Preempt row `i` before the step that would feed it its pending
+        token y: read y and send it (as _iterate's read loop does: thinking
+        budget, stop, grammar / bad-word history, logprobs), do with it what
+        _logits does to a next input (penalty count, _Control's count: the
+        resumed row's first input is `first`, skipped there), store the row
+        (KV of prompt + generated[:-1] = everything but y, its recurrent state
+        after them) as a reply-KV entry (_store_preempt) and put the request
+        back at the head of the queue with ids = prompt + generated: its
+        lookup resumes at the entry's end, prefills nothing, and its first
+        decode input is y at the same position. A row that stops on y (EOS,
+        stop id) or reaches max_tokens ends normally instead. When the entry
+        is not kept (over the headroom) the request still resumes, from what
+        the cache holds (a recompute)."""
+        req = row.req
+        tok = row.y.item()                          # waits for its own step only
+        lpi = _read_logprobs(row.lp) if row.lp is not None else None
+        row.fed.append(tok)
+        try:
+            if req.thinking is not None:
+                req.thinking(tok)
+            why = req.ctl.stop(tok) if req.ctl.active else (
+                "stop" if self.eng.stopping(tok) else None)
+            if why == "stop":
+                if lpi is not None:
+                    req.stop_lp = (tok, *lpi)
+                self._finish(row, "stop")
+                return
+            if not ahead:
+                if req.guide is not None:
+                    req.guide.consume(tok)
+                req.ctl.history.append(tok)
+            req.out.put(("tok", tok, why != "skip") if lpi is None
+                        else ("tok", tok, why != "skip", lpi))
+            row.n += 1
+            if row.n == req.max_tokens:
+                self._finish(row, "length")
+                return
+            if row.pen.active:
+                row.pen.add(row.y)
+            if req.ctl.active:
+                req.ctl.n += 1
+        except Exception as e:  # noqa: BLE001 — e.g. grammar rejected the token
+            self._fail(row, e)
+            return
+        row.why = "preempted"
+        kept = None
+        try:
+            kept = self._store_preempt(row, self._reply_cache(row, i))
+        except Exception:  # noqa: BLE001 — costs the entry only: the request resumes by recompute
+            log.exception("id=%s preempt: storing the row failed", req.id)
+        fed, n = row.fed, row.n
+        row.fed = row.entry = None                  # no reply store at its drop
+        row.done = True
+        self.reserved -= row.reserved
+        self.clear = True
+        if req.orig is None:
+            req.orig = req.ids
+        req.ids = req.ids + fed
+        req.max_tokens -= n
+        req.carry = (row.sampler, row.pen)
+        req.preempts += 1
+        req.bounds = req.peeked = req.keep_since = None
+        with self.cv:
+            self.waiting.appendleft(req)
+        log.warning("id=%s preempted at %d tokens (%d of %d preemptions): the batch's KV would "
+                    "pass its memory headroom (%.2f GiB reserved); %s, back at the head of the "
+                    "queue (%d tokens, %d left to generate)", req.id, len(req.ids) - len(req.orig),
+                    req.preempts, PREEMPT, self.reserved / GIB,
+                    "its KV kept in the prompt cache" if kept is not None
+                    else "its KV NOT kept (resumes by recompute)", len(req.ids), req.max_tokens)
+
+    def _store_preempt(self, row, cache):
+        """The preempted row as a prompt-cache entry: ids = prompt +
+        generated[:-1] (the KV it holds), the end state its own; resumable at
+        its end (`reply`, as a reply-KV entry: no slab end, decode bits). The
+        prompt entry's pieces are inherited when it is still there (only the
+        generated part is copied), else everything is copied. Unlike a reply
+        store: also with reasoning in the output (the resumed prompt holds it
+        exactly), copied and evaluated here (we are before the step; one
+        host wait for a rare event) -> the entry or None (not kept)."""
+        if cache is None:
+            return None
+        req, pc = row.req, self.eng._pcache
+        ids = req.ids + row.fed[:-1]
+        if len(ids) != row.pos or any(row.cache[j].offset != row.pos for j in self.fa_layers):
+            log.warning("id=%s preempt: the row's cache does not hold its tokens", req.id)
+            return None
+        e = row.entry() if row.entry is not None else None
+        if (e is not None and any(e is x for x in pc.entries)
+                and e.ids == ids[:len(e.ids)]):
+            inherit, at, clock = _Inherit(e.chain, {}, None, e.quantized), len(e.ids), (e.used, e.seq)
+        else:
+            inherit, at, clock = None, 0, None
+        ends, protect = row.plan
+        new, _ = pc.store(ids, cache, {}, inherit, at, ends, protect,
+                          limit=self.budget + self.prefill_reserve - self.reserved,
+                          kv_start=self.kv["quantized_kv_start"], wanted=self._wanted,
+                          reply=at if inherit is not None else len(req.ids) - 1, tick=False,
+                          spare=self._parents(), clock=clock)
+        if new is not None:
+            try:
+                mx.eval(new.arrays)                 # (the end state: gathers from the stack)
+            except Exception:
+                # no entry whose arrays cannot run (the absorbed ones are gone: a recompute)
+                pc.entries = [x for x in pc.entries if x is not new]
+                pc._recount()
+                raise
+            log.info("id=%s preempt: stored %d tokens (%d inherited), %.1f MB (%d entries, "
+                     "%.1f MB total)", req.id, len(ids), at, new.nbytes / 1e6,
+                     len(pc.entries), pc.bytes / 1e6)
+        return new
 
     def _log(self):
         now = time.time()
@@ -4956,7 +5176,7 @@ class Engine:
         positions first..len-1 (the scheduler's prefill) and the assistant
         messages' spans."""
         first, lps = r.plp
-        ids = r.ids
+        ids = r.prompt_ids
         p = req.params
         gen = ((not p.HasField("add_generation_prompt") or p.add_generation_prompt)
                and not p.continue_final_message)
@@ -5175,7 +5395,7 @@ class Engine:
             calls = []
             if tools:
                 answer = "".join(answer_buf)
-                key = hashlib.sha256(f"{r.ids}|{sampling.get('seed')}|{answer}".encode()).hexdigest()
+                key = hashlib.sha256(f"{r.prompt_ids}|{sampling.get('seed')}|{answer}".encode()).hexdigest()
                 content, calls = parse_tool_calls(answer, tools, key)
                 choice, _ = _tool_choice(p)
                 if calls and choice == "none":

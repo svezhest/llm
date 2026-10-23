@@ -3,7 +3,7 @@ between the slabs of a long running prefill instead of waiting for it.
 
 Every answer must be what it is without the lane (and what a cold serial run
 gives: hit == cold), the long prefill must be cut into the same slabs, the
-lane never runs more than QWEN_PREFILL_LANE_BURST prefills in a row, it
+lane never takes more than QWEN_PREFILL_LANE_BURST requests in a row, it
 overtakes only when the budget also holds the head, and the entry the long
 prefill resumed from is never evicted by the lane's store."""
 import pytest
@@ -25,8 +25,9 @@ def small(monkeypatch):
     monkeypatch.setattr(worker, "PROMPT_CACHE_CKPTS", 12)
     monkeypatch.setattr(worker, "PROMPT_CACHE_KEEP_TOKENS", 8)
     monkeypatch.setattr(worker, "PROMPT_CACHE_KEEP_WAIT_S", float("inf"))
-    monkeypatch.setattr(worker, "PREFILL_LANE", 1)
+    monkeypatch.setattr(worker, "PREFILL_LANE", 16)            # tokens: two slabs' worth
     monkeypatch.setattr(worker, "PREFILL_LANE_BURST", 4)
+    monkeypatch.setattr(worker, "DEBUG_NO_SYNC", True)      # no wait inside the steps
 
 
 def conv(seed):
@@ -83,7 +84,7 @@ def scenario(lm, lane, n_short=3, **kw):
 
 
 def test_lane_runs_short_hits_beside_a_long_prefill(dense, small):
-    got, sched, seen, offs, joined, convs, shorts = scenario(dense, 1)
+    got, sched, seen, offs, joined, convs, shorts = scenario(dense, 16)
     off, _, seen0, offs0, joined0, _, _ = scenario(dense, 0)
     assert got == off                                   # every answer as without the lane
     assert got["long"] == cold(dense, prompts([120], 3)[0], 5, "long")
@@ -104,15 +105,15 @@ def test_lane_runs_short_hits_beside_a_long_prefill(dense, small):
 
 def test_lane_burst_never_starves_the_main_prefill(dense, small, monkeypatch):
     monkeypatch.setattr(worker, "PREFILL_LANE_BURST", 2)
-    got, sched, seen, offs, joined, convs, shorts = scenario(dense, 1, n_short=5, max_batch=8)
-    run_ = 0
+    got, sched, seen, offs, joined, convs, shorts = scenario(dense, 16, n_short=5, max_batch=8)
+    burst = set()
     for kind, rid in seen:
         if kind == "lane":
-            run_ += 1
-            assert run_ <= 2, seen
+            burst.add(rid)
+            assert len(burst) <= 2, seen                # lane requests between two main slabs
         else:
-            run_ = 0
-    assert sum(k == "lane" for k, _ in seen) == 5
+            burst = set()
+    assert {rid for k, rid in seen if k == "lane"} == {r.id for r in shorts}
 
 
 def test_lane_overtakes_only_when_the_head_fits_too(dense, small):
@@ -123,7 +124,7 @@ def test_lane_overtakes_only_when_the_head_fits_too(dense, small):
     head = request(prompts([60], 42)[0], 3, "head")       # cold, several slabs: no lane
     short = request(b, 3, "short")
     seen, _ = trace(sched)
-    assert sched._lane_slabs(head) > 1 and sched._lane_slabs(short) <= 1
+    assert sched._lane_tokens(head) > 16 and sched._lane_tokens(short) <= 16
     run(sched, [long, head, short], arrive={2: [head, short]})
     assert [rid for k, rid in seen if k == "lane"] == ["short"]
     assert [rid for k, rid in seen if k == "main"].index("head") > 0
@@ -168,7 +169,7 @@ def test_vision_main_text_lane_and_no_vision_in_the_lane(dense, small):
     sched = scheduler(dense)
     seen, _ = trace(sched)
     v, t, v2 = vreq("v"), request(t_ids, 8, "t"), vreq("v2")
-    assert sched._lane_slabs(v2) is None
+    assert sched._lane_tokens(v2) is None
     got = run(sched, [v, t, v2], arrive={2: [t, v2]})
     assert got["v"] == one and got["v2"][0] == one[0] and got["t"] == ref
     assert [rid for k, rid in seen if k == "lane"] == ["t"]
@@ -195,3 +196,21 @@ def test_lane_store_never_evicts_the_main_prefills_parent(dense, small, monkeypa
     run(sched, [long, short], arrive={2: [short]}, on_tick=on_tick)
     assert [rid for k, rid in seen if k == "lane"] == ["short"]
     assert long.reused > 0 and kept and all(kept)
+
+
+def test_multi_slab_lane_request_beside_a_cold_prefill(dense, small):
+    """A lane request of two slabs (cold, 13 tokens over a slab end) runs
+    over two prefill ticks before the main prefill's next slab; the main
+    prefill (cold too: its first slab set the model's mRoPE state) goes on
+    with its own state after it. Both answer as cold serial runs."""
+    long_ids, t_ids = prompts([100], 80)[0], prompts([14], 81)[0]
+    assert len(worker._bounds(t_ids, IM_START)) == 1
+    long, t = request(long_ids, 4, "long"), request(t_ids, 6, "t")
+    sched = scheduler(dense)
+    seen, _ = trace(sched)
+    got = run(sched, [long, t], arrive={2: [t]})
+    assert [k for k, rid in seen if rid == "t"] == ["lane", "lane"]
+    i = seen.index(("lane", "t"))
+    assert seen[i + 1] == ("lane", "t") and seen[i + 2] == ("main", "long")
+    assert got["long"] == cold(dense, long_ids, 4, "long")
+    assert got["t"] == cold(dense, t_ids, 6, "t")
