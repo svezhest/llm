@@ -1,0 +1,14 @@
+2026-10-24 02:12:55,250 qwen.worker WARNING no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+2026-10-24 02:12:55,328 root WARNING Checkpoint has no weights for module(s): vision_tower. Disabling them.
+2026-10-24 02:13:00,635 worker.pfqmm INFO pfqmm 8-bit g64: tested, 249 modules on (lm_head K=4096 N=248320 M=256/264/288/296)
+2026-10-24 02:13:00,636 worker.pfqmm INFO pfqmm: 249 modules on the 64-row prefill qmm, >= 64 rows (8-bit g64 tested)
+2026-10-24 02:13:00,638 worker.mrqmm INFO mrqmm: 249 modules on the multi-row kernel for 1..16 decode rows (linear_attn.in_proj_a x24, linear_attn.in_proj_b x24, linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8); left on quantized_matmul: none
+coverage: {'mrqmm': 249, 'uncovered': {}}
+loaded; max_batch 16
+prompt tokens: [331, 635, 326, 634, 324, 632, 324, 633, 331, 635, 323, 629, 321, 627, 321, 628]
+ref: 16 solo runs in 173s
+solo repeat with golden: equal
+f B=16: 16 rows, 3704 steps, rows with a mismatch 0, max |d log p| 0, mean batch 13.4, 42s; decode steps by B {1: 13, 2: 5, 3: 12, 4: 5, 5: 11, 6: 6, 7: 12, 8: 48, 9: 15, 10: 10, 11: 14, 12: 10, 13: 15, 14: 9, 15: 20, 16: 122}
+free B=16: tokens differ in 0 rows, logprobs in 0; decode steps by B {1: 21, 2: 12, 3: 20, 4: 12, 5: 19, 6: 11, 7: 20, 8: 12, 9: 20, 10: 11, 11: 19, 12: 12, 13: 20, 14: 12, 15: 21, 16: 136}
+c B=16: 16 rows, 3704 steps, rows with a mismatch 16, max |d log p| 0.026, mean batch 13.3, 43s; decode steps by B {1: 6, 2: 13, 3: 4, 4: 12, 5: 5, 6: 11, 7: 7, 8: 58, 9: 11, 10: 13, 11: 11, 12: 14, 13: 8, 14: 17, 15: 12, 16: 124}
+PASS -> /tmp/perf/batch_invariant/bi_check_full16.json

@@ -2,7 +2,7 @@
 # Batch-invariant mode, GPU phase (docs/perf/2026-10-24/design/batch_invariant.md):
 #   1. kernel cost per shape (no model, ~1.3 GB, ~2 min)
 #   2. Metal tests (tiny shapes, < 0.3 GB, ~30 s)
-#   3. real 9B: a row in a batch == the row alone (forced + free + control, ~8 min)
+#   3. real 9B: a row in a batch == the row alone (forced + free + control, ~8 + 5 min)
 #   4. real 9B: decode step on / off A/B in-process (~7 min)
 # Needs the GPU lease: no worker / gateway / other GPU job, Activity Monitor
 # closed. One command; everything goes to $PERF_OUT (default
@@ -43,7 +43,12 @@ if (( ${steps[(Ie)3]} )); then
   env $W9 $PY ../../scripts/perf/batch_invariant/check_real.py --out $PERF_OUT/bi_check.json \
     > $PERF_OUT/bi_check.txt 2>&1 || true
   grep -E "^(ref|solo|f |c |free|PASS|FAIL)" $PERF_OUT/bi_check.txt | tee -a $PERF_OUT/summary.txt
-  grep -E "batch-invariant|mrqmm:" $PERF_OUT/bi_check.txt | head -4 | tee -a $PERF_OUT/summary.txt
+  grep -E "^coverage" $PERF_OUT/bi_check.txt | tee -a $PERF_OUT/summary.txt
+  # short prompts, long answers: every batch size 1..16 decodes (the run above
+  # is prefill-bound, mean batch ~4)
+  env $W9 $PY ../../scripts/perf/batch_invariant/check_real.py --lens 300,600 --gen 256 --B 16 \
+    --out $PERF_OUT/bi_check_full16.json > $PERF_OUT/bi_check_full16.txt 2>&1 || true
+  grep -E "^(f |c |free|PASS|FAIL)" $PERF_OUT/bi_check_full16.txt | tee -a $PERF_OUT/summary.txt
 fi
 if (( ${steps[(Ie)4]} )); then
   log "4 real 9B step A/B"

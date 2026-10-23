@@ -11,7 +11,9 @@ comparisons of prompt / context methods need runs that reproduce under load. Tod
 **What the mode guarantees.** A row's logits are the same bits whatever the batch around it: 1..16
 rows, any prompt lengths, rows joining and leaving. So a row's tokens and log-probabilities equal
 those of the same request run alone. This holds for the 9B layout (all decode linears 8-bit g64 with
-fp16 scales). It is not yet checked on the real model; see the GPU plan.
+fp16 scales). **Real 9B, 2026-10-24: PASS** (every batch size 1..16, 0 mismatches in 5947 forced
+steps and two free runs; the mode off: 16/16 rows differ). Cost: B = 1 ×1.09–1.21, B = 2 ×0.86,
+B = 4/8 ×1.00, B = 16 ×0.97 (see "GPU results").
 
 ## What depended on B, and what the mode does
 
@@ -41,11 +43,12 @@ fp16 scales). It is not yet checked on the real model; see the GPU plan.
 
 - At 3..8 rows it is already the default (2 × 8). The mode changes nothing there: the bits at
   B = 3..8 are today's bits (`test_k_split_fixed_per_k` asserts the config is equal).
-- At 1–2 rows: mrqmm costs ~1.03× a qmv step at M = 1 (31.3 vs 30.3 ms of step linears,
-  `../../2026-10-12/mrqmm.md`). At M = 2 it should be faster than qmv (the qmv step is ~1.17× M = 1).
-- At 9..16 rows: KS 8 with NA 2. The config sweep at 16 rows put 2 × 8 within 3 % of the default
-  4 × 4. NA is free (it does not change a bit), so `INVARIANT_NA16` can be retuned from the GPU
-  kernel bench; 4 × 8 is measured too.
+- At 1–2 rows: mrqmm was ~1.03× a qmv step at M = 1 (31.3 vs 30.3 ms of step linears,
+  `../../2026-10-12/mrqmm.md`); measured now (GPU results) the real step is ×1.09–1.21 at B = 1,
+  and ×0.86 at B = 2 (2-row qmv reads the weights twice).
+- At 9..16 rows: KS 8 with NA 2. The config sweep at 16 rows had put 2 × 8 within 3 % of the default
+  4 × 4; in the real step it is 2.6 % *faster*. NA is free (it does not change a bit); the GPU
+  kernel bench measured 4 × 8 as 5–6 % slower at 9..16 rows, so `INVARIANT_NA16` stays 2.
 - KS 4 everywhere would instead change the 3..8-row bits and slow the bandwidth-bound small-M case
   (half the simdgroups per tile).
 
@@ -241,4 +244,108 @@ Record PASS/FAIL and the four tables under "GPU results" below. Then the AppWorl
 
 ## GPU results
 
-(to be filled by the GPU phase)
+2026-10-24, 02:00–02:40, M1 Max, GPU lease (worker stopped; the gateways idle; the user's browser
+open, swap 7.1 / 8 GB used: speed drifts, A/B inside each process). mlx 0.32.3, mlx-vlm 0.7.6,
+Ornith-1.5-9B 8-bit, `QWEN_KV_BITS=0 QWEN_PROMPT_CACHE=0 QWEN_PRESENCE_PENALTY=0`. Raw:
+`../raw/batch_invariant/` (`summary.txt` first).
+
+**Gate: PASS.**
+
+### 1. Kernel bench (`bi_kern.txt`)
+
+Step linears, ms (independent calls in a chain: the GPU overlaps them, so this understates the cost
+of a slow kernel in a decode step, where the matmuls depend on each other):
+
+| rows | default | mode (2 × 8) | × | 4 × 8 at 9..16 | × |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 26.3 (qmv) | 30.1 | 1.14 | 30.3 | 1.15 |
+| 2 | 34.8 (qmv) | 30.1 | 0.86 | 30.0 | 0.86 |
+| 3 / 4 / 8 | 29.9 / 30.0 / 31.7 | 29.7 / 30.0 / 32.1 | 0.99–1.01 (same config) | | |
+| 9 / 12 / 16 | 44.5 / 44.9 / 45.7 | 44.5 / 45.4 / 46.7 | 1.00–1.02 | 46.8 / 47.6 / 48.6 | 1.05–1.06 |
+
+At one row the loss is in o_proj / GDN out_proj (4096 × 4096: 82–90 vs 63–67 µs) and gate/up
+(197 vs 165 µs). In a *dependent* chain (`probe_chain.py`), MLP 1 row: qmv 189, mrqmm NA 1/2/4
+192/193/198 µs; 4096², 1 row: 97 vs 109 µs. NA does not help at 1 row. So `INVARIANT_NA16` stays 2.
+
+### 2. Metal tests (`bi_metal_tests.txt`)
+
+`test_batch_invariant_metal.py` + `test_mrqmm.py`: 153 passed, 1 skipped (the real-weights test).
+
+### 3. Real 9B: a row in a batch == the row alone
+
+Load log: `mrqmm: 249 modules on the multi-row kernel for 1..16 decode rows (… in_proj_a/b x24 …
+lm_head x1 …); left on quantized_matmul: none`; coverage `uncovered: {}`.
+
+**Run A** (`bi_check.txt`): 16 prompts of 323–6035 tokens, 96 tokens each. It is prefill-bound
+(mean batch ~4).
+
+| phase | rows | steps compared | rows with a mismatch | max \|Δ log p\| |
+|---|---:|---:|---:|---:|
+| solo again with golden (4 prompts) | 4 | | 0 (equal) | |
+| forced B = 2 | 2 | 185 | 0 | 0 |
+| forced B = 4 | 4 | 342 | 0 | 0 |
+| forced B = 8 | 8 | 572 | 0 | 0 |
+| forced B = 16 | 16 | 1144 | 0 | 0 |
+| free B = 16 (tokens, logprobs) | 16 | | 0 / 0 | |
+| control, the mode off, forced B = 16 | 16 | 1144 | **8** | 0.020 |
+
+**Run B** (`bi_check_full16.txt`): 16 prompts of 321–635 tokens, 256 tokens each, so the batch
+reaches 16. Every batch size 1..16 decoded, 122 steps at B = 16.
+
+| phase | rows | steps compared | rows with a mismatch | max \|Δ log p\| |
+|---|---:|---:|---:|---:|
+| forced B = 16 | 16 | 3704 | 0 | 0 |
+| free B = 16 | 16 | | 0 / 0 | |
+| control, the mode off | 16 | 3704 | **16** | 0.026 |
+
+"Equal" means `==` on every step's (log p of the token, top-5 ids and log p's), and the same
+tokens. Free runs of all 16 rows at once give byte-identical greedy answers to solo. Nothing needed
+fixing on the real model.
+
+### 4. Decode step cost, in-process A/B (`bi_step_ab.txt`)
+
+The mode is toggled every 16 steps, 3 rounds. Each row gives the median of the per-round on/off
+ratios.
+
+| B | on ms | off ms | on/off | rounds |
+|---:|---:|---:|---:|---|
+| 1 | 32.9 | 27.9 | **×1.18** | 1.09, 1.21, 1.18 |
+| 2 | 33.7 | 39.7 | **×0.86** | 0.87, 0.86, 0.85 |
+| 4 | 36.9 | 36.7 | ×1.00 | 1.00, 1.01, 1.00 |
+| 8 | 38.3 | 38.4 | ×1.00 | 1.00, 1.00, 1.00 |
+| 16 | 57.2 | 58.9 | **×0.97** | 0.97, 0.98, 0.97 |
+
+- **Earlier run, slow machine state** (`bi_step_ab_run1.txt`, 20 min before, B = 4 at 46 vs 37 ms):
+  B = 1 ×1.39–1.46. B = 2 / 4 / 8 / 16 matched the table above: 0.86 / 1.00 / 1.00 / 0.97.
+- **Probes at B = 1.**
+  - Synchronous without the scheduler (`probe_b1_direct.py`): 32.4 vs 29.9 ms (×1.08). The same
+    with a step-ahead: 31.2 vs 27.9 (×1.12).
+  - The scheduler with the mode fixed per run (`probe_step_fixed.py`): 30.1 vs 27.2 (×1.11).
+  - The 1-row cost is the mrqmm kernel's latency against qmv on dependent matmuls, mostly at
+    4096 × 4096. It grows when the GPU runs slow.
+- **Against the plan's pass criteria:**
+  - B = 2 (≤ ×1.02), B = 4/8 (±2 %) and B = 16 (≤ ×1.05) pass.
+  - **B = 1 misses its ≤ ×1.05 target: ×1.09–1.21.** It cannot be tuned away without changing
+    bits: NA does not help, and KS is fixed by the 3..8-row bucket. A 1-row kernel with the same
+    bits would have to reproduce the simdgroup MMA's internal rounding in scalar code.
+
+### Findings for the default path (not changed here)
+
+- At B = 2, mrqmm is 14 % faster than MLX's 2-row qmv. The default keeps qmv only for the "B ≤ 2
+  bit-exact to solo" property.
+- At 9..16 rows the default 4 × 4 is 2.6 % slower than 2 × 8 in the real step, although the
+  2026-10-12 sweep had them within 3 %. Switching the default to 2 × 8 would be −2.6 % at B = 16
+  and changes only the default's (already non-exact) bits there.
+
+### Recommendation
+
+- Keep `QWEN_BATCH_INVARIANT=0` as the default. The mode costs 9–21 % on lone-request steps
+  (interactive single-user latency).
+- Use `QWEN_BATCH_INVARIANT=1 QWEN_PROMPT_CACHE_REPLY=0` (with the default `QWEN_MAX_BATCH=16`)
+  for reproducible AppWorld runs, instead of `QWEN_MAX_BATCH=2`:
+  - batched steps cost nothing at B ≥ 3 and less at B = 2 and 16;
+  - only steps with one row decoding pay;
+  - under the AppWorld load (mean 5.4 rows per step at B = 16, `../../2026-10-17/replay_batch1.md`)
+    the expected cost is ~0.
+- Next: the AppWorld replay at `MAX_BATCH=16 + BATCH_INVARIANT=1 + REPLY=0` vs `MAX_BATCH=2`, two
+  runs each. Check req/min and that the two invariant runs give identical replies.

@@ -75,6 +75,34 @@ def filler(n_chars, seed):
     return "\n".join(out)
 
 
+import logging  # noqa: E402
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logging.getLogger("qwen.worker").setLevel(logging.WARNING)   # warnings only (not every request)
+for n in ("worker.mrqmm",):
+    logging.getLogger(n).setLevel(logging.INFO)
+
+# decode steps by batch size (the 9..16-row bucket must be exercised too)
+HIST = {}
+_step0 = W._Scheduler._step
+
+
+def _step_hist(self, rows):
+    HIST[len(rows)] = HIST.get(len(rows), 0) + 1
+    return _step0(self, rows)
+
+
+W._Scheduler._step = _step_hist
+_log_inv = W._log_invariant
+
+
+def _log_inv_print(lm, mb):
+    import mrqmm as _m
+    print("coverage:", {"mrqmm": sum(1 for _, x in lm.named_modules() if type(x) is _m.MRQuantizedLinear),
+                        "uncovered": W._invariant_uncovered(lm) if mb > 2 else None}, flush=True)
+    return _log_inv(lm, mb)
+
+
+W._log_invariant = _log_inv_print
 assert W.BATCH_INVARIANT, "run with QWEN_BATCH_INVARIANT=1"
 eng = W.Engine(os.environ["QWEN_MODEL"])
 eng.load()
@@ -187,7 +215,9 @@ def forced_phase(B, tag, rot):
     reqs = [make(i, f"{tag}{B}-{j}", g, REF[i]["toks"]) for j, (i, g) in enumerate(zip(idx, gens))]
     START[0] = eng.sched.steps
     t = time.time()
+    HIST.clear()
     out = run(reqs, stagger=B // 2)
+    hist = dict(sorted(HIST.items()))
     rows, steps, bad, dmax, firsts = 0, 0, 0, 0.0, []
     for j, (i, g) in enumerate(zip(idx, gens)):
         got = out[f"{tag}{B}-{j}"]
@@ -195,10 +225,11 @@ def forced_phase(B, tag, rot):
         rows, steps, bad, dmax = rows + 1, steps + n, bad + (b > 0), max(dmax, d)
         if f is not None and len(firsts) < 4:
             firsts.append(dict(prompt=i, slot=j, batch_mean=got["batch_mean"], **f))
-    res = dict(rows=rows, steps=steps, rows_bad=bad, max_dlp=dmax, first=firsts,
+    res = dict(rows=rows, steps=steps, rows_bad=bad, max_dlp=dmax, first=firsts, step_hist=hist,
                mean_batch=sum(out[k]["batch_mean"] for k in out) / len(out), s=time.time() - t)
     print(f"{tag} B={B}: {rows} rows, {steps} steps, rows with a mismatch {bad}, "
-          f"max |d log p| {dmax:.3g}, mean batch {res['mean_batch']:.1f}, {res['s']:.0f}s", flush=True)
+          f"max |d log p| {dmax:.3g}, mean batch {res['mean_batch']:.1f}, {res['s']:.0f}s; "
+          f"decode steps by B {hist}", flush=True)
     return res
 
 
@@ -208,11 +239,14 @@ for k, B in enumerate(int(x) for x in a.B.split(",")):
 # free run: all prompts at once, plain greedy
 t = time.time()
 START[0] = eng.sched.steps
+HIST.clear()
 out = run([make(i, f"free{i}", a.gen) for i in range(a.n)], stagger=a.n // 2)
 fb = [i for i in range(a.n) if out[f"free{i}"]["toks"] != REF[i]["toks"]]
 lb = [i for i in range(a.n) if out[f"free{i}"]["lps"] != REF[i]["lps"]]
-report["phases"]["free"] = dict(rows=a.n, rows_tokens_differ=fb, rows_lps_differ=lb, s=time.time() - t)
-print(f"free B={a.n}: tokens differ in {len(fb)} rows, logprobs in {len(lb)}", flush=True)
+report["phases"]["free"] = dict(rows=a.n, rows_tokens_differ=fb, rows_lps_differ=lb, s=time.time() - t,
+                                step_hist=dict(sorted(HIST.items())))
+print(f"free B={a.n}: tokens differ in {len(fb)} rows, logprobs in {len(lb)}; decode steps by B "
+      f"{dict(sorted(HIST.items()))}", flush=True)
 
 # control: mode off (idle now: the scheduler waits for work)
 mrqmm.set_invariant(False)
