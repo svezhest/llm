@@ -1,0 +1,5 @@
+gb= 3.0 tail=4096 done=   250 miss=89.4% lat=336.6s  tail=2048 done=   258 miss=82.5% lat=328.3s  tail=   0 done=   257 miss=81.0% lat=328.5s
+gb= 4.0 tail=4096 done=   294 miss=64.7% lat=294.0s  tail=2048 done=   328 miss=57.8% lat=269.4s  tail=   0 done=   318 miss=55.5% lat=273.1s
+gb= 5.0 tail=4096 done=   429 miss=40.1% lat=204.7s  tail=2048 done=   570 miss=29.8% lat=158.0s  tail=   0 done=   584 miss=29.3% lat=157.7s
+gb= 6.0 tail=4096 done=   911 miss=18.2% lat=103.8s  tail=2048 done=  1262 miss=13.0% lat= 78.2s  tail=   0 done=  1349 miss=12.1% lat= 74.6s
+gb= 8.0 tail=4096 done=  3185 miss= 3.6% lat= 26.1s  tail=2048 done=  3249 miss= 3.4% lat= 25.5s  tail=   0 done=  3277 miss= 3.4% lat= 25.3s
