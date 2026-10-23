@@ -188,6 +188,10 @@ pcdisk.json     {format, key}
 Clearing at start is the default. `KEEP=1` reuses files only under the same key. Being that
 conservative is deliberate: any code change invalidates.
 
+With `KEEP=1` every file is also `fsync`ed before its rename. Otherwise a power loss could leave
+a full-size file of zeros under its name, which the size check would not catch. Without `KEEP`
+the directory is cleared at start anyway, so the writes skip the `fsync`.
+
 ### Errors
 
 Disk errors are never a request's failure:

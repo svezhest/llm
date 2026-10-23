@@ -91,10 +91,12 @@ def _nocache(f):
             pass                                      # a file system without it: cached
 
 
-def _write_blob(path, header, arrays, bf16=None):
+def _write_blob(path, header, arrays, bf16=None, sync=False):
     """MAGIC, u64 header length, header JSON, then the arrays (C order),
     each at a 4096-aligned offset. Written to path + ".tmp", then renamed:
-    a file under its name is complete (its size is checked on read)."""
+    a file under its name is complete (its size is checked on read). `sync`
+    (KEEP: files outlive the process): fsync before the rename, so a power
+    loss cannot leave a full-size file of zeros under the name."""
     specs, off = [], 0
     for i, a in enumerate(arrays):
         specs.append({"dtype": a.dtype.name, "shape": list(a.shape), "off": off,
@@ -116,6 +118,9 @@ def _write_blob(path, header, arrays, bf16=None):
             if pad:
                 f.write(b"\0" * pad)
             del c
+        if sync:
+            f.flush()
+            os.fsync(f.fileno())
     os.replace(tmp, path)
     return start + off
 
@@ -271,7 +276,7 @@ class DiskTier:
         self.queue_bytes = int(QUEUE_GB * GIB if queue_bytes is None else queue_bytes)
         self.min_tokens = MIN_TOKENS if min_tokens is None else min_tokens
         self.seg_cls, self.entry_cls = seg_cls, entry_cls
-        self.key = key
+        self.key, self.keep = key, keep
         self.lock = threading.Lock()
         self.idle = threading.Condition(self.lock)
         self.entries: dict[str, DiskEntry] = {}
@@ -656,13 +661,14 @@ class DiskTier:
                         raise RuntimeError(f"shared blob {b.uid} is not on disk")
             written = 0
             for b, header, views, flags in job.new:
-                n = _write_blob(b.path, header, views, flags)
+                n = _write_blob(b.path, header, views, flags, sync=self.keep)
                 with self.lock:
                     b.nbytes, b.state = n, "ok"
                     self.used += n
                 written += n
             views = job.new = None                    # the MLX buffers go (written)
-            n = _write_blob(d.path, {"kind": "ent", "uid": d.uid, "meta": job.meta}, [d.ids])
+            n = _write_blob(d.path, {"kind": "ent", "uid": d.uid, "meta": job.meta}, [d.ids],
+                            sync=self.keep)
             with self.lock:
                 d.meta_bytes, d.state = n, "ok"
                 self.used += n
