@@ -19,16 +19,14 @@ import os
 import types
 
 import mlx.core as mx
-import numpy as np
 import pytest
-from mlx_vlm.models.cache import KVCache
 
 import cascade
 import cascade_mma
 import worker
 from conftest import build_lm, prompts, request, run, scheduler
 from test_cascade import _cache, per_row, queries, rms_rel
-from test_cascade_sched import (GEN, REAL_WINS, FakeRow, Logits, Spy, any_three, chats,
+from test_cascade_sched import (REAL_WINS, FakeRow, Logits, Spy, any_three, chats,
                                 check_accounting, one_per_tick, prefix_rows)
 
 F16, F32 = mx.float16, mx.float32
@@ -56,9 +54,9 @@ def traces():
 
 
 class Rows:
-    """B rows sharing a P-token prefix (test_cascade.Rows with a choice of
-    the donor's spare capacity): rows[b][layer] a KVCache; row 0's buffers
-    are `cap0` slots (default: as a prefill leaves them, rounded up to 256)."""
+    """B rows sharing a P-token prefix (test_cascade.Rows, whose `group`
+    builds in kernel mode by default): rows[b][layer] a KVCache whose buffers
+    are P + S_b rounded up to 256 slots, as a prefill leaves them."""
 
     def __init__(self, P, lens, Hkv, D, n_layers=1, dtype=F16, seed=0, garbage=None):
         mx.random.seed(seed)
