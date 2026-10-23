@@ -46,6 +46,7 @@ from mlx_vlm.tokenizer_utils import (BPEStreamingDetokenizer, _remove_space,
                                      make_streaming_detokenizer)
 
 import cascade
+import cascade_mma
 import worker_pb2 as pb
 import worker_pb2_grpc as pb_grpc
 
@@ -1810,6 +1811,24 @@ def _cascade_knobs(env):
 
 
 CASCADE, CASCADE_MIN_ROWS, CASCADE_MIN_PREFIX, CASCADE_CHECK = _cascade_knobs(os.environ)
+# QWEN_CASCADE_KERNEL (0): a group's prefix stays fp16 and is attended by
+#   cascade_mma (simdgroup MMA, split over the prefix; design:
+#   docs/perf/2026-10-24/design/cascade_mma.md) instead of an fp32 copy with
+#   materialized scores. The prefix is the donor row's own KV buffer, aliased
+#   (cascade.PrefixGroup.build(kernel=True): no formation copy) when at most
+#   CASCADE_ALIAS_SLACK slots lie past P, else a P-slot fp16 copy; the charge
+#   (_group_bytes) counts P + CASCADE_ALIAS_SLACK fp16 tokens -- half of the
+#   fp32 prefix, so groups also win at fewer rows (_group_wins). Numerics: the
+#   same products (fp16 q and K/V, exact in fp32), another summation order, no
+#   rounding below fp32 before the output: the class of today's cascade. fp16
+#   KV only (the scheduler leaves it off otherwise, the load log says why);
+#   "1" only, anything else = today's fp32 path bit for bit.
+def _cascade_kernel_knob(env):
+    return env.get("QWEN_CASCADE_KERNEL", "0") == "1"
+
+
+CASCADE_KERNEL = _cascade_kernel_knob(os.environ)
+CASCADE_ALIAS_SLACK = cascade.ALIAS_SLACK   # kernel mode (tests: 16)
 CASCADE_CHUNK = cascade.CHUNK         # prefix chunk (tests: 16)
 CASCADE_STEP = cascade.STEP           # suffix stack growth (tests: 16)
 CASCADE_SLACK = 64 << 20              # fixed part of a group's step transient (tests: 0)
@@ -2225,6 +2244,13 @@ def _install_fast_paths():
             "verify_exact_max_t": VERIFY_EXACT_MAX_T}
 
 
+def _act_dtype(lm):
+    """The language model's compute (and KV) dtype: its final norm's weight
+    (fp16 after QWEN_FP16's cast, else bf16); None when it has none."""
+    w = getattr(getattr(getattr(lm, "model", None), "norm", None), "weight", None)
+    return getattr(w, "dtype", None)
+
+
 def _kv_token_bytes(lm, bits):
     """Full-attention KV bytes per token of one row: fp16, or `bits`-bit values
     in uint32 words plus an fp16 scale and bias per 64-element group."""
@@ -2634,6 +2660,8 @@ class _Scheduler:
         self.fa_layers = [i for i, x in enumerate(self.lm.model.layers) if not x.is_linear]
         self.groups: list[_PrefixGroup] = []
         self.cascade = self._cascade_on(CASCADE)
+        # fixed for the scheduler's life: _group_bytes charges by it
+        self.cascade_kernel = CASCADE_KERNEL and _act_dtype(self.lm) == mx.float16
         self.n_groups = self.n_grouped = 0  # Health: plain ints kept current here
 
     # --- threads -------------------------------------------------------------
@@ -3751,8 +3779,12 @@ class _Scheduler:
     def cascade_state(self):
         """For the load log: on, or why not."""
         if self.cascade:
+            kern = ""                   # the default (fp32 prefix) says nothing more
+            if CASCADE_KERNEL:
+                kern = ("; MMA kernel over the fp16 prefix (QWEN_CASCADE_KERNEL)" if self.cascade_kernel
+                        else "; fp32 prefix (QWEN_CASCADE_KERNEL=1 ignored: the model is not fp16)")
             return (f"on: >= {CASCADE_MIN_ROWS} rows sharing >= "
-                    f"{CASCADE_MIN_PREFIX} prompt tokens{', check' if CASCADE_CHECK else ''}")
+                    f"{CASCADE_MIN_PREFIX} prompt tokens{', check' if CASCADE_CHECK else ''}{kern}")
         why = [w for w, bad in (("QWEN_CASCADE=0", not CASCADE),
                                 ("min rows / prefix 0", not (CASCADE_MIN_ROWS and CASCADE_MIN_PREFIX)),
                                 ("no prompt cache", not PROMPT_CACHE),
@@ -3839,6 +3871,17 @@ class _Scheduler:
         n, s = len(rows), self._group_suffix(P, rows, tokens)
         kv32 = 2 * self.kv_fp16                     # bytes per token, all FA layers, fp32
         n_fa = len(self.fa_layers)
+        if self.cascade_kernel:
+            # QWEN_CASCADE_KERNEL: the fp16 prefix (the donor's aliased buffer,
+            # <= P + slack slots, or a P + 1 copy); no prefix scores, the
+            # kernel's partials instead (one bound per layer, as the scores)
+            hq = self.lm.args.num_attention_heads
+            prefix = (P + CASCADE_ALIAS_SLACK) * self.kv_fp16
+            scores = n_fa * (8 * hq * n * s + cascade_mma.partial_bytes(
+                P, n, hq, self.lm.args.head_dim)) + CASCADE_SLACK
+            moves = 2 * n * s * kv32 // n_fa
+            arrays = prefix + int(n * s * kv32 * 1.05)
+            return arrays + max(scores + moves, 2 * int((P + s) * self.kv_fp16 * 1.05))
         ppad = -(-P // CASCADE_CHUNK) * CASCADE_CHUNK
         scores = n_fa * 8 * self.lm.args.num_attention_heads * n * (ppad + s) + CASCADE_SLACK
         moves = 2 * n * s * kv32 // n_fa
@@ -3978,10 +4021,17 @@ class _Scheduler:
         _GroupRefs (their buffers are freed); the charges moved from the rows
         to the group."""
         source = rows[0]
+        if self.cascade_kernel:
+            # the prefix aliases the donor's buffer: the one with the fewest
+            # slots past P (every candidate holds the same [0, P) bits: _bounds,
+            # QWEN_CASCADE_CHECK compared them all with rows[0])
+            fa = self.fa_layers[0]
+            source = min(rows, key=lambda r: r.cache[fa].keys.shape[2])
         at = {id(r): b for b, r in enumerate(self.rows)}
         rows = sorted(rows, key=lambda r: at[id(r)])
         pg = cascade.PrefixGroup.build(source.cache, [r.cache for r in rows], P, self.fa_layers,
-                                       chunk=CASCADE_CHUNK, step=CASCADE_STEP)
+                                       chunk=CASCADE_CHUNK, step=CASCADE_STEP,
+                                       kernel=self.cascade_kernel, slack=CASCADE_ALIAS_SLACK)
         g = _PrefixGroup(pg, source.req.ids[:P], rows)
         before = self.reserved
         g.reserved = self._group_bytes(P, g.rows)
@@ -3995,9 +4045,10 @@ class _Scheduler:
         self.reserved += g.reserved
         self.groups.append(g)
         self._cascade_count()
-        log.info("cascade: group formed: P=%d, %d rows (%s), %.1f MB (prefix + stacks, fp32), "
+        log.info("cascade: group formed: P=%d, %d rows (%s), %.1f MB (prefix %s + stacks fp32), "
                  "charged %.2f GiB; reserved %.2f -> %.2f GiB",
                  P, len(g.rows), ",".join(r.req.id for r in g.rows), pg.nbytes / 1e6,
+                 ("fp16 " + ("aliased" if pg.aliased else "copied")) if pg.kernel else "fp32",
                  g.reserved / GIB, before / GIB, self.reserved / GIB)
 
     def _group_add(self, g, row):
@@ -4569,6 +4620,11 @@ class Engine:
                  f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
                  f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
         log.info("cascade attention (QWEN_CASCADE): %s", self.sched.cascade_state())
+        if self.sched.cascade and self.sched.cascade_kernel:
+            lm = self.model.language_model
+            a = lm.args
+            cascade_mma.warm(a.head_dim, a.num_key_value_heads, a.num_attention_heads,
+                             lm.model.layers[self.sched.fa_layers[0]].self_attn.scale)
         self.sched.start()
         self.ready = True
         log.info("model loaded in %d ms", self.load_ms)
