@@ -71,8 +71,12 @@ array.
   shared by every layer.
 - **One pipeline per model.** There is one compiled pipeline pair per model layout
   (D, Hkv, scale). A new group, a new member count or a new P never recompiles.
-- **Warm-up.** `cascade_mma.warm` compiles the pair at load when the knob is on, on the
-  load thread before the scheduler starts.
+- **Warm-up.** `cascade_mma.warm` compiles the pair at load whenever the knob is on and
+  the model is fp16, even with cascade off at that moment (a later `set_cascade(True)`),
+  on the load thread before the scheduler starts. A compile error after an MLX bump then
+  shows at load.
+- **Names and head dims.** The kernel name carries the exact scale (`float.hex`), because
+  MLX caches libraries by name. Only the tested head dims 64 / 128 / 256 are accepted.
 
 ### Suffixes and the merge
 
@@ -99,9 +103,14 @@ cap − P ≤ `slack` (`cascade.ALIAS_SLACK`, 1024).
 - **Pinned buffer.** The group pins the whole buffer; its [P, cap) is unused.
 - **Long donor tail.** If the donor has more than `slack` slots past P, the group takes a
   fresh (1, Hkv, P + 1, D) copy instead (concatenate always writes a fresh buffer).
+- **Per buffer.** The alias / copy decision is taken per layer and per K / V buffer;
+  `aliased` is True only when every one is aliased.
 - **Choice of donor.** In kernel mode the scheduler picks as source the candidate with the
-  fewest slots. Every candidate holds the same [0, P) bits (`_bounds`, hit == cold;
-  `QWEN_CASCADE_CHECK` checks it).
+  fewest slots. Candidates hold the same [0, P) bits only where [0, P) was built by
+  prefill (`_bounds`, hit == cold). A row resumed through a reply entry
+  (`QWEN_PROMPT_CACHE_REPLY=1`, the default) holds decode-kernel bits up to the reply's
+  end, which may differ. Then, exactly as the fp32 path did with `rows[0]`, every member
+  attends the donor's bits; `QWEN_CASCADE_CHECK=1` refuses such members.
 - **Why aliasing is safe.** After formation the donor's KVCache objects are replaced by
   `_GroupRef`s. MLX never donates a buffer that has another live reference: a writer
   would copy, not overwrite. The prompt cache never holds a view of a row: `store` copies
@@ -150,8 +159,12 @@ charge  = prefix + stack + max(scores + moves, 2 · 1.05 · (P + s) · kv_fp16) 
   it is ~1 GiB lower.
 - **Wins at fewer rows.** `_group_wins` (real lengths, ~150-token suffixes) now holds from
   4 rows at 4K, 8K and 32K. In fp32 mode it needed 5 rows, or 4 only from a 32K prefix.
-- **2–3 rows still never win.** The 2-row dissolve floor dominates: at 3 × 32K the charge
-  is 3.20 GiB against the rows' own 3.16 GiB.
+- **2–3 rows mostly do not win.** The 2-row dissolve floor dominates: at 3 × 32K the
+  charge is 3.20 GiB against the rows' own 3.16 GiB. From 64K, 3 rows win barely (6.30 vs
+  6.31 GiB; 96K 9.40 vs 9.46).
+- **Break-even suffix** (real suffix where a group stops winning): 769 / 1537 / 2049
+  tokens for 4K × 5 / 8 / 16 rows, 2049 / 3585 / 4609 for 8K, 9217 / 16129 / 19713 for
+  32K (fp32 mode: 257 / 1281 / 2049, 1025 / 3073 / 4353, 4865 / 13057 / 18177).
 - **Formation threshold unchanged.** `CASCADE_MIN_ROWS` (8) still decides formation.
   Smaller groups only matter after members leave.
 

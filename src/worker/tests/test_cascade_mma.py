@@ -147,6 +147,42 @@ def test_kernel_group_copies_a_long_donor_tail():
                           cascade.attention(q, ga, d.layers[0], 0.125)).item()
 
 
+def test_kernel_alias_or_copy_per_layer():
+    """The alias / copy choice is per buffer: a donor whose second FA layer
+    has a long tail (its own cap) gets that layer copied and the first one
+    aliased -- no ValueError; `aliased` only when every buffer is."""
+    d = Rows(40, [3, 4, 5], 2, 64, n_layers=2, seed=4)
+    i0, i1 = d.layers
+    c = d.rows[0][i1]
+    c.prefix_cache_reserve(c.offset + 600)          # layer 1: 643+ slots, > 300 past P
+    mx.eval(c.keys, c.values)
+    assert d.rows[0][i0].keys.shape[2] == 256 and c.keys.shape[2] > 340
+    g = d.group(slack=300)
+    assert not g.aliased
+    assert g.kc[i0].shape[2] == 256 and g.kc[i1].shape == (1, 2, 41, 64)
+    assert g.vc[i1].shape == (1, 2, 41, 64)
+    assert d.group().aliased                        # slack 1024: both aliased
+    q = queries(3, 4, 64)
+    for i in d.layers:
+        ref = per_row(q, [r[i] for r in d.rows], 0.125, fp32=True)
+        assert rms_rel(cascade.attention(q, g, i, 0.125), ref) <= 3e-4
+
+
+def test_kernel_head_dims_and_names():
+    """Only the tested head dims (64 / 128 / 256) pass the check; the kernel
+    name carries the exact scale (MLX caches libraries by name)."""
+    for D in (96, 160, 512, 32):
+        q = mx.zeros((1, 4, 1, D), F16)
+        kv = mx.zeros((1, 2, 8, D), F16)
+        with pytest.raises(ValueError, match="head_dim"):
+            cascade_mma.prefix_attention(q, kv, kv, 8, 0.1)
+    a, b = 0.125, math.nextafter(0.125, 1.0)
+    na = cascade_mma._kernels(64, 2, a)[0]
+    nb = cascade_mma._kernels(64, 2, b)[0]
+    assert na is not nb
+    assert cascade_mma._kernels(64, 2, a)[0] is na
+
+
 @pytest.mark.parametrize("dtype", [F32, mx.bfloat16])
 def test_kernel_mode_is_fp16_only(dtype):
     d = Rows(40, [3, 4, 5], 2, 64, dtype=dtype)

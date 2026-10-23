@@ -208,7 +208,7 @@ the suffix part and the merge are `merge` (the same ops as `cascade`, under
 mx.compile). kc[i] / vc[i] are then the source row's own (1, Hkv, cap, D)
 KVCache buffers, aliased when cap - P <= `slack` (ALIAS_SLACK: no formation
 copy, no transient; the group pins the buffer, its [P, cap) unused), else a
-fresh (1, Hkv, P + 1, D) copy; c = 0, Ppad = P, pmask None. Only the stacks,
+fresh (1, Hkv, P + 1, D) copy -- per buffer; c = 0, Ppad = P, pmask None. Only the stacks,
 lens, masks and the step protocol are shared with the fp32 mode, so append /
 take / grow / release behave the same; `release` and `prefix_kv` hand out the
 fp16 prefix as is (exact). Memory per token of prefix: 32 KiB on the 9B
@@ -424,7 +424,7 @@ class PrefixGroup:
         self.sv: dict = {}
         self.pmask = None
         self.kernel = False             # QWEN_CASCADE_KERNEL: fp16 prefix, cascade_mma
-        self.aliased = False            # kernel mode: kc / vc are the donor row's own buffers
+        self.aliased = False            # kernel mode: every kc / vc is the donor row's own buffer
         self._slack = 0
         self._lens: list[int] = []
         self.cap = 0
@@ -454,8 +454,9 @@ class PrefixGroup:
         (1, Hkv, cap, D) buffers, aliased (no copy: nothing is allocated and
         no formation transient) when at most `slack` slots lie past P,
         else a fresh (1, Hkv, P + 1, D) copy of [0, P) (+ one zero slot) --
-        either way the kernel reads only [0, P). `chunk` and `pmask` are
-        unused (c = 0, Ppad = P)."""
+        decided per buffer; `aliased` is True when every layer's K and V are
+        aliased. Either way the kernel reads only [0, P). `chunk` and
+        `pmask` are unused (c = 0, Ppad = P)."""
         if P <= 0:
             raise ValueError("cascade: empty prefix")
         if not members:
@@ -473,7 +474,6 @@ class PrefixGroup:
                 raise ValueError(f"cascade: the MMA kernel takes an fp16 KV, not {g.kv_dtype}")
             g.chunk, g.c, g.Ppad = 0, 0, P
             g._slack = slack
-            g.aliased = source[layers[0]].keys.shape[2] - P <= slack
         else:
             g.c = -(-P // chunk)
             g.Ppad = g.c * chunk
@@ -492,6 +492,9 @@ class PrefixGroup:
             vc[i] = g._prefix16(vs) if g.kernel else g._prefix32(vs)
             sk[i] = g._stack([_fa(m[i], P) for m in members], lens, cap, keys=True)
             sv[i] = g._stack([_fa(m[i], P) for m in members], lens, cap, keys=False)
+        if g.kernel:
+            g.aliased = all(source[i].keys.shape[2] - P <= slack
+                            and source[i].values.shape[2] - P <= slack for i in layers)
         pmask = None
         if not g.kernel and g.Ppad != P:
             pmask = mx.where(mx.arange(g.Ppad) < P, 0.0, _NEG).astype(F32).reshape(1, g.c, 1, chunk)
@@ -519,17 +522,15 @@ class PrefixGroup:
 
     def _prefix16(self, x):
         """Kernel mode: [0, P) of a (1, Hkv, cap, D) fp16 buffer for
-        cascade_mma. The buffer itself when `aliased` (cap - P <= slack at
-        build; every FA layer's buffer of a KVCache has the same cap)
-        (mx.contiguous of a row-contiguous array shares its buffer: a KVCache
-        buffer is one), so the group pins the donor row's buffer instead of
-        copying it; else a (1, Hkv, P + 1, D) copy (a concatenate always
-        writes a fresh buffer; the extra slot is a zero) so that a long donor
-        suffix is not kept alive. Bits unchanged either way."""
-        if self.aliased:
-            if x.shape[2] - self.P > self._slack:
-                raise ValueError(f"cascade: a donor buffer of {x.shape[2]} slots past "
-                                 f"{self.P} + {self._slack}")
+        cascade_mma. The buffer itself when cap - P <= slack (mx.contiguous of
+        a row-contiguous array shares its buffer: a KVCache buffer is one),
+        so the group pins the donor row's buffer instead of copying it; else
+        a (1, Hkv, P + 1, D) copy (a concatenate always writes a fresh
+        buffer; the extra slot is a zero) so that a long donor suffix is not
+        kept alive. Decided per buffer (layers of one KVCache list normally
+        share a cap, but nothing here relies on it). Bits unchanged either
+        way."""
+        if x.shape[2] - self.P <= self._slack:
             return mx.contiguous(x)
         z = mx.zeros((1, self.Hkv, 1, self.D), x.dtype)
         return mx.concatenate([x[..., :self.P, :], z], axis=2)

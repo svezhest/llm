@@ -3903,7 +3903,13 @@ class _Scheduler:
         rows win at 4K / 8K / 32K. A group stops winning at a real suffix of
         257 / 1281 / 2049 tokens for 4K x 5 / 8 / 16 rows, 1025 / 3073 /
         4353 for 8K, 4865 / 13057 / 18177 for 32K (the P // 2 leave comes
-        first from 8 rows at 8K). Under 3 rows never."""
+        first from 8 rows at 8K). Under 3 rows never.
+        QWEN_CASCADE_KERNEL (fp16 prefix, P + 1024 slots charged): 4 rows win
+        at 4K / 8K / 32K, 3 rows not at 32K (3.20 vs 3.16 GiB) but barely
+        from 64K (6.30 vs 6.31, 96K 9.40 vs 9.46: the floor dominates); a
+        group stops winning at a real suffix of 769 / 1537 / 2049 tokens for
+        4K x 5 / 8 / 16 rows, 2049 / 3585 / 4609 for 8K, 9217 / 16129 / 19713
+        for 32K."""
         if len(rows) < 3:
             return False
         real = {r: r.pos + 1 for r in rows}
@@ -4023,8 +4029,12 @@ class _Scheduler:
         source = rows[0]
         if self.cascade_kernel:
             # the prefix aliases the donor's buffer: the one with the fewest
-            # slots past P (every candidate holds the same [0, P) bits: _bounds,
-            # QWEN_CASCADE_CHECK compared them all with rows[0])
+            # slots past P. Candidates hold the same [0, P) bits only for a
+            # prefill-built [0, P) (_bounds, hit == cold); a row resumed through
+            # a reply entry (QWEN_PROMPT_CACHE_REPLY, the default) holds decode-
+            # kernel bits up to the reply's end, which may differ. As with
+            # rows[0] in the fp32 path, the group then attends the donor's bits
+            # for every member; QWEN_CASCADE_CHECK=1 refuses such members.
             fa = self.fa_layers[0]
             source = min(rows, key=lambda r: r.cache[fa].keys.shape[2])
         at = {id(r): b for b, r in enumerate(self.rows)}
@@ -4621,7 +4631,7 @@ class Engine:
                  f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
                  f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
         log.info("cascade attention (QWEN_CASCADE): %s", self.sched.cascade_state())
-        if self.sched.cascade and self.sched.cascade_kernel:
+        if self.sched.cascade_kernel:   # also when cascade is off now: set_cascade(True) later
             lm = self.model.language_model
             a = lm.args
             cascade_mma.warm(a.head_dim, a.num_key_value_heads, a.num_attention_heads,

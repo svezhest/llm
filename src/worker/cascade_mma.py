@@ -82,6 +82,7 @@ F32 = mx.float32
 MIN_CHUNK = 256
 MAX_CHUNK = 2048
 TARGET_TG = 256       # pass-1 threadgroups the chunk size aims for (32 cores)
+HEAD_DIMS = (64, 128, 256)   # the tested ones (tests/test_cascade_mma.py)
 
 
 def tiles(D: int):
@@ -392,7 +393,8 @@ def _kernels(D, hkv, scale):
             k = _KERNELS.get(key)
             if k is None:
                 c = _consts(D, hkv, scale)
-                tag = f"d{D}_k{hkv}_{abs(hash(float(scale))) % 10**8}"
+                # the exact scale in the name: MLX caches libraries by kernel name
+                tag = f"d{D}_k{hkv}_s{float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p')}"
                 p1 = mx.fast.metal_kernel(
                     name=f"cmma_p1_{tag}", input_names=["q", "k", "v", "meta"],
                     output_names=["po", "pml"], source=c + _P1, header=_header())
@@ -462,7 +464,7 @@ def check(q, k, v, P):
         raise ValueError(f"cascade_mma: q {tuple(q.shape)}, k {tuple(k.shape)}, v {tuple(v.shape)}")
     B, Hq, _, D = q.shape
     Hkv = k.shape[1]
-    if Hq % Hkv or k.shape[3] != D or D % 32 or D > 256 or not 1 <= P <= k.shape[2]:
+    if Hq % Hkv or k.shape[3] != D or D not in HEAD_DIMS or not 1 <= P <= k.shape[2]:
         raise ValueError(f"cascade_mma: {Hq} q / {Hkv} kv heads, head_dim {D} / {k.shape[3]}, "
                          f"P {P} of {k.shape[2]} slots")
     if q.dtype != mx.float16 or k.dtype != mx.float16 or v.dtype != mx.float16:
