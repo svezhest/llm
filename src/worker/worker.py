@@ -431,6 +431,17 @@ SAMPLING_KWARGS = {
 }
 
 
+# QWEN_SAMPLER_TOPK_FAST (0): with top_k > 0, min_p / top_p and the draw run
+#   over the k survivors of one stable vocab argsort (_Sampler.survivors)
+#   instead of topk + argsort + put_along_axis + a V-wide softmax / cumsum /
+#   Gumbel draw: the same distribution (ties of the k-th value included),
+#   another random stream for a given seed (a draw over k + 1 values), and
+#   boundary rounding over k terms instead of V. Off = the vLLM-order path
+#   above bit for bit. (DeepInfer finds the thresholds by radix select,
+#   tilelang_ops/cuda/fused_sample.py.)
+SAMPLER_TOPK_FAST = os.environ.get("QWEN_SAMPLER_TOPK_FAST", "0") == "1"
+
+
 def make_sampler(sampling, seed=None):
     """logits (rows, V) -> token ids, with an explicit per-request RNG key.
 
@@ -467,6 +478,7 @@ class _Sampler:
         self.key = mx.random.key(int(seed) & 0x7FFF_FFFF_FFFF_FFFF)
         self.temp = max(temp, 0.01)
         self.group = (self.temp, self.min_p, self.top_k, self.top_p)
+        self.fast = SAMPLER_TOPK_FAST and self.top_k > 0
 
     def filtered(self, logits):
         """temperature, min_p, top_k, top_p on float32 logits (rows, V): row
@@ -487,14 +499,102 @@ class _Sampler:
             x = mx.put_along_axis(x, idx, mx.where(drop, ninf, xs), axis=-1)
         return x
 
+    def prepare(self, logits):
+        """What `draw` takes for these rows: the filtered full-vocab logits,
+        or (QWEN_SAMPLER_TOPK_FAST, 0 < top_k < V) the top-k survivors."""
+        if self.fast and self.top_k < logits.shape[-1]:
+            return self.survivors(logits)
+        return self.filtered(logits)
+
+    def survivors(self, logits):
+        """filtered() over the top_k candidates only (QWEN_SAMPLER_TOPK_FAST):
+        one stable argsort of the vocab instead of topk + argsort + scatter,
+        and min_p / top_p / the draw over k values instead of V.
+
+        The same distribution, in exact arithmetic: min_p and top_k both keep
+        an upper set of the values (min_p: exp(x - max) >= min_p, and the max
+        is always in the top k), so min_p -> top_k = their intersection, all
+        inside the k largest plus the values tied with the k-th; top_p then
+        drops a prefix of the survivors in ascending stable order (ties by
+        vocab index, as filtered()'s argsort: MLX's sort is stable on CPU and
+        Metal), so its cumulative mass needs only the survivors. The ties of
+        the k-th value outside the k (filtered() keeps every one) are the
+        positions [V - n, V - k) of the sorted order (n = #x >= kth): they come
+        first in the ascending cumsum, top_p drops the lowest-index ones
+        first (floor(thr Z / w_kth) of them), the rest is one extra candidate
+        of logit kth + log(count) whose draw picks one of them uniformly.
+        Only the rounding differs from filtered(): the softmax / cumsum run
+        over k terms instead of V (equal nonzero terms, other summation
+        order), so a token exactly at the min_p / top_p boundary (~1e-7
+        relative) can land on the other side. The random stream differs (a
+        draw over k + 1 values and a uniform, not V Gumbels): hence a knob."""
+        x = logits.astype(mx.float32) / self.temp
+        V, k = x.shape[-1], self.top_k
+        ninf = mx.array(-float("inf"), dtype=mx.float32)
+        order = mx.argsort(x, axis=-1)
+        ids = order[..., V - k:]
+        xs = mx.take_along_axis(x, ids, axis=-1)          # ascending; xs[..., -1] = max
+        kth = xs[..., :1]
+        w = mx.exp(xs - xs[..., -1:])                      # unnormalized probabilities
+        n = (x >= kth).sum(axis=-1, keepdims=True).astype(mx.float32)
+        # kth = -inf: fewer than k finite logits, the "ties" have no mass
+        extra = mx.where(kth > ninf, n - k, 0.0)
+        start = V - n
+        keep = None
+        if self.min_p > 0:
+            keep = w >= self.min_p
+            extra = mx.where(keep[..., :1], extra, 0.0)
+        if self.top_p < 1.0:
+            wk = w[..., :1]
+            wkeep = w if keep is None else mx.where(keep, w, 0.0)
+            base = extra * wk
+            thr = (1 - self.top_p) * (base + wkeep.sum(axis=-1, keepdims=True))
+            # the extras' ascending cumsum is j * wk: those with j * wk <= thr go
+            # (all of them when wk underflowed to 0: no mass)
+            gone = mx.where(wk > 0, mx.clip(mx.floor(thr / mx.maximum(wk, 1e-30)), 0.0, extra), extra)
+            drop = base + mx.cumsum(wkeep, axis=-1) <= thr
+            drop[..., -1] = False
+            keep = ~drop if keep is None else keep & ~drop
+            extra, start = extra - gone, start + gone
+        z = xs if keep is None else mx.where(keep, xs, ninf)
+        z = mx.concatenate([z, mx.where(extra > 0, kth + mx.log(mx.maximum(extra, 1.0)), ninf)], axis=-1)
+        return _TopK(z, ids, order, start, extra)
+
     def draw(self, x):
         self.key, sub = mx.random.split(self.key)
+        if isinstance(x, _TopK):
+            return x.draw(sub)
         return mx.random.categorical(x, key=sub)
 
     def __call__(self, logits):
         if self.greedy:
             return mx.argmax(logits - mx.logsumexp(logits, axis=-1, keepdims=True), axis=-1)
-        return self.draw(self.filtered(logits))
+        return self.draw(self.prepare(logits))
+
+
+class _TopK:
+    """_Sampler.survivors of some rows: z (R, k + 1) logits of the k
+    candidates `ids` (R, k) + the ties-of-the-k-th bucket, `order` (R, V)
+    the sorted vocab, the bucket's tokens = order[start : start + extra].
+    Rows slice like an array (sample_rows draws each row with its own key)."""
+    __slots__ = ("z", "ids", "order", "start", "extra")
+
+    def __init__(self, z, ids, order, start, extra):
+        self.z, self.ids, self.order, self.start, self.extra = z, ids, order, start, extra
+
+    def __getitem__(self, sl):
+        return _TopK(*(getattr(self, a)[sl] for a in self.__slots__))
+
+    def draw(self, key):
+        """Tokens (R,) uint32, as mx.random.categorical over the full vocab."""
+        kc, ku = mx.random.split(key)
+        k = self.ids.shape[-1]
+        t = mx.random.categorical(self.z, key=kc)
+        tok = mx.take_along_axis(self.ids, mx.minimum(t, k - 1)[..., None], axis=-1)[..., 0]
+        u = mx.floor(mx.random.uniform(shape=self.extra.shape, key=ku) * self.extra)
+        pos = mx.clip(self.start + mx.minimum(u, self.extra - 1), 0, self.order.shape[-1] - 1)
+        tie = mx.take_along_axis(self.order, pos.astype(mx.int32), axis=-1)[..., 0]
+        return mx.where(t == k, tie, tok)
 
 
 def sample_rows(samplers, logits, on_error=None):
@@ -537,7 +637,7 @@ def _sample_group(samplers, logits):
     if s0.greedy:
         toks = s0(stack)
         return [toks[j:j + 1] for j in range(len(samplers))]
-    x = s0.filtered(stack)
+    x = s0.prepare(stack)
     return [s.draw(x[j:j + 1]) for j, s in enumerate(samplers)]
 
 
@@ -2091,16 +2191,98 @@ def _fast_gdn_kernel(q, k, v, g, beta, state, mask=None):
     return _GDN_KERNEL(q, k, v, g, beta, state, mask)
 
 
+# QWEN_VERIFY_MRQMM (0): DFlash rounds through mrqmm, the batched-decode
+#   kernel. "1": a verify block of 3..16 tokens (1, T, K) runs every linear
+#   mrqmm.install covered (8-bit affine g64 fp16, N >= 512: on the 9B all of
+#   them incl. lm_head; the GDN in-projections as their fused concatenation,
+#   b/a riding along as in decode) as T decode rows (T, 1, K) through the
+#   module's own __call__ (whatever row rules / configs mrqmm has); 1..2-token
+#   blocks, uncovered modules and T > 16 keep the path above
+#   (QWEN_VERIFY_EXACT_MAX_T then governs only them), and the drafter's lm_head
+#   (the target's 8-bit head, (1, bs - 1, K)) too. "head": the drafter's
+#   lm_head only. M1 Max, 9B linears of one forward (docs/perf/2026-10-12/
+#   microbench.md 1a, mrqmm.md): exact qmv 63-73 ms at T = 8, quantized_matmul
+#   85-90 at 8..16, mrqmm 33 at 8 rows and 46 at 16 (lm_head alone 9 -> 3.1 /
+#   4.6 ms: the drafter's head is ~9 of its ~15 ms block). Cost of "1":
+#   a verify row is no longer bit-identical to a 1-token qmv decode, so DFlash
+#   output != plain greedy byte for byte (the batched-decode numerics class,
+#   9B teacher-forced top-1 >= 99.7 %); "head" keeps DFlash == greedy (the
+#   target verifies; the drafts only move acceptance and the adaptive block).
+#   Off unless a drafter is loaded; installs mrqmm also at max_batch < 3
+#   (decode at B <= 2 never takes it). docs/perf/2026-10-24/design/verify_mrqmm.md.
+VERIFY_MRQMM = os.environ.get("QWEN_VERIFY_MRQMM", "0") or "0"
+VERIFY_MR = VERIFY_MRQMM == "1"
+VERIFY_MR_HEAD = VERIFY_MRQMM in ("1", "head")
+
+
+def _verify_mr(linear, x):
+    """A verify / drafter-head call that takes mrqmm: (1, T, K) fp16 with
+    MIN_ROWS..MAX_ROWS tokens on a module mrqmm.install covered."""
+    mr = sys.modules.get("mrqmm")
+    return (mr is not None and type(linear) is mr.MRQuantizedLinear and x.ndim == 3
+            and x.shape[0] == 1 and mr.MIN_ROWS <= x.shape[1] <= mr.MAX_ROWS
+            and x.dtype == mx.float16)
+
+
+def _mr_rows(linear, x):
+    """(1, T, K) as T decode rows through the covered module (mrqmm)."""
+    _, T, K = x.shape
+    return linear(x.reshape(T, 1, K)).reshape(1, T, -1)
+
+
 def _verify_linear(self, linear, x):
+    if VERIFY_MR and _verify_mr(linear, x):
+        return _mr_rows(linear, x)
     if x.shape[1] > VERIFY_EXACT_MAX_T:
         return linear(x)
     return _VERIFY_LINEAR(self, linear, x)
 
 
 def _verify_linears(self, linears, x):
+    if VERIFY_MR:
+        f = linears[0].__dict__.get("_verify_fused") if linears else None
+        if f is not None and tuple(map(id, linears)) == f[0] and _verify_mr(linears[0], x):
+            # the GDN in-projections (qkv, z, b, a): one mrqmm over their
+            # concatenation (_install_verify_mrqmm), as _gdn_call in decode
+            _, w, sc, b, split, mr = f
+            _, T, K = x.shape
+            y = mr.mrqmm(x.reshape(T, 1, K), w, sc, b).reshape(1, T, -1)
+            return tuple(mx.split(y, split, axis=-1))
+        on = [_verify_mr(linear, x) for linear in linears]
+        if any(on):
+            rest = [linear for linear, m in zip(linears, on) if not m]
+            rest = iter(_verify_linears(self, rest, x) if rest else ())
+            return tuple(_mr_rows(linear, x) if m else next(rest) for linear, m in zip(linears, on))
     if x.shape[1] > VERIFY_EXACT_MAX_T:
         return tuple(linear(x) for linear in linears)
     return _VERIFY_LINEARS(self, linears, x)
+
+
+def _install_verify_mrqmm(lm):
+    """QWEN_VERIFY_MRQMM=1: point each GDN layer's in_proj_qkv at the fused
+    in-projection _install_gdn_fuse built for mrqmm (no copy), for
+    _verify_linears. After _install_gdn_fuse. -> number of layers."""
+    if not VERIFY_MR:
+        return 0
+    n = 0
+    for _, m in lm.named_modules():
+        f = m.__dict__.get("_fused_in")
+        if f is None or f[7] is None:
+            continue
+        ls = [m[a] for a in _GDN_IN]
+        # ids of the four modules (no reference back to them: no cycle)
+        ls[0].__dict__["_verify_fused"] = (tuple(map(id, ls)), f[0], f[1], f[2], f[3], f[7])
+        n += 1
+    return n
+
+
+def _verify_head(head):
+    """QWEN_VERIFY_MRQMM 1 / head: the drafter's lm_head (bound to the
+    target's at every draft.reset) with 3..16-row blocks on mrqmm."""
+    mr = sys.modules.get("mrqmm")
+    if not VERIFY_MR_HEAD or mr is None or type(head) is not mr.MRQuantizedLinear:
+        return head
+    return lambda x: _mr_rows(head, x) if _verify_mr(head, x) else head(x)
 
 
 # QWEN_GDN_FUSE (1): a decode step's four GDN in-projections (qkv, z, b, a)
@@ -3480,6 +3662,8 @@ class _Scheduler:
             # mlx-vlm 0.7.6 `_dflash_rounds`, with `pick` as the target sampler.
             block_total = _dflash_block_total(draft, DRAFT_BLOCK or None)
             draft_cache = draft.reset(self.model)
+            if VERIFY_MR_HEAD and getattr(draft, "lm_head", None) is not None:
+                draft.lm_head = _verify_head(draft.lm_head)
             b = first
             while n < max_tokens:
                 yield
@@ -4547,14 +4731,20 @@ class Engine:
             self.max_batch = 1
         import pfqmm                       # after the fp16 cast (fp16 scales only); LM only
         pfqmm.install(lm)
-        if self.max_batch >= 3:
+        if self.max_batch >= 3 or (self.draft is not None and VERIFY_MR_HEAD):
             # after the fp16 cast (the kernel takes fp16 scales only); the
             # language model only (never the vision tower or the drafter,
-            # which shares lm_head but always calls it with (1, T, K)).
-            # Logs its coverage, or "off" for QWEN_MRQMM=0.
+            # which shares lm_head and calls it with (1, T, K): mrqmm only
+            # with QWEN_VERIFY_MRQMM). Logs its coverage, or "off" for QWEN_MRQMM=0.
             import mrqmm
             mrqmm.install(lm)
         log.info("GDN decode in-projections fused (QWEN_GDN_FUSE): %d layers", _install_gdn_fuse(lm))
+        if VERIFY_MRQMM not in ("0", "1", "head"):
+            log.warning("QWEN_VERIFY_MRQMM=%r: not 0 / 1 / head, off", VERIFY_MRQMM)
+        if self.draft is not None and VERIFY_MR_HEAD:
+            log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM,
+                     f"verify blocks of 3..16 tokens + drafter lm_head ({_install_verify_mrqmm(lm)} "
+                     "GDN layers fused)" if VERIFY_MR else "drafter lm_head only")
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
         reserve = _prefill_reserve(lm.args.num_attention_heads)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
