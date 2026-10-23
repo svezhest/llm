@@ -148,7 +148,7 @@ def run(sched, reqs, arrive=None, max_ticks=5000, on_tick=None):
             sched.submit(r)
         if on_tick is not None:
             on_tick(t, sched)
-        if not (sched.rows or sched.task or sched.waiting) and not arrive:
+        if not (sched.rows or sched.task or sched.lane or sched.waiting) and not arrive:
             break
         sched.tick()
         for r in reqs:

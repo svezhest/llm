@@ -1758,6 +1758,38 @@ def _ws_masks(llg_tok, cap):
 #   RESOURCE_EXHAUSTED (the gateway answers 503). Every streaming Generate
 #   holds a gRPC thread for its whole life, so the pool is slots + 8 threads
 #   for Check / Cancel / Health (see serve()).
+# QWEN_PREFILL_LANE (0 = off): a second, priority prefill for short TEXT
+#   requests. While a prefill runs (the main task: one request, slab by slab,
+#   e.g. a 110K MISS for minutes), the first waiting text request that needs
+#   at most this many slabs from where it would resume (its prompt-cache hit,
+#   else 0) is admitted beside it and prefilled between the main prefill's
+#   slabs (_admit_lane): a 300-token suffix after a 20K hit is ~1 s instead of
+#   a wait for the whole long prefill (the 600 s client timeouts of the 110K
+#   episode, 2026-10-17). It may overtake waiting requests that do not
+#   qualify, only when the budget holds it AND the head of the queue; the
+#   others keep their FIFO order. Same admission rules as any request (budget,
+#   live check, prompt-cache eviction) except it never gives up its hit (a
+#   lane request without it would be a long one). Slab ends are each prompt's
+#   own (_bounds): the main prefill is cut exactly as without the lane.
+#   Recommended 1 (a lane prefill then ends in the tick it starts).
+# QWEN_PREFILL_LANE_BURST (4): lane prefills in a row before the main
+#   prefill gets its next slab (the lane never starves it).
+PREFILL_LANE = max(0, int(os.environ.get("QWEN_PREFILL_LANE", "0") or "0"))
+PREFILL_LANE_BURST = max(1, int(os.environ.get("QWEN_PREFILL_LANE_BURST", "4") or "4"))
+# QWEN_PREEMPT (0 = off): a row that outgrows the batch's headroom while
+#   other rows run is preempted instead of ended with "length" (a cut tool
+#   call for an agent), at most this many times per request: its KV (prompt +
+#   the tokens it consumed) goes to the prompt cache as a reply-KV entry, the
+#   request goes back to the HEAD of the queue with ids = prompt + generated
+#   and resumes from that entry (one row-length copy of nothing: the entry's
+#   end is the next decode input's position). The client sees one stream: the
+#   handler's detokenizer / stop filter / reasoning split never notice, the
+#   scheduler carries the sampler (its key: the seeded stream continues), the
+#   penalty counts, _Control's counters, the grammar matcher and the thinking
+#   budget (on the request). Not for vision, DFlash, cascade-grouped rows,
+#   prompt_logprobs or prompt_cache "read" requests (they are cut as before);
+#   see _preempt.
+PREEMPT = max(0, int(os.environ.get("QWEN_PREEMPT", "0") or "0"))
 MAX_BATCH = max(1, int(os.environ.get("QWEN_MAX_BATCH", "16")))
 PREFILL_SHARE = min(1.0, max(0.05, float(os.environ.get("QWEN_BATCH_PREFILL_SHARE", "0.5"))))
 BATCH_MEM_GB = float(os.environ.get("QWEN_BATCH_MEM_GB", "0") or "0")
@@ -2488,10 +2520,22 @@ class _Req:
     # stop token a "stop" finish ended on (no "tok" event carries it)
     plp: tuple | None = None
     stop_lp: tuple | None = None
+    # QWEN_PREEMPT (_Scheduler._preempt): `ids` then holds the prompt + the
+    # tokens generated before the preemption and `max_tokens` what is left;
+    # `orig` = the prompt as the handler sent it, `carry` = (sampler,
+    # penalties) the resumed row goes on with
+    orig: list | None = None
+    carry: tuple | None = None
+    preempts: int = 0
+
+    @property
+    def prompt_ids(self):
+        """The prompt as the handler built it (`ids` after a preemption)."""
+        return self.ids if self.orig is None else self.orig
 
     @property
     def prompt_tokens(self):
-        return len(self.ids)
+        return len(self.prompt_ids)
 
 
 class _Row:
@@ -2527,6 +2571,10 @@ class _Row:
                     if _wants(req, "logprobs") else None)
         self.lp = None                              # logprobs of y (lazy, _token_logprobs)
         self.lp_next = None                         # ... of the step just queued
+        # QWEN_PREFILL_LANE: the model's mRoPE state (_rope_deltas,
+        # _position_ids) as this row's prefill left it at its last slab;
+        # put back before its next one (the other prefill wrote its own)
+        self.rope = None
 
     @property
     def sync(self):
@@ -2613,6 +2661,10 @@ class _Scheduler:
         self.gdn = None                 # {layer: stacked ArraysCache} while B >= 2
         self.task = None                # generator: the prefill / lone DFlash run in progress
         self.task_row = None
+        # QWEN_PREFILL_LANE: the short text prefill running between the main
+        # task's slabs, and how many lane prefills ran since the main one's last slab
+        self.lane = self.lane_row = None
+        self.lane_run = 0
         self.resume = 0.0               # prefill waits until then (decode's share)
         self.reserved = 0
         self.steps = 0
@@ -2672,7 +2724,8 @@ class _Scheduler:
             with mx.stream(generation_stream):
                 while True:
                     with self.cv:
-                        while not (self.rows or self.task or self.waiting or self.stopping):
+                        while not (self.rows or self.task or self.lane or self.waiting
+                                   or self.stopping):
                             self._idle()
                             self.cv.wait()
                     if self.stopping:
@@ -2715,7 +2768,7 @@ class _Scheduler:
             left = list(self.waiting)
             self.waiting.clear()
             self.cv.notify_all()
-        rows = self.rows + ([self.task_row] if self.task_row is not None else [])
+        rows = self.rows + self._tasks()
         for r in rows:
             if not r.done:
                 r.done = True
@@ -2723,6 +2776,7 @@ class _Scheduler:
         for req in left:
             req.out.put(("error", kind, msg))
         self.rows, self.gdn, self.task, self.task_row, self.reserved = [], None, None, None, 0
+        self.lane = self.lane_row = None
         self._drop_groups()
         try:
             from mlx_vlm.generate.common import generation_stream
@@ -2758,8 +2812,19 @@ class _Scheduler:
         if self.task is None and self.waiting:
             self._admit()
         t = time.time()
-        if self.task is not None and (not self.rows or time.time() >= self.resume):
-            self._advance()
+        if ((self.task is not None or self.lane is not None)
+                and (not self.rows or time.time() >= self.resume)):
+            # prefill's turn: the lane first (a short request beside a running
+            # plain prefill; at most PREFILL_LANE_BURST of them in a row)
+            if (PREFILL_LANE and self.lane is None and self.waiting and self.task is not None
+                    and self.lane_run < PREFILL_LANE_BURST and self.task.__name__ == "_prefill"):
+                self._admit_lane()
+            if self.lane is not None and (self.task is None or self.lane_run < PREFILL_LANE_BURST):
+                self.lane_run += 1
+                self._advance_lane()
+            else:
+                self.lane_run = 0
+                self._advance()
             self.log_pf += time.time() - t
         elif self.rows:
             steps = self.steps
@@ -2802,7 +2867,7 @@ class _Scheduler:
     def _reserve(self, req):
         return self._bytes(self._tokens(req))
 
-    def _regrow(self, row):
+    def _regrow(self, row, ahead=0):
         """Re-account a row that outgrew its reservation (by 1024-token steps,
         up to its own limit): admissions wait while the batch is over budget.
         Growth past the headroom too (budget + prefill reserve; the last 1 GiB
@@ -2812,10 +2877,12 @@ class _Scheduler:
         admitted-not-started request's goes last: _wanted), else the growing
         row ends with "length" — only
         when other rows run: a lone row is bounded by MAX_CONTEXT alone, as
-        before batching."""
-        if row.pos < row.tokens:
-            return
-        tokens = min(row.pos + 1024, len(row.req.ids) + row.req.max_tokens + 1)
+        before batching. `ahead` (QWEN_PREEMPT, _iterate before a step): the
+        growth the next step will need, -> False instead of the cut (the
+        caller preempts the row); else -> False when it was cut."""
+        if row.pos + ahead < row.tokens:
+            return True
+        tokens = min(row.pos + ahead + 1024, len(row.req.ids) + row.req.max_tokens + 1)
         g = row.group
         if g is None:
             need = self._bytes(tokens)
@@ -2828,8 +2895,7 @@ class _Scheduler:
         if rows <= headroom < rows + pc.bytes:
             # not the entry a running prefill resumed from: its pieces stay
             # allocated until that prefill stores, whatever the count says
-            task = self.task_row
-            keep = (task.parent,) if task is not None and task.parent is not None else ()
+            keep = self._parents()
             n = 0
             while rows + pc.bytes > headroom and pc.evict(keep, self._wanted):
                 n += 1
@@ -2837,10 +2903,12 @@ class _Scheduler:
                 log.info("prompt cache: %d entries evicted for the growth of id=%s "
                          "(%.2f GiB left)", n, row.req.id, pc.bytes / GIB)
         if rows + pc.bytes > headroom and sum(not r.done for r in self.rows) > 1:
+            if ahead:
+                return False
             log.warning("id=%s ended at %d tokens: the batch's KV would pass its memory "
                         "headroom (%.2f GiB reserved)", row.req.id, row.n, self.reserved / GIB)
             self._finish(row, "length")
-            return
+            return False
         row.tokens = tokens
         if g is None:
             self.reserved += need - row.reserved
@@ -2848,8 +2916,19 @@ class _Scheduler:
         else:
             self.reserved += need - g.reserved
             g.reserved = need
+        return True
 
-    def _fits(self, req, rows):
+    def _tasks(self):
+        """The rows of the prefills in progress: the main task's, the lane's."""
+        return [r for r in (self.task_row, self.lane_row) if r is not None]
+
+    def _parents(self, but=None):
+        """The entries the running prefills (but `but`) resumed from: never
+        evicted while they run (their pieces stay allocated until they store,
+        whatever the count says). () unless a prefill is running."""
+        return tuple(r.parent for r in self._tasks() if r is not but and r.parent is not None)
+
+    def _fits(self, req, rows, lane=False, extra=0):
         """Would `req` (the head of the queue) be admitted next to `rows`
         running rows? The rows' reservations + the prompt cache's live bytes
         + `req` within the budget: when only the cache is in the way, its
@@ -2860,10 +2939,15 @@ class _Scheduler:
         QWEN_PROMPT_CACHE_KEEP_TOKENS and for at most
         QWEN_PROMPT_CACHE_KEEP_WAIT_S (from the first time it blocked); else
         that entry is evicted first (it has to go: the others would not do)
-        and `req` admitted now."""
+        and `req` admitted now. The entries running prefills resumed from are
+        never evicted (_parents). `lane` (_admit_lane): its entry is kept
+        whatever its depth and never given up (without it the request is no
+        lane request); a preempted request (_preempt) never gives its up
+        either: its prompt + generated tokens are worth waiting for. `extra`:
+        bytes reserved beside it (the head a lane request overtakes)."""
         if rows == 0:
             return True
-        need = self._reserve(req)
+        need = self._reserve(req) + extra
         if rows >= self.max_batch or self.reserved + need > self.budget:
             return False
         pc = self.eng._pcache
@@ -2872,15 +2956,18 @@ class _Scheduler:
             keep, depth, first = (), 0, None
             if PROMPT_CACHE and not req.images:
                 e, depth = self._peek(req)
-                if e is not None and depth >= PREFILL_STEP:
+                if e is not None and (depth >= PREFILL_STEP or lane):
                     keep = (e,)
+            spare = tuple(x for x in self._parents() if not any(x is k for k in keep))
 
             def blocked(floor):                 # out even with every other entry evicted
                 return (self.reserved + need + floor > self.budget
                         or live - (pc.bytes - floor) + need + self.prefill_reserve > self.cap)
-            floor = pc.bytes_of(keep)
-            if keep and blocked(floor) and not blocked(0):
+            floor = pc.bytes_of(keep + spare)
+            if keep and blocked(floor) and not blocked(pc.bytes_of(spare)):
                 # only the entry it would resume from is in the way
+                if lane or req.preempts or any(keep[0] is x for x in self._parents()):
+                    return False
                 now = time.time()
                 if req.keep_since is None:
                     req.keep_since = now
@@ -2890,13 +2977,14 @@ class _Scheduler:
                 log.info("prompt cache: id=%s gives up its %d-token hit to be admitted (%s)",
                          req.id, depth, f"waited {waited:.1f} s" if depth
                          >= PROMPT_CACHE_KEEP_TOKENS else "under QWEN_PROMPT_CACHE_KEEP_TOKENS")
-                first, keep, floor = keep[0], (), 0
+                first, keep, floor = keep[0], (), pc.bytes_of(spare)
             if blocked(floor):
                 return False                    # it waits either way: evict nothing
             n = 0
             if first is not None:               # given up: it goes before any other
                 n += pc.evict(keep=[x for x in pc.entries if x is not first])
-            while self.reserved + need + pc.bytes > self.budget and pc.evict(keep, self._wanted):
+            while self.reserved + need + pc.bytes > self.budget and pc.evict(keep + spare,
+                                                                              self._wanted):
                 n += 1
             if n:
                 log.info("prompt cache: %d entries evicted to admit id=%s (%.2f GiB left)",
@@ -2944,9 +3032,9 @@ class _Scheduler:
         append to it meanwhile."""
         with self.cv:
             reqs = list(itertools.islice(self.waiting, self.max_batch))
-        task = self.task_row
-        if task is not None and not task.started:
-            reqs.insert(0, task.req)
+        for task in reversed(self._tasks()):        # the main task's first, then the lane's
+            if not task.started:
+                reqs.insert(0, task.req)
         out = []
         for req in reqs:
             if not req.images:
@@ -2967,19 +3055,15 @@ class _Scheduler:
 
     def _admit(self):
         req = self.waiting[0]
-        if not self._fits(req, len(self.rows)):
+        if not self._fits(req, len(self.rows) + (self.lane_row is not None)):
             return
-        if not self.rows:
+        if not self.rows and self.lane_row is None:
             mx.reset_peak_memory()
         self.waiting.popleft()
-        tokens = self._tokens(req)
-        row = _Row(req, tokens, self._bytes(tokens))
-        self.reserved += row.reserved
-        req.t0 = time.time()                    # reset when its prefill starts (_advance)
+        row = self._setup(req)
+        if row is None:
+            return
         try:
-            row.sampler = make_sampler(req.sampling, seed=req.sampling.get("seed"))
-            row.pen = _Penalties(req.sampling, req.ids, self.eng.vocab)
-            req.ctl.build()
             spec = self._spec_ok(row)
         except Exception as e:  # noqa: BLE001 — this request's options, not the batch's
             log.exception("request setup failed: %s", req.id)
@@ -2987,6 +3071,81 @@ class _Scheduler:
             return
         self.task_row = row
         self.task = self._spec(row) if spec else self._prefill(row)
+
+    def _setup(self, req):
+        """The row of a request taken off the queue (its reservation counted)
+        -> None when its options failed (the request got its error). A
+        preempted request goes on with its own sampler (key) and penalty
+        counts; its _Control masks are built already."""
+        tokens = self._tokens(req)
+        row = _Row(req, tokens, self._bytes(tokens))
+        self.reserved += row.reserved
+        if not req.preempts:
+            req.t0 = time.time()                # reset when its prefill starts (_advance)
+        try:
+            if req.carry is not None:
+                (row.sampler, row.pen), req.carry = req.carry, None
+            else:
+                row.sampler = make_sampler(req.sampling, seed=req.sampling.get("seed"))
+                row.pen = _Penalties(req.sampling, req.ids, self.eng.vocab)
+                req.ctl.build()
+        except Exception as e:  # noqa: BLE001 — this request's options, not the batch's
+            log.exception("request setup failed: %s", req.id)
+            self._fail(row, e)
+            return None
+        return row
+
+    def _lane_slabs(self, req):
+        """Prefill slabs `req` would run if admitted now: from where its
+        prompt-cache lookup would resume (peek: the same scan), to its
+        prompt's end, cut at its own slab ends -> None: never a lane request
+        (vision: its mRoPE positions and image work are the running prefill's
+        kind of state; cancelled)."""
+        if req.images or req.cancel.is_set():
+            return None
+        e, depth = self._peek(req) if PROMPT_CACHE else (None, 0)
+        start, end = (depth if e is not None else 0), len(req.ids) - 1
+        if end <= start:
+            return 0
+        return 1 + sum(1 for b in self._bounds(req) if start < b < end)
+
+    def _admit_lane(self):
+        """QWEN_PREFILL_LANE: admit the first waiting text request that needs
+        at most PREFILL_LANE prefill slabs, beside the running plain prefill
+        (the main task). It overtakes the waiting requests before it only if
+        the budget also holds the head's reservation (and its row): the lane
+        never makes the head wait longer for memory; the queue keeps its
+        order otherwise. Same admission rules as _admit, but its hit is never
+        given up (_fits lane=True). Its prefill runs at prefill's next turns
+        (_advance_lane: lane first, up to PREFILL_LANE_BURST in a row), then
+        it joins the batch like any row."""
+        with self.cv:
+            cand = list(itertools.islice(self.waiting, self.max_batch))
+        if not cand:
+            return
+        head = cand[0]
+        for req in cand:
+            n = self._lane_slabs(req)
+            if n is not None and n <= PREFILL_LANE:
+                break
+        else:
+            return
+        over = req is not head
+        # the main prefill's row (not in self.rows yet) and, overtaken, the head's
+        if not self._fits(req, len(self.rows) + 1 + over, lane=True,
+                          extra=self._reserve(head) if over else 0):
+            return
+        with self.cv:
+            if req.cancel.is_set() or not any(req is x for x in self.waiting):
+                return                          # (cancelled meanwhile: the next tick says so)
+            self.waiting.remove(req)
+        row = self._setup(req)
+        if row is None:
+            return
+        log.info("id=%s prefill lane: %d slab(s) beside the prefill of id=%s%s", req.id, n,
+                 self.task_row.req.id, f", ahead of {cand.index(req)} waiting" if over else "")
+        self.lane_row = row
+        self.lane = self._prefill(row)
 
     def _spec_ok(self, row):
         req = row.req
@@ -3004,23 +3163,48 @@ class _Scheduler:
             # need a mask over the draft prefix. Plain decoding instead.
             log.info("grammar / token options: speculative decoding off for this request")
             return False
-        return not self.rows and (self.max_batch == 1 or not self.waiting)
+        # (a preempted request goes on as a plain row: its carried sampler
+        # and penalty counts are the batch path's; a lane runs beside nothing else)
+        return (not self.rows and (self.max_batch == 1 or not self.waiting)
+                and req.preempts == 0 and self.lane is None)
 
     def _advance(self):
-        row = self.task_row
+        self._next(lane=False)
+
+    def _advance_lane(self):
+        self._next(lane=True)
+
+    def _next(self, lane):
+        """One tick of the main task or of the lane: a slab (DFlash: a round)."""
+        row = self.lane_row if lane else self.task_row
         if not row.started:
             # admitted is not started: with rows running, the first slab
             # waits for decode's share (resume) like any other
             row.started = True
-            row.req.t0 = time.time()
-            row.req.queue_ms = int((row.req.t0 - row.req.t_arrival) * 1000)
+            if not row.req.preempts:            # the stream started before
+                row.req.t0 = time.time()
+                row.req.queue_ms = int((row.req.t0 - row.req.t_arrival) * 1000)
+        lm = self.lm
+        if PREFILL_LANE and row.rope is not None:
+            # Text slabs past the first read the model's _rope_deltas (offset
+            # + delta) and a cold first slab writes both: two prefills
+            # interleaved each get back the state their own last slab left.
+            lm._rope_deltas, lm._position_ids = row.rope
         try:
-            next(self.task)
+            next(self.lane if lane else self.task)
+            if PREFILL_LANE:
+                row.rope = (lm._rope_deltas, lm._position_ids)
         except StopIteration:
-            self.task = self.task_row = None
+            self._task_done(lane)
         except Exception as e:  # noqa: BLE001 — a failed prefill fails its request only
-            log.exception("prefill failed: %s", self.task_row.req.id)
-            self._fail(self.task_row, e)
+            log.exception("prefill failed: %s", row.req.id)
+            self._fail(row, e)
+            self._task_done(lane)
+
+    def _task_done(self, lane):
+        if lane:
+            self.lane = self.lane_row = None
+        else:
             self.task = self.task_row = None
 
     # --- prefill ----------------------------------------------------------------
@@ -3074,7 +3258,8 @@ class _Scheduler:
             elif use_cache:
                 log.info("id=%s prompt cache MISS (common prefix %d, %d entries)",
                          req.id, split, len(eng._pcache.entries))
-        req.reused = reused
+        if not req.preempts:                    # Usage.cached_tokens: the first prefill's
+            req.reused = reused
         row.cached = reused > 0
         keep, protect, ckpts = set(), set(), {}
         if keeps:
@@ -3159,7 +3344,8 @@ class _Scheduler:
                 keep = {b for b in keep if b >= start}
                 protect = {b for b in protect if b >= start}
                 # (chain: store drops its positions below the start itself)
-            if PROMPT_CACHE_REPLY and not req.images:
+            if (PROMPT_CACHE_REPLY or PREEMPT) and not req.images:
+                # (QWEN_PREEMPT: the generated tokens make the resumed prompt)
                 row.fed, row.plan = [], (set(bounds), protect)
 
         def checkpoint(pos, cache):
@@ -3206,7 +3392,8 @@ class _Scheduler:
                 e, covered = pc.store(ids[:L], cache, ckpts, inherit, reused, ends, protect,
                                       limit=self.budget + self.prefill_reserve - self.reserved,
                                       kv_start=self.kv["quantized_kv_start"], chain=chain,
-                                      wanted=self._wanted, fresh=fresh, partial=partial)
+                                      wanted=self._wanted, fresh=fresh, partial=partial,
+                                      spare=self._parents(but=row))
             except Exception:  # noqa: BLE001 — the prefill succeeded: the request goes on uncached
                 log.exception("id=%s prompt cache store failed (the request goes on)", req.id)
                 return
@@ -3585,7 +3772,7 @@ class _Scheduler:
             # reply KV: the finished rows' caches, taken before the batch's
             # stacked state is cut (lazy; _store_reply queues the copies)
             replies = [(r, self._reply_cache(r, i)) for i, r in enumerate(self.rows)
-                       if r.done and r.fed is not None]
+                       if r.done and r.fed is not None and PROMPT_CACHE_REPLY]
             if self.gdn is not None:
                 if len(keep) == 1:              # back to the plain library call
                     _gdn_split(self.gdn, keep[0], self.rows[keep[0]].cache)
@@ -3716,8 +3903,7 @@ class _Scheduler:
                         "its entry", req.id)
             return None, []
         ends, protect = row.plan
-        task = self.task_row
-        spare = (task.parent,) if task is not None and task.parent is not None else ()
+        spare = self._parents()
         try:
             new, covered = pc.store(ids, cache, {}, _Inherit(e.chain, {}, None, e.quantized), L,
                                     ends, protect,
@@ -4218,7 +4404,7 @@ class _Scheduler:
             self._fail(r, e)
         self.rows, self.gdn = [], None
         self._drop_groups()                         # the arrays go with the rows
-        self.reserved = self.task_row.reserved if self.task_row is not None else 0
+        self.reserved = sum(r.reserved for r in self._tasks())
         try:
             mx.clear_cache()
         except Exception:  # noqa: BLE001 — the failure is already reported
@@ -4390,7 +4576,7 @@ class _Scheduler:
         if now - self.log_at < SCHED_LOG_S:
             return
         steps = self.steps - self.log_steps
-        if steps or self.rows or self.waiting or self.task:
+        if steps or self.rows or self.waiting or self.task or self.lane:
             # rows / waiting / prefilling: at this moment; the rest over the
             # window. step_ms = decode ticks' wall time per step (the step-ahead
             # makes it the GPU's step time), gbps = the bytes a step must read
@@ -4399,7 +4585,8 @@ class _Scheduler:
                      "step_ms=%.1f gbps=%.0f decode_s=%.1f prefill_s=%.1f "
                      "reserved=%.2f/%.2fGiB pcache=%.2fGiB active=%.2fGiB groups=%d grouped=%d",
                      len(self.rows), len(self.waiting),
-                     self.task_row.req.id if self.task_row is not None else "-",
+                     (self.task_row.req.id if self.task_row is not None else "-")
+                     + (f"+lane:{self.lane_row.req.id}" if self.lane_row is not None else ""),
                      steps / (now - self.log_at), self.log_rows / steps if steps else 0.0,
                      1e3 * self.log_dec / steps if steps else 0.0,
                      self.log_bytes / self.log_dec / 1e9 if self.log_dec else 0.0,
