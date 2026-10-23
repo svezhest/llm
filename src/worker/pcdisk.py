@@ -36,6 +36,7 @@ Threads. MLX graphs only on the scheduler thread (worker invariant):
 Disk errors never fail a request: a failed write loses the entry (as before
 this tier), a failed load is a miss; both are logged.
 """
+import fcntl
 import hashlib
 import importlib
 import json
@@ -66,6 +67,11 @@ QUEUE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_QUEUE_GB", "2") or "2")
 MIN_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_DISK_MIN_TOKENS", "4096") or "0")
 # the head of the queue waits this long for its load before going without it
 WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_WAIT_S", "10") or "0")
+# F_NOCACHE (macOS) on every file: the cache's GBs never sit in the unified
+# buffer cache beside the model (RAM is what the tier frees; a page-cache copy
+# of each written entry would compete with the batch and push other processes
+# to swap); reads then measure the SSD, not RAM. 0: the OS caches as usual.
+NOCACHE = os.environ.get("QWEN_PROMPT_CACHE_DISK_NOCACHE", "1") != "0"
 
 MAGIC = b"QPCDISK1"
 _ALIGN = 4096
@@ -77,6 +83,14 @@ def _new_uid():
 
 
 # --- blob files --------------------------------------------------------------
+def _nocache(f):
+    if NOCACHE and hasattr(fcntl, "F_NOCACHE"):
+        try:
+            fcntl.fcntl(f.fileno(), fcntl.F_NOCACHE, 1)
+        except OSError:
+            pass                                      # a file system without it: cached
+
+
 def _write_blob(path, header, arrays, bf16=None):
     """MAGIC, u64 header length, header JSON, then the arrays (C order),
     each at a 4096-aligned offset. Written to path + ".tmp", then renamed:
@@ -91,6 +105,7 @@ def _write_blob(path, header, arrays, bf16=None):
     start = (16 + len(raw) + _ALIGN - 1) // _ALIGN * _ALIGN
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
+        _nocache(f)
         f.write(MAGIC + struct.pack("<Q", len(raw)) + raw)
         f.write(b"\0" * (start - 16 - len(raw)))
         for a, s in zip(arrays, specs):
@@ -128,6 +143,7 @@ def _read_header(f, path):
 def _read_blob(path, skip=False):
     """-> (header, [numpy arrays]) (skip: the header only, size checked)."""
     with open(path, "rb") as f:
+        _nocache(f)
         h, start = _read_header(f, path)
         if skip:
             return h, None
