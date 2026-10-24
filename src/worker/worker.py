@@ -1240,7 +1240,11 @@ class _PrefixCache:
         covered = [e for e in self.entries
                    if (prefix(e) or (e.reply is not None and e.reply <= L
                                      and ids[: e.reply] == e.ids[: e.reply]))
-                   and not (quantized and not e.quantized)]
+                   and not (quantized and not e.quantized)
+                   # a given segment (a preempted row's buffers) inherits nothing:
+                   # absorbing a running prefill's parent would drop its bytes
+                   # from the count while that prefill's _Inherit holds them
+                   and not (seg is not None and any(e is s for s in spare))]
         for e in covered:
             for p, s in e.ckpts.items():
                 if p < L:                             # (a prompt-part cover may hold deeper ones)
@@ -4685,10 +4689,11 @@ class _Scheduler:
             if r.pos + 1 >= r.tokens and self._preemptable(r) and not self._regrow(r, ahead=1):
                 req = self._preempt(r, i, ahead)
                 if req is not None:
+                    # queued at once (behind the ones preempted before it), so
+                    # that the next row's _regrow sees its entry as wanted
+                    with self.cv:
+                        self.waiting.insert(len(back), req)
                     back.append(req)
-        if back:
-            with self.cv:
-                self.waiting.extendleft(reversed(back))
         if any(r.done for r in self.rows):
             self._compact()
 

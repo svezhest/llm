@@ -40,6 +40,10 @@ CPU-only work so far. The GPU plan is at the end.
      before the store: its buffers are what the entry holds). Before this fix the limit still counted
      the row and the entry needed a fresh copy, so under real pressure it was almost never kept and the
      resume was a cold recompute. The real-budget test now checks "KV kept" and a full HIT.
+   - A running prefill's parent (`spare`) is never absorbed by such a store, because that prefill's
+     `_Inherit` holds the parent's pieces. Before, the entry came out of the count but stayed in memory:
+     with a 30K system prompt on the 9B, ~1 GB of admissions too many. The parent simply stays, and its
+     bytes are counted next to the new entry (review 2026-10-24, r4).
    - `tick=False`, and the prompt entry's clock is kept.
    - The end-state gathers are evaluated right there (a host wait for a rare event, before the step). If
      that eval fails, the entry goes and the entries it absorbed come back.
@@ -51,7 +55,9 @@ CPU-only work so far. The GPU plan is at the end.
    - The request goes back to the **head** of the queue with `ids` = prompt +
      generated, `max_tokens` −= sent, `carry` = (sampler, penalties), `preempts` += 1, and its `bounds` /
      `peeked` / `keep_since` memos reset. Several rows preempted before the same step go back in batch
-     (admission) order, ahead of what was waiting (`extendleft(reversed(…))`).
+     (admission) order, ahead of what was waiting. Each is queued as soon as it is preempted (at the
+     position after the ones before it), so a later row's `_regrow` in the same pass sees its entry as
+     wanted. Otherwise that entry, stored "now" (the MRU), would be the first eviction victim.
    - The original prompt is kept in `req.orig`. The handler reads `prompt_ids` (Usage.prompt_tokens, the
      tool-call id seed, `prompt_logprobs`).
 5. **Resume.** Normal admission.

@@ -261,3 +261,62 @@ def test_rows_preempted_in_one_step_keep_their_order(pre, dense, monkeypatch):
     got = drive(sched, reqs)
     assert seen and seen[0][:2] == ["a", "b"] and seen[0][-1] == "w", seen
     assert all(tokens(got[k]) == tokens(ref[k]) for k in "abcw")
+
+
+def test_preempt_never_absorbs_a_running_prefills_parent(pre, dense, monkeypatch):
+    """Review 2026-10-24 (r4): A decodes from prompt P (its entry E); M = P +
+    80 tokens resumes from E and prefills over many ticks; A is preempted
+    meanwhile. Its entry (A's own buffers, inheriting nothing) must not
+    absorb E: M's _Inherit holds E's pieces, they must stay counted."""
+    from conftest import IM_START
+    monkeypatch.setattr(worker, "RESERVE_TOKENS", 6)
+    P = [IM_START] + prompts([30], 70)[0] + [IM_START] + prompts([4], 71)[0]
+    A = request(P, 40, "a")
+    B = request(prompts([10], 72)[0], 40, "b")
+    M = request(P + prompts([80], 73)[0], 3, "m")       # resumes from A's prompt entry, many slabs
+    sched = scheduler(dense, max_batch=4, share=0.5)
+    pc = sched.eng._pcache
+    force(sched, "a")
+    seen = []
+
+    def on_tick(t, s):
+        row = s.task_row
+        if row is not None and row.req is M and row.parent is not None:
+            seen.append((A.preempts, any(row.parent is e for e in pc.entries)))
+    drive(sched, [A, B, M], arrive={4: [M]}, on_tick=on_tick)
+    assert M.reused > 0 and seen
+    assert all(inside for _, inside in seen), "M's parent left pc.entries while M held its pieces"
+
+
+def test_first_preempted_entry_is_wanted_during_the_pass(pre, dense, monkeypatch):
+    """Review 2026-10-24: two rows preempted before one step; the second
+    row's _regrow evicts in victim order while the pass runs. The first
+    row's fresh entry is already queued (wanted), so it is not the victim."""
+    monkeypatch.setattr(worker, "RESERVE_TOKENS", 6)
+    ps = prompts([12, 12, 12, 9], 64)
+    reqs = [request(p, 20, k) for p, k in zip(ps, "abcx")]
+    sched = scheduler(dense, max_batch=3)
+    pc = sched.eng._pcache
+    drive(sched, reqs[3:])                               # an unrelated entry (x), older
+    force(sched, "a")
+    orig, lost = sched._regrow, []
+
+    def regrow(row, ahead=0):
+        if row.req.id == "b" and ahead and sched.rows[0].req.id == "a" and sched.rows[0].done:
+            # b's growth makes the cache give way by one entry (victim order)
+            (a_entry,) = [e for e in pc.entries if e.ids[:12] == ps[0] and len(e.ids) > 12]
+            assert len(pc.entries) >= 2                  # a's and x's: a choice to make
+            pc.evict(sched._parents(), sched._wanted)
+            lost.append(not any(e is a_entry for e in pc.entries))
+        return orig(row, ahead)
+    sched._regrow = regrow
+
+    def on_tick(t, s):
+        # a's prompt entry gone before its preemption: its new entry gets no
+        # clock of its own (stored now = the most recently used: MRU's victim)
+        if any(r.req.id == "a" and not r.first for r in s.rows):
+            pc.entries = [e for e in pc.entries if e.ids != ps[0][:-1]]
+            pc._recount()
+    got = drive(sched, reqs[:3], on_tick=on_tick)
+    assert lost and not any(lost), "the first preempted row's entry was the eviction victim"
+    assert reqs[0].preempts == 1 and len(tokens(got["a"])) == 20
