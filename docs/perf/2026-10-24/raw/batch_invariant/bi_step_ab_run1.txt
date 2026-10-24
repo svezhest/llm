@@ -1,0 +1,24 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+loaded; max_batch 16, cascade False
+round 0 B= 1: on 41.68 ms, off 29.90 ms, x1.394 (n 210/210)
+round 0 B= 2: on 40.42 ms, off 47.00 ms, x0.860 (n 210/210)
+round 0 B= 4: on 42.54 ms, off 42.56 ms, x1.000 (n 210/210)
+round 0 B= 8: on 45.06 ms, off 45.12 ms, x0.998 (n 210/210)
+round 0 B=16: on 67.41 ms, off 69.21 ms, x0.974 (n 210/210)
+round 1 B=16: on 68.74 ms, off 70.48 ms, x0.975 (n 210/210)
+round 1 B= 8: on 47.85 ms, off 47.98 ms, x0.997 (n 210/210)
+round 1 B= 4: on 45.96 ms, off 45.98 ms, x1.000 (n 210/210)
+round 1 B= 2: on 43.82 ms, off 50.90 ms, x0.861 (n 210/210)
+round 1 B= 1: on 44.55 ms, off 30.69 ms, x1.452 (n 210/210)
+round 2 B= 1: on 44.25 ms, off 30.37 ms, x1.457 (n 210/210)
+round 2 B= 2: on 43.26 ms, off 50.25 ms, x0.861 (n 210/210)
+round 2 B= 4: on 45.84 ms, off 45.88 ms, x0.999 (n 210/210)
+round 2 B= 8: on 47.26 ms, off 47.29 ms, x0.999 (n 210/210)
+round 2 B=16: on 69.76 ms, off 71.47 ms, x0.976 (n 210/210)
+B= 1: on/off x1.452 (rounds 1.394, 1.452, 1.457), on 44.25 ms off 30.37 ms
+B= 2: on/off x0.861 (rounds 0.860, 0.861, 0.861), on 43.26 ms off 50.25 ms
+B= 4: on/off x1.000 (rounds 1.000, 1.000, 0.999), on 45.84 ms off 45.88 ms
+B= 8: on/off x0.998 (rounds 0.998, 0.997, 0.999), on 47.26 ms off 47.29 ms
+B=16: on/off x0.975 (rounds 0.974, 0.975, 0.976), on 68.74 ms off 70.48 ms
+-> /tmp/perf/batch_invariant/bi_step_ab.json

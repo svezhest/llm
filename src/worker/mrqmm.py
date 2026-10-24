@@ -33,6 +33,21 @@ Used only for 8-bit affine, group size 64, fp16 x/scales/biases, 3 <= rows
 (MIN_N); every other call goes to mx.quantized_matmul unchanged (M <= 2 stays
 bit-identical to a solo row).
 
+Batch-invariant mode (set_invariant, the worker's QWEN_BATCH_INVARIANT=1): row m
+of the output is then the same bits whatever the number of rows (1..16) and
+whichever rows sit beside it. The order of the sum for one output (n, m) is
+fixed by K and KS only: simdgroup ks accumulates its groups g = ks, ks + KS, ...
+(8 MMA steps of 8 k each, the k permutation the same for every row) into one
+fp32 accumulator, and the reduction adds simdgroups 1..KS-1 to simdgroup 0's
+sum in that order. NA (which simdgroup / fragment owns n) and MB (which 8-row
+bucket holds m) only place the element: the MMA result of (n, m) reads A row n
+and B column m alone (padded columns m >= M are computed from row 0 and never
+stored), the dequantized weight is a per-n fma, and the accumulators of
+different (i, mb) never meet. So the mode fixes KS per K (8, halved until it
+divides K/64: _config) for both buckets, keeps NA free, and takes 1..16 rows
+and every 8-bit module whatever its N (MIN_N is a speed rule; tests/
+test_batch_invariant_metal.py checks it at the 9B shapes).
+
     import mrqmm; mrqmm.install(model)        # QWEN_MRQMM=0 disables
 
 The GDN decode in-projections (qkv, z, b, a as one matmul over concatenated
@@ -177,6 +192,12 @@ _SRC = r"""
     }
 """
 
+# Batch-invariant mode (set_invariant): one K split for every row count, 1..16
+# rows and any N take the kernel. Off = the speed rules above, bit for bit.
+INVARIANT = False
+INVARIANT_KS = 8
+INVARIANT_NA16 = 2            # NA at 9..16 rows (placement only: free to retune)
+
 _KERNELS = {}                 # (K, N, MB, NA, KS) -> compiled metal_kernel
 _CALLS = {}                   # (x.shape, x.dtype, w.shape, cfg) -> (kernel, kwargs, m0 array)
 _LOCK = threading.Lock()      # cache misses only (warm-up at load vs the scheduler thread)
@@ -188,6 +209,12 @@ def _config(K: int, N: int, MB: int) -> tuple[int, int]:
     8 rows -> 2 x 8, 16 rows -> 4 x 4 (more MMAs per x fragment); a narrow
     layer keeps NA 2 so that it still spreads over enough simdgroups."""
     na, ks = (2, 8) if MB == 1 else (4, 4)
+    if INVARIANT:
+        # the sum order of (n, m) depends on KS (and K) alone, NA / MB only
+        # place it: KS 8 as the 1..8-row bucket (unchanged there), NA 2 at
+        # 9..16 rows (2 x 8 within 3 % of 4 x 4 at 16 rows, results/mrqmm.md
+        # config sweep). NA can be retuned without changing a bit.
+        na, ks = (2 if MB == 1 else INVARIANT_NA16), INVARIANT_KS
     if N < 4096 or N % (8 * na):
         na = 2 if N % 16 == 0 else 1
     while ks > 1 and (K // GROUP) % ks:
@@ -253,12 +280,27 @@ def mrqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, cfg=None
     return kernel(inputs=[x, w, scales, biases, m0], **kw)[0]
 
 
-def _use(x: mx.array) -> bool:
-    """Decode-shaped fp16 input with MIN_ROWS..MAX_ROWS rows."""
+def _use(x: mx.array, n: int | None = None) -> bool:
+    """Decode-shaped fp16 input with MIN_ROWS..MAX_ROWS rows for a layer of n
+    outputs (>= MIN_N; None: vetted by the caller); batch-invariant:
+    1..MAX_ROWS rows, any n (an install in that mode swapped narrow layers
+    too, so toggling the mode off restores the speed rules exactly)."""
     if x.dtype != mx.float16 or x.ndim < 2 or x.shape[-2] != 1:
         return False
     rows = x.size // x.shape[-1]
-    return MIN_ROWS <= rows <= MAX_ROWS
+    if INVARIANT:
+        return 1 <= rows <= MAX_ROWS
+    return (n is None or n >= MIN_N) and MIN_ROWS <= rows <= MAX_ROWS
+
+
+def set_invariant(on: bool):
+    """Batch-invariant mode on / off (the worker at load, before install;
+    tools toggle it between steps on the scheduler thread). The call cache
+    holds configs: cleared."""
+    global INVARIANT
+    with _LOCK:
+        INVARIANT = bool(on)
+        _CALLS.clear()
 
 
 class MRQuantizedLinear(nn.QuantizedLinear):
@@ -266,7 +308,7 @@ class MRQuantizedLinear(nn.QuantizedLinear):
     Installed by swapping __class__ (parameters and state are untouched)."""
 
     def __call__(self, x):
-        if not _use(x):
+        if not _use(x, self["weight"].shape[0]):
             return super().__call__(x)
         y = mrqmm(x, self["weight"], self["scales"], self["biases"])
         if "bias" in self:
@@ -287,10 +329,11 @@ def enabled() -> bool:
 
 def install(model, warmup: bool = True) -> int:
     """Swap every supported nn.QuantizedLinear of `model` (8-bit, g64, fp16
-    scales/biases, N >= MIN_N) to MRQuantizedLinear; every other module is
-    left alone. Logs the coverage once. Returns the number of modules covered
-    (0 = no-op). The GDN decode in-projections fused into one matmul are the
-    worker's (`_install_gdn_fuse`, after this; it calls `warm` for its shapes)."""
+    scales/biases, N >= MIN_N; any N in batch-invariant mode) to
+    MRQuantizedLinear; every other module is left alone. Logs the coverage
+    once. Returns the number of modules covered (0 = no-op). The GDN decode
+    in-projections fused into one matmul are the worker's
+    (`_install_gdn_fuse`, after this; it calls `warm` for its shapes)."""
     if not enabled():
         log.info("mrqmm: off (QWEN_MRQMM=0 or no Metal)")
         return 0
@@ -298,7 +341,7 @@ def install(model, warmup: bool = True) -> int:
     for name, m in model.named_modules():
         if not isinstance(m, nn.QuantizedLinear):
             continue
-        if _module_ok(m) and m.weight.shape[0] >= MIN_N:
+        if _module_ok(m) and (INVARIANT or m.weight.shape[0] >= MIN_N):
             m.__class__ = MRQuantizedLinear
             covered.append((name, m))
         elif type(m) is nn.QuantizedLinear:
@@ -318,7 +361,7 @@ def install(model, warmup: bool = True) -> int:
             k = k[len(pre):] if k.startswith(pre) else k
         kinds[k] = kinds.get(k, 0) + 1
     log.info("mrqmm: %d modules on the multi-row kernel for %d..%d decode rows (%s); "
-             "left on quantized_matmul: %s", len(covered), MIN_ROWS, MAX_ROWS,
+             "left on quantized_matmul: %s", len(covered), 1 if INVARIANT else MIN_ROWS, MAX_ROWS,
              ", ".join(f"{k} x{v}" for k, v in sorted(kinds.items())),
              ", ".join(f"{k} x{v}" for k, v in skipped.items()) or "none")
     if warmup:
@@ -328,6 +371,40 @@ def install(model, warmup: bool = True) -> int:
         for w in shapes.values():
             warm(*w)
     return len(covered)
+
+
+def uncovered(model, skip=()) -> dict:
+    """Batch-invariant coverage: the matmul modules of `model` a decode step
+    runs outside the kernel, by class -> count. Their rows keep MLX's own
+    row-count rules (qmv per row below its threshold, then qmm: B <= 2 is
+    still exact there, larger B is not): 5-bit / 4-bit / 6-bit layers (27B,
+    35B shared expert / lm_head), N % 8 layers (35B shared_expert_gate),
+    unquantized nn.Linear, the MoE experts (gather_qmm; SwitchGLU also sorts
+    by expert from B * top_k >= 64 rows), a tied lm_head (embed_tokens.as_linear).
+    `skip`: ids of modules a decode step never calls (the worker's fused GDN
+    in-projections)."""
+    out = {}
+
+    def add(k):
+        out[k] = out.get(k, 0) + 1
+    for _, m in model.named_modules():
+        t = type(m)
+        if t is MRQuantizedLinear or id(m) in skip:
+            continue
+        if t is nn.QuantizedLinear:
+            why = ("" if (m.bits, m.group_size) != (BITS, GROUP) else
+                   " N % 8" if m.weight.shape[0] % 8 else
+                   " not fp16" if m.scales.dtype != mx.float16 else
+                   " mrqmm off" if not enabled() else "")
+            add(f"QuantizedLinear {m.bits}-bit g{m.group_size}{why}")
+        elif t is nn.Linear:
+            add("Linear (unquantized)")
+        elif "Switch" in t.__name__ and hasattr(m, "weight"):
+            add(f"{t.__name__} (MoE experts)")
+    args = getattr(model, "args", None)
+    if getattr(args, "tie_word_embeddings", False):
+        add("tied lm_head (embed_tokens.as_linear)")
+    return out
 
 
 def warm(w: mx.array, scales: mx.array, biases: mx.array):

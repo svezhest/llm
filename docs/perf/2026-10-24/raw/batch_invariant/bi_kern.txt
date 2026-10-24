@@ -1,0 +1,73 @@
+q_proj        K= 4096 N=  8192 rows= 1 qmv=   114.8us def=   115.6us inv=   115.6us inv48=   117.8us
+q_proj        K= 4096 N=  8192 rows= 2 qmv=   124.6us def=   115.6us inv=   115.4us inv48=   116.6us
+q_proj        K= 4096 N=  8192 rows= 3 qmv=   175.1us def=   114.9us inv=   115.4us inv48=   114.6us
+q_proj        K= 4096 N=  8192 rows= 4 qmv=   224.0us def=   116.3us inv=   114.8us inv48=   114.8us
+q_proj        K= 4096 N=  8192 rows= 8 qmv=   324.5us def=   118.8us inv=   117.4us inv48=   116.8us
+q_proj        K= 4096 N=  8192 rows= 9 qmv=   327.3us def=   162.1us inv=   168.9us inv48=   174.2us
+q_proj        K= 4096 N=  8192 rows=12 qmv=   327.5us def=   163.8us inv=   167.1us inv48=   174.0us
+q_proj        K= 4096 N=  8192 rows=16 qmv=   329.2us def=   162.8us inv=   167.2us inv48=   174.9us
+k/v_proj      K= 4096 N=  1024 rows= 1 qmv=    28.5us def=    29.7us inv=    29.6us inv48=    29.2us
+k/v_proj      K= 4096 N=  1024 rows= 2 qmv=    28.0us def=    32.1us inv=    30.9us inv48=    30.2us
+k/v_proj      K= 4096 N=  1024 rows= 3 qmv=    40.3us def=    30.2us inv=    29.5us inv48=    32.1us
+k/v_proj      K= 4096 N=  1024 rows= 4 qmv=    47.3us def=    32.1us inv=    31.9us inv48=    29.8us
+k/v_proj      K= 4096 N=  1024 rows= 8 qmv=    99.5us def=    34.6us inv=    37.8us inv48=    45.2us
+k/v_proj      K= 4096 N=  1024 rows= 9 qmv=   121.6us def=    54.3us inv=    51.8us inv48=    53.7us
+k/v_proj      K= 4096 N=  1024 rows=12 qmv=    96.6us def=    54.0us inv=    48.0us inv48=    53.2us
+k/v_proj      K= 4096 N=  1024 rows=16 qmv=   111.4us def=    53.4us inv=    54.1us inv48=    53.6us
+o_proj        K= 4096 N=  4096 rows= 1 qmv=    67.1us def=    90.3us inv=    82.1us inv48=    91.9us
+o_proj        K= 4096 N=  4096 rows= 2 qmv=    79.9us def=    75.5us inv=    76.0us inv48=    77.5us
+o_proj        K= 4096 N=  4096 rows= 3 qmv=    98.4us def=    70.4us inv=    70.9us inv48=    71.7us
+o_proj        K= 4096 N=  4096 rows= 4 qmv=   123.2us def=    64.9us inv=    65.8us inv48=    64.2us
+o_proj        K= 4096 N=  4096 rows= 8 qmv=   213.6us def=    66.7us inv=    65.5us inv48=    67.2us
+o_proj        K= 4096 N=  4096 rows= 9 qmv=   256.1us def=    90.8us inv=    90.8us inv48=   101.8us
+o_proj        K= 4096 N=  4096 rows=12 qmv=   180.3us def=    93.7us inv=    92.3us inv48=   100.0us
+o_proj        K= 4096 N=  4096 rows=16 qmv=   181.3us def=    92.0us inv=    92.2us inv48=    99.4us
+gdn_in_fused  K= 4096 N= 12352 rows= 1 qmv=   164.9us def=   168.1us inv=   168.1us inv48=   169.9us
+gdn_in_fused  K= 4096 N= 12352 rows= 2 qmv=   180.6us def=   166.7us inv=   168.8us inv48=   167.2us
+gdn_in_fused  K= 4096 N= 12352 rows= 3 qmv=   265.2us def=   166.7us inv=   167.2us inv48=   167.8us
+gdn_in_fused  K= 4096 N= 12352 rows= 4 qmv=   340.4us def=   167.0us inv=   168.7us inv48=   166.9us
+gdn_in_fused  K= 4096 N= 12352 rows= 8 qmv=   460.6us def=   175.9us inv=   174.2us inv48=   171.2us
+gdn_in_fused  K= 4096 N= 12352 rows= 9 qmv=   488.2us def=   252.0us inv=   252.4us inv48=   263.7us
+gdn_in_fused  K= 4096 N= 12352 rows=12 qmv=   524.9us def=   267.2us inv=   277.4us inv48=   289.1us
+gdn_in_fused  K= 4096 N= 12352 rows=16 qmv=   562.3us def=   292.2us inv=   293.1us inv48=   302.2us
+gdn_out       K= 4096 N=  4096 rows= 1 qmv=    63.1us def=    75.5us inv=    75.8us inv48=    72.2us
+gdn_out       K= 4096 N=  4096 rows= 2 qmv=    84.5us def=    74.4us inv=    75.7us inv48=    75.0us
+gdn_out       K= 4096 N=  4096 rows= 3 qmv=   123.6us def=    77.3us inv=    76.3us inv48=    74.9us
+gdn_out       K= 4096 N=  4096 rows= 4 qmv=   160.0us def=    77.3us inv=    76.0us inv48=    76.4us
+gdn_out       K= 4096 N=  4096 rows= 8 qmv=   290.0us def=    79.5us inv=    79.3us inv48=    80.2us
+gdn_out       K= 4096 N=  4096 rows= 9 qmv=   325.3us def=   116.9us inv=   116.0us inv48=   128.7us
+gdn_out       K= 4096 N=  4096 rows=12 qmv=   236.3us def=   115.5us inv=   117.4us inv48=   131.1us
+gdn_out       K= 4096 N=  4096 rows=16 qmv=   236.3us def=   117.5us inv=   118.6us inv48=   131.0us
+mlp_gate/up   K= 4096 N= 12288 rows= 1 qmv=   164.6us def=   198.6us inv=   196.6us inv48=   195.5us
+mlp_gate/up   K= 4096 N= 12288 rows= 2 qmv=   227.3us def=   195.3us inv=   195.1us inv48=   195.9us
+mlp_gate/up   K= 4096 N= 12288 rows= 3 qmv=   327.8us def=   195.6us inv=   195.8us inv48=   194.7us
+mlp_gate/up   K= 4096 N= 12288 rows= 4 qmv=   429.9us def=   194.9us inv=   195.9us inv48=   196.9us
+mlp_gate/up   K= 4096 N= 12288 rows= 8 qmv=   586.0us def=   206.4us inv=   205.3us inv48=   207.4us
+mlp_gate/up   K= 4096 N= 12288 rows= 9 qmv=   549.7us def=   283.0us inv=   288.8us inv48=   300.4us
+mlp_gate/up   K= 4096 N= 12288 rows=12 qmv=   547.9us def=   281.4us inv=   290.4us inv48=   294.7us
+mlp_gate/up   K= 4096 N= 12288 rows=16 qmv=   541.1us def=   277.5us inv=   287.7us inv48=   297.9us
+mlp_down      K=12288 N=  4096 rows= 1 qmv=   165.4us def=   189.1us inv=   178.9us inv48=   182.4us
+mlp_down      K=12288 N=  4096 rows= 2 qmv=   210.8us def=   178.5us inv=   184.7us inv48=   181.6us
+mlp_down      K=12288 N=  4096 rows= 3 qmv=   302.8us def=   183.5us inv=   176.9us inv48=   178.1us
+mlp_down      K=12288 N=  4096 rows= 4 qmv=   392.3us def=   189.3us inv=   186.8us inv48=   185.1us
+mlp_down      K=12288 N=  4096 rows= 8 qmv=   545.5us def=   201.9us inv=   216.1us inv48=   201.5us
+mlp_down      K=12288 N=  4096 rows= 9 qmv=   535.5us def=   279.4us inv=   266.9us inv48=   288.6us
+mlp_down      K=12288 N=  4096 rows=12 qmv=   554.1us def=   283.2us inv=   271.9us inv48=   297.2us
+mlp_down      K=12288 N=  4096 rows=16 qmv=   569.9us def=   288.7us inv=   282.1us inv48=   301.4us
+lm_head       K= 4096 N=248320 rows= 1 qmv=  3122.2us def=  3609.7us inv=  3843.1us inv48=  4027.5us
+lm_head       K= 4096 N=248320 rows= 2 qmv=  5034.4us def=  3768.4us inv=  3761.7us inv48=  3752.6us
+lm_head       K= 4096 N=248320 rows= 3 qmv=  7188.0us def=  3702.3us inv=  3672.2us inv48=  3681.3us
+lm_head       K= 4096 N=248320 rows= 4 qmv=  9253.5us def=  3636.9us inv=  3628.2us inv48=  3608.8us
+lm_head       K= 4096 N=248320 rows= 8 qmv= 11504.3us def=  3881.9us inv=  3869.0us inv48=  3853.6us
+lm_head       K= 4096 N=248320 rows= 9 qmv= 11520.5us def=  5657.5us inv=  5747.0us inv48=  5869.9us
+lm_head       K= 4096 N=248320 rows=12 qmv= 11587.8us def=  5702.8us inv=  5825.4us inv48=  6126.9us
+lm_head       K= 4096 N=248320 rows=16 qmv= 11714.8us def=  6008.8us inv=  6394.2us inv48=  6429.2us
+step linears rows= 1: default  26.34 ms, inv  30.06 (x1.141), inv48  30.33 (x1.152)
+step linears rows= 2: default  34.78 ms, inv  30.05 (x0.864), inv48  29.95 (x0.861)
+step linears rows= 3: default  29.91 ms, inv  29.67 (x0.992), inv48  29.67 (x0.992)
+step linears rows= 4: default  30.00 ms, inv  29.97 (x0.999), inv48  29.88 (x0.996)
+step linears rows= 8: default  31.72 ms, inv  32.07 (x1.011), inv48  31.80 (x1.003)
+step linears rows= 9: default  44.46 ms, inv  44.52 (x1.001), inv48  46.81 (x1.053)
+step linears rows=12: default  44.88 ms, inv  45.43 (x1.012), inv48  47.63 (x1.061)
+step linears rows=16: default  45.73 ms, inv  46.65 (x1.020), inv48  48.59 (x1.062)
+-> /tmp/perf/batch_invariant/bi_kern.json

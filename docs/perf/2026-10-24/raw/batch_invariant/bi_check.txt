@@ -1,0 +1,13 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+loaded; max_batch 16
+prompt tokens: [331, 833, 1532, 3028, 6030, 326, 828, 1533, 3031, 6035, 323, 838, 1537, 3021, 6021, 324]
+ref: 16 solo runs in 148s
+solo repeat with golden: equal
+f B=2: 2 rows, 185 steps, rows with a mismatch 0, max |d log p| 0, mean batch 1.9, 7s
+f B=4: 4 rows, 342 steps, rows with a mismatch 0, max |d log p| 0, mean batch 3.8, 26s
+f B=8: 8 rows, 572 steps, rows with a mismatch 0, max |d log p| 0, mean batch 4.3, 45s
+f B=16: 16 rows, 1144 steps, rows with a mismatch 0, max |d log p| 0, mean batch 4.2, 95s
+free B=16: tokens differ in 0 rows, logprobs in 0
+c B=16: 16 rows, 1144 steps, rows with a mismatch 8, max |d log p| 0.0199, mean batch 4.1, 94s
+PASS -> /tmp/perf/batch_invariant/bi_check.json

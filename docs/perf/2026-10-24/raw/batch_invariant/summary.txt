@@ -1,0 +1,37 @@
+02:01:01 1 kernel bench
+step linears rows= 1: default  26.34 ms, inv  30.06 (x1.141), inv48  30.33 (x1.152)
+step linears rows= 2: default  34.78 ms, inv  30.05 (x0.864), inv48  29.95 (x0.861)
+step linears rows= 3: default  29.91 ms, inv  29.67 (x0.992), inv48  29.67 (x0.992)
+step linears rows= 4: default  30.00 ms, inv  29.97 (x0.999), inv48  29.88 (x0.996)
+step linears rows= 8: default  31.72 ms, inv  32.07 (x1.011), inv48  31.80 (x1.003)
+step linears rows= 9: default  44.46 ms, inv  44.52 (x1.001), inv48  46.81 (x1.053)
+step linears rows=12: default  44.88 ms, inv  45.43 (x1.012), inv48  47.63 (x1.061)
+step linears rows=16: default  45.73 ms, inv  46.65 (x1.020), inv48  48.59 (x1.062)
+02:02:13 2 Metal tests
+153 passed, 1 skipped, 2 warnings in 8.24s
+02:02:23 done -> /tmp/perf/batch_invariant
+02:02:58 3 real 9B batch == solo
+ref: 16 solo runs in 148s
+solo repeat with golden: equal
+f B=2: 2 rows, 185 steps, rows with a mismatch 0, max |d log p| 0, mean batch 1.9, 7s
+f B=4: 4 rows, 342 steps, rows with a mismatch 0, max |d log p| 0, mean batch 3.8, 26s
+f B=8: 8 rows, 572 steps, rows with a mismatch 0, max |d log p| 0, mean batch 4.3, 45s
+f B=16: 16 rows, 1144 steps, rows with a mismatch 0, max |d log p| 0, mean batch 4.2, 95s
+free B=16: tokens differ in 0 rows, logprobs in 0
+c B=16: 16 rows, 1144 steps, rows with a mismatch 8, max |d log p| 0.0199, mean batch 4.1, 94s
+PASS -> /tmp/perf/batch_invariant/bi_check.json
+02:12:02 done -> /tmp/perf/batch_invariant
+02:19:01 4 real 9B step A/B
+B= 1: on/off x1.452 (rounds 1.394, 1.452, 1.457), on 44.25 ms off 30.37 ms
+B= 2: on/off x0.861 (rounds 0.860, 0.861, 0.861), on 43.26 ms off 50.25 ms
+B= 4: on/off x1.000 (rounds 1.000, 1.000, 0.999), on 45.84 ms off 45.88 ms
+B= 8: on/off x0.998 (rounds 0.998, 0.997, 0.999), on 47.26 ms off 47.29 ms
+B=16: on/off x0.975 (rounds 0.974, 0.975, 0.976), on 68.74 ms off 70.48 ms
+02:27:29 done -> /tmp/perf/batch_invariant
+02:31:42 4 real 9B step A/B
+B= 1: on/off x1.177 (rounds 1.092, 1.214, 1.177), on 32.88 ms off 27.93 ms
+B= 2: on/off x0.860 (rounds 0.872, 0.860, 0.849), on 33.67 ms off 39.65 ms
+B= 4: on/off x1.001 (rounds 0.996, 1.005, 1.001), on 36.88 ms off 36.71 ms
+B= 8: on/off x0.999 (rounds 0.999, 0.999, 0.998), on 38.34 ms off 38.37 ms
+B=16: on/off x0.974 (rounds 0.971, 0.975, 0.974), on 57.20 ms off 58.94 ms
+02:38:49 done -> /tmp/perf/batch_invariant
