@@ -177,10 +177,10 @@ def test_kernel_head_dims_and_names():
         with pytest.raises(ValueError, match="head_dim"):
             cascade_mma.prefix_attention(q, kv, kv, 8, 0.1)
     a, b = 0.125, math.nextafter(0.125, 1.0)
-    na = cascade_mma._kernels(64, 2, a)[0]
-    nb = cascade_mma._kernels(64, 2, b)[0]
+    na = cascade_mma._kernels(64, 2, a, cascade_mma.TILES["16x16"])[0]
+    nb = cascade_mma._kernels(64, 2, b, cascade_mma.TILES["16x16"])[0]
     assert na is not nb
-    assert cascade_mma._kernels(64, 2, a)[0] is na
+    assert cascade_mma._kernels(64, 2, a, cascade_mma.TILES["16x16"])[0] is na
 
 
 @pytest.mark.parametrize("dtype", [F32, mx.bfloat16])

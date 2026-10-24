@@ -38,14 +38,19 @@ mkdir -p $OUT
 note() { echo "$(date '+%F %T') $*" | tee -a $ST; }
 state() {
   note "state: therm $(pmset -g therm 2>&1 | grep -v '^Note' | tr '\n' ' ' | cut -c1-120) |" \
-       "load $(sysctl -n vm.loadavg) | free $(( $(vm_stat | awk '/Pages free/ {gsub(/\./,"",$3); print $3}') * 16384 / 1048576 )) MiB"
+       "load $(sysctl -n vm.loadavg) | free $(( $(vm_stat | awk '/Pages free/ {gsub(/\./,"",$3); print $3}') * 16384 / 1048576 )) MiB" \
+       "| swap $(sysctl -n vm.swapusage | awk '{print $6}')"
 }
-busy() {
-  pgrep -fl 'python worker.py|pytest|microbench|agree_cascade|cascade_step_probe|step_prof' | grep -v pgrep
+busy() {     # another model on the GPU: refuse
+  pgrep -fl 'python worker.py|microbench|agree_cascade|cascade_step_probe|step_prof' | grep -v pgrep
+}
+noisy() {    # CPU tests of other agents: noise (+-20 %), accepted -- logged only
+  pgrep -fl 'pytest' | grep -v pgrep | cut -c1-160
 }
 if [[ -z $CMMA_FORCE && -n $(busy) ]]; then
   note "REFUSED: the GPU is not free:"; busy | tee -a $ST; exit 2
 fi
+[[ -n $(noisy) ]] && note "WARNING: CPU pytest running (noise accepted): $(noisy | tr '\n' ' ')"
 note "=== start ($PH), tree $T, git $(git -C $T rev-parse --short HEAD)$(git -C $T diff --quiet || echo '+dirty')"
 state
 
@@ -106,10 +111,10 @@ if [[ $PH == *E* ]]; then
     GPID=$!
     for i in {1..60}; do curl -sf http://127.0.0.1:$GP/v1/models > /dev/null && break; sleep 1; done
   }
-  wave() {  # $1 name, $2 prompt tokens, $3 max tokens
+  wave() {  # $1 name, $2 prompt tokens, $3 max tokens, $4 concurrency (16)
     local n0=$(( $(wc -l < $WL) + 1 ))
-    $TPY $T/scripts/bench_concurrency.py --url http://127.0.0.1:$GP --prefix shared --concurrency 16 \
-      --requests-per-level 16 --max-tokens $3 --prompt-tokens $2 --ignore-eos on --probe 64 --cooldown 30 \
+    $TPY $T/scripts/bench_concurrency.py --url http://127.0.0.1:$GP --prefix shared --concurrency ${4:-16} \
+      --requests-per-level ${4:-16} --max-tokens $3 --prompt-tokens $2 --ignore-eos on --probe 64 --cooldown 30 \
       --thinking off --worker-log $WL --out $OUT/E_$1.json > $OUT/E_$1.txt 2>&1 &
     local cp=$!
     while kill -0 $cp 2>/dev/null; do      # the 27 GiB guard of run_cascade.zsh
@@ -125,7 +130,7 @@ if [[ $PH == *E* ]]; then
     k=1; [[ $tag == off ]] && k=0
     start $tag QWEN_CASCADE_KERNEL=$k
     wave ${tag}_8k 8000 256
-    wave ${tag}_32k 32000 128
+    wave ${tag}_32k 32000 128 ${E32_C:-16}
     cleanup
     state
   done

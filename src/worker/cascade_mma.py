@@ -85,11 +85,29 @@ TARGET_TG = 256       # pass-1 threadgroups the chunk size aims for (32 cores)
 HEAD_DIMS = (64, 128, 256)   # the tested ones (tests/test_cascade_mma.py)
 
 
-def tiles(D: int):
-    """(BQ, BK, WM, WN) per head_dim: MLX's D = 256 attention tile (BQ 32, BK
-    16, 4 x 2 simdgroups); a 16-row tile for D <= 128 (the tests' head_dim 64:
-    the WN = 2 score exchange must fit the K / V threadgroup buffer)."""
-    return (32, 16, 4, 2) if D > 128 else (16, 16, 2, 2)
+# (BQ, BK, WM, WN, QREG) pass-1 tiles; QREG = Q held in registers (MLX's
+# q_in_registers) instead of threadgroup memory. TILE (env CASCADE_MMA_TILE,
+# the microbench's sweep: "BQxBK" + "q" for QREG, e.g. "64x32q") overrides
+# `tiles` for every call.
+TILES = {
+    # measured 2026-10-24 (raw/cascade_mma/M2_tile_sweep.txt; prefix half, 8 layers):
+    # 32x16 and 32x32q equal (~4.0 TF at 32K x 16, 2.6-3.1 at 8K x 8); the TQ 2
+    # tiles spill (1.0-2.5 TF); a software-pipelined 32x16 (next K / V block read
+    # into registers during the MMAs) and P V with fp16 P were no faster either
+    "32x16": (32, 16, 4, 2, False),      # MLX's D = 256 prefill tile (the default)
+    "32x32q": (32, 32, 4, 2, True),
+    "64x16q": (64, 16, 4, 2, True),      # 16 rows x G4 = one query block per kv head (TQ 2): spills
+    "64x32q": (64, 32, 4, 2, True),      # (BQ 64 with 8 x 2 simdgroups: 512 threads > the 448 allowed)
+    "16x16": (16, 16, 2, 2, False),      # D <= 128 (the WN = 2 exchange must fit)
+}
+TILE = os.environ.get("CASCADE_MMA_TILE", "")
+
+
+def tiles(D: int, m0: int = 64):
+    """The pass-1 tile for head_dim D and M0 query rows (TILES)."""
+    if TILE:
+        return TILES[TILE]
+    return TILES["32x16"] if D > 128 else TILES["16x16"]
 
 
 # The ops of steel_attention.h
@@ -117,7 +135,7 @@ _IMPL = r"""
 // memory; Q is (Hkv, M0, BD) row-major, K / V are (Hkv, capP, BD) and this
 // threadgroup attends keys [start, end) of its chunk; the output is the
 // chunk's normalized o (fp32) + its m and l.
-template <typename T, int BQ, int BK, int BD, int WM, int WN>
+template <typename T, int BQ, int BK, int BD, int WM, int WN, bool QREG>
 METAL_FUNC void cmma_p1(
     const device T* Q, const device T* K, const device T* V,
     device float* po, device float* pml,
@@ -167,7 +185,7 @@ METAL_FUNC void cmma_p1(
   using MMAFrag_in_t = BaseMMAFrag<T, kFragSize, kFragSize>;
   static_assert(WN == 2, "WN = 2 only");
   constexpr int TQ = BQ / (WM * kFragSize);
-  static_assert(TQ == 1, "one 8-row fragment per simdgroup");
+  static_assert(TQ >= 1 && BQ == WM * kFragSize * TQ, "TQ 8-row fragments per simdgroup");
   constexpr int TK = BK / kFragSize;
   constexpr int TD = BD / kFragSize;
   constexpr int TDh = TD / WN;
@@ -175,6 +193,7 @@ METAL_FUNC void cmma_p1(
   constexpr int TVh = BV / (kFragSize * WN);
 
   MMATile<T, TQ, 1, MMAFrag_in_t> Qtile;
+  MMATile<T, TQ, 1, MMAFrag_in_t> Qtiles[QREG ? TDh : 1];
   MMATile<T, 1, TK, MMAFrag_in_t> Ktile;
   MMATile<AccumType, TQ, TK, MMAFrag_acc_t> Stile;
   MMATile<T, 1, 1, MMAFrag_in_t> Vtile;
@@ -194,10 +213,27 @@ METAL_FUNC void cmma_p1(
   constexpr short Ks_tile_stride = kFragSize * LDK_tgp;
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (q_rows < BQ) {
-    loader_q.load_safe(short2(BD, q_rows));     // rows past M0: zeros, never stored
+  if constexpr (!QREG) {
+    if (q_rows < BQ) {
+      loader_q.load_safe(short2(BD, q_rows));     // rows past M0: zeros, never stored
+    } else {
+      loader_q.load_unsafe();
+    }
   } else {
-    loader_q.load_unsafe();
+    STEEL_PRAGMA_UNROLL
+    for (short dd = 0; dd < TDh; dd++) {
+      STEEL_PRAGMA_UNROLL
+      for (short iq = 0; iq < TQ; iq++) {
+        const int r = tm + sm + iq * kFragSize;
+        const device T* q_src = Q + r * BD + d_half * (BD / WN) + dd * kFragSize + sn;
+        if (q_rows < BQ) {
+          MMAFrag_in_t::load_safe(Qtiles[dd].frag_at(iq, 0), q_src, BD, Int<1>{},
+                                  q_rows - r, (BD / WN) - (dd * kFragSize + sn), Int<0>{}, Int<0>{});
+        } else {
+          MMAFrag_in_t::load(Qtiles[dd].frag_at(iq, 0), q_src, BD, Int<1>{});
+        }
+      }
+    }
   }
 
   constexpr short kRowsPT = decltype(Stile)::kRowsPerThread;
@@ -218,10 +254,14 @@ METAL_FUNC void cmma_p1(
     STEEL_PRAGMA_UNROLL
     for (short dd = 0; dd < TDh; dd++) {
       simdgroup_barrier(mem_flags::mem_none);
-      Qtile.template load<T, 1, 1, LDQ_tgp, 1>(&Qs[Qs_offset + dd * Qs_tile_stride]);
+      if constexpr (!QREG) Qtile.template load<T, 1, 1, LDQ_tgp, 1>(&Qs[Qs_offset + dd * Qs_tile_stride]);
       Ktile.template load<T, 1, 1, LDK_tgp, 1>(&Ks[Ks_offset + dd * Ks_tile_stride]);
       simdgroup_barrier(mem_flags::mem_none);
-      tile_matmad(Stile, Qtile, Ktile, Stile);
+      if constexpr (QREG) {
+        tile_matmad(Stile, Qtiles[dd], Ktile, Stile);
+      } else {
+        tile_matmad(Stile, Qtile, Ktile, Stile);
+      }
     }
     {   // WN = 2: each simdgroup summed half of D; exchange the partial scores
       constexpr int s_xchg_stride = decltype(Stile)::kElemsPerTile * 32;
@@ -285,8 +325,10 @@ METAL_FUNC void cmma_p1(
         simdgroup_barrier(mem_flags::mem_none);
         Vtile.template load<T, 1, 1, LDV_tgp, 1>(&Vs[Vs_offset + ik * kFragSize * LDV_tgp + id * kFragSize]);
         simdgroup_barrier(mem_flags::mem_none);
-        MMAFrag_acc_t::mma(Otile.frag_at(0, id), Stile.frag_at(0, ik), Vtile.frag_at(0, 0),
-                           Otile.frag_at(0, id));
+        STEEL_PRAGMA_UNROLL
+        for (short iq = 0; iq < TQ; iq++)
+          MMAFrag_acc_t::mma(Otile.frag_at(iq, id), Stile.frag_at(iq, ik), Vtile.frag_at(0, 0),
+                             Otile.frag_at(iq, id));
       }
     }
     loader_k.next();
@@ -303,9 +345,15 @@ METAL_FUNC void cmma_p1(
   } else {
     Otile.template store<float, 1, 1>(O, BD);
   }
-  if (sn == 0 && d_half == 0 && row < q_rows) {
-    pml[2 * (p0 + row)] = max_score[0];
-    pml[2 * (p0 + row) + 1] = sum_score[0];
+  if (sn == 0 && d_half == 0) {
+    STEEL_PRAGMA_UNROLL
+    for (short i = 0; i < kRowsPT; ++i) {
+      const int ri = row + i * kFragSize;
+      if (ri < q_rows) {
+        pml[2 * (p0 + ri)] = max_score[i];
+        pml[2 * (p0 + ri) + 1] = sum_score[i];
+      }
+    }
   }
 }
 """
@@ -315,9 +363,9 @@ METAL_FUNC void cmma_p1(
 _P1 = r"""
     constexpr int LDQ = D + 8;
     constexpr int KVS = (BK + 8) * D > BK * (D + 8) ? (BK + 8) * D : BK * (D + 8);
-    threadgroup half Q_smem[BQ * LDQ];
+    threadgroup half Q_smem[QREG ? 1 : BQ * LDQ];
     threadgroup half KV_smem[KVS];
-    cmma_p1<half, BQ, BK, D, WM, WN>(q, k, v, po, pml, meta[0], meta[1], meta[2], meta[3], HKV,
+    cmma_p1<half, BQ, BK, D, WM, WN, QREG>(q, k, v, po, pml, meta[0], meta[1], meta[2], meta[3], HKV,
         SCALE2, Q_smem, KV_smem, thread_index_in_simdgroup, simdgroup_index_in_threadgroup,
         threadgroup_position_in_grid);
 """
@@ -339,6 +387,111 @@ _P2 = r"""
     out[(size_t(h) * M0 + r) * D + d] = acc / L;
     if (d == 0) lse[size_t(h) * M0 + r] = (M + log2(L)) * M_LN2_F;
 """
+
+# Suffix pass (`group_attention`): grid (pieces, Hkv, n) threadgroups of NS
+# simdgroups; piece c of row b covers suffix slots [c * SCH, min(len_b, (c + 1) * SCH))
+# of the fp32 stack (n, Hkv, capS, D); each simdgroup takes a contiguous run of
+# them and computes all REP query heads of its kv head (rattn.py's pass 1 on an
+# fp32 buffer); the NS runs are merged in threadgroup memory. An empty piece
+# writes o = 0, m = -inf, l = 0 (weight 0 in the merge).
+# smeta (int32): capS, NP (pieces per row); slen (int32 [n]): attended slots per row.
+_PS = r"""
+    constexpr int PT = D / 32;
+    const uint lid = thread_index_in_simdgroup;
+    const int s = int(simdgroup_index_in_threadgroup);
+    const int piece = int(threadgroup_position_in_grid.x);
+    const int h = int(threadgroup_position_in_grid.y);
+    const int b = int(threadgroup_position_in_grid.z);
+    const int capS = smeta[0], NP = smeta[1];
+    const int len = slen[b];
+    const int start = piece * SCH, end = min(len, start + SCH);
+    const int sub = (SCH + NS - 1) / NS;
+    const int s0 = min(max(end, start), start + s * sub), s1 = min(max(end, start), s0 + sub);
+    const size_t base = ((size_t(b) * HKV + h) * capS + s0) * D + lid * PT;
+    const device float4* k4 = (const device float4*)(sk + base);
+    const device float4* v4 = (const device float4*)(sv + base);
+    float qr[REP][PT], o[REP][PT], m[REP], l[REP];
+    for (int g = 0; g < REP; ++g) {
+      const device half* qp = q + (size_t(b) * HQ + h * REP + g) * D + lid * PT;
+      for (int i = 0; i < PT; ++i) { qr[g][i] = SCALE2 * float(qp[i]); o[g][i] = 0.0f; }
+      m[g] = -INFINITY; l[g] = 0.0f;
+    }
+    for (int t = s0; t < s1; ++t) {
+      float ka[PT], va[PT];
+      for (int i = 0; i < PT / 4; ++i) {
+        const float4 x = k4[i], y = v4[i];
+        ka[4 * i] = x.x; ka[4 * i + 1] = x.y; ka[4 * i + 2] = x.z; ka[4 * i + 3] = x.w;
+        va[4 * i] = y.x; va[4 * i + 1] = y.y; va[4 * i + 2] = y.z; va[4 * i + 3] = y.w;
+      }
+      for (int g = 0; g < REP; ++g) {
+        float d = 0.0f;
+        for (int i = 0; i < PT; ++i) d += qr[g][i] * ka[i];
+        const float sc = simd_sum(d);
+        const float mn = max(m[g], sc);
+        const float f = fast::exp2(m[g] - mn), e = fast::exp2(sc - mn);
+        m[g] = mn;
+        l[g] = l[g] * f + e;
+        for (int i = 0; i < PT; ++i) o[g][i] = o[g][i] * f + e * va[i];
+      }
+      k4 += D / 4;
+      v4 += D / 4;
+    }
+    threadgroup float o_sh[NS * REP * D];
+    threadgroup float m_sh[NS * REP], l_sh[NS * REP];
+    for (int g = 0; g < REP; ++g) {
+      for (int i = 0; i < PT; ++i) o_sh[(s * REP + g) * D + lid * PT + i] = o[g][i];
+      if (lid == 0) { m_sh[s * REP + g] = m[g]; l_sh[s * REP + g] = l[g]; }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (int g = s; g < REP; g += NS) {
+      float M = -INFINITY;
+      for (int j = 0; j < NS; ++j) M = max(M, m_sh[j * REP + g]);
+      float L = 0.0f, acc[PT];
+      for (int i = 0; i < PT; ++i) acc[i] = 0.0f;
+      for (int j = 0; j < NS; ++j) {
+        const float mj = m_sh[j * REP + g];
+        const float w = mj == -INFINITY ? 0.0f : fast::exp2(mj - M);
+        L += l_sh[j * REP + g] * w;
+        for (int i = 0; i < PT; ++i) acc[i] += w * o_sh[(j * REP + g) * D + lid * PT + i];
+      }
+      const size_t p = ((size_t(b) * NP + piece) * HKV + h) * REP + g;
+      const float inv = L > 0.0f ? 1.0f / L : 0.0f;
+      for (int i = 0; i < PT; ++i) so[p * D + lid * PT + i] = acc[i] * inv;
+      if (lid == 0) { sml[2 * p] = L > 0.0f ? M : -INFINITY; sml[2 * p + 1] = L; }
+    }
+"""
+
+# Final merge (`group_attention`): one threadgroup of D threads per (query row
+# r = b * REP + g, kv head h): the prefix chunks' (o, m, l) and row b's suffix
+# pieces' -> the fp16 output (B, Hq, 1, D). Weights l 2^(m - M) (0 for an empty
+# piece); M is finite (every prefix chunk holds a key).
+_P3 = r"""
+    const int r = int(threadgroup_position_in_grid.x);
+    const int h = int(threadgroup_position_in_grid.y);
+    const int d = int(thread_position_in_threadgroup.x);
+    const int M0 = meta[0], n = meta[4], NP = smeta[1];
+    const int b = r / REP, g = r % REP;
+    float M = -INFINITY;
+    for (int c = 0; c < n; ++c) M = max(M, pml[2 * ((size_t(c) * HKV + h) * M0 + r)]);
+    for (int c = 0; c < NP; ++c) M = max(M, sml[2 * (((size_t(b) * NP + c) * HKV + h) * REP + g)]);
+    float L = 0.0f, acc = 0.0f;
+    for (int c = 0; c < n; ++c) {
+      const size_t p = (size_t(c) * HKV + h) * M0 + r;
+      const float w = pml[2 * p + 1] * fast::exp2(pml[2 * p] - M);
+      L += w;
+      acc += w * po[p * D + d];
+    }
+    for (int c = 0; c < NP; ++c) {
+      const size_t p = ((size_t(b) * NP + c) * HKV + h) * REP + g;
+      const float w = sml[2 * p + 1] * fast::exp2(sml[2 * p] - M);
+      L += w;
+      acc += w * so[p * D + d];
+    }
+    out[((size_t(b) * HQ) + h * REP + g) * D + d] = half(acc / L);
+"""
+SCH = 256             # suffix slots per piece
+SNS = 4               # simdgroups per suffix piece
+_SMETA: dict = {}
 
 _HEADER = None
 _KERNELS: dict = {}
@@ -377,31 +530,46 @@ def _header() -> str:
     return _HEADER
 
 
-def _consts(D, hkv, scale):
-    BQ, BK, WM, WN = tiles(D)
+def _consts(D, hkv, scale, tile):
+    BQ, BK, WM, WN, QREG = tile
     return (f"constexpr int D = {D}, HKV = {hkv}, BQ = {BQ}, BK = {BK}, WM = {WM}, WN = {WN};\n"
+            f"    constexpr bool QREG = {'true' if QREG else 'false'};\n"
             f"    constexpr float SCALE2 = {scale * math.log2(math.e)!r}f;\n")
 
 
-def _kernels(D, hkv, scale):
-    """The two pipelines of one model layout (compiled on first use, ~0.1-0.3 s
-    of Metal compile; `warm` does it at load)."""
-    key = (D, hkv, float(scale))
+_HEADER_S = """
+#include <metal_simdgroup>
+using namespace metal;
+"""
+
+
+def _kernels(D, hkv, scale, tile, hq=16):
+    """The two pipelines of one model layout and pass-1 tile (compiled on first
+    use, ~0.1-0.3 s of Metal compile; `warm` does it at load)."""
+    key = (D, hkv, float(scale), tile, hq)
     k = _KERNELS.get(key)
     if k is None:
         with _LOCK:
             k = _KERNELS.get(key)
             if k is None:
-                c = _consts(D, hkv, scale)
+                c = _consts(D, hkv, scale, tile)
                 # the exact scale in the name: MLX caches libraries by kernel name
-                tag = f"d{D}_k{hkv}_s{float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p')}"
+                tag = f"t{tile[0]}x{tile[1]}{'q' if tile[4] else ''}_d{D}_k{hkv}_s{float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p')}"
                 p1 = mx.fast.metal_kernel(
                     name=f"cmma_p1_{tag}", input_names=["q", "k", "v", "meta"],
                     output_names=["po", "pml"], source=c + _P1, header=_header())
                 p2 = mx.fast.metal_kernel(
                     name=f"cmma_p2_{tag}", input_names=["po", "pml", "meta"],
                     output_names=["out", "lse"], source=c + _P2)
-                k = _KERNELS[key] = (p1, p2)
+                sc = c + (f"    constexpr int REP = {hq // hkv}, HQ = {hq}, SCH = {SCH}, "
+                          f"NS = {SNS};\n")
+                ps = mx.fast.metal_kernel(
+                    name=f"cmma_ps_{tag}_h{hq}", input_names=["q", "sk", "sv", "slen", "smeta"],
+                    output_names=["so", "sml"], source=sc + _PS, header=_HEADER_S)
+                p3 = mx.fast.metal_kernel(
+                    name=f"cmma_p3_{tag}_h{hq}", input_names=["po", "pml", "so", "sml", "meta", "smeta"],
+                    output_names=["out"], source=sc + _P3)
+                k = _KERNELS[key] = (p1, p2, ps, p3)
     return k
 
 
@@ -483,14 +651,15 @@ def prefix_attention(q, k, v, P, scale, chunk=None):
     Hkv, cap = k.shape[1], k.shape[2]
     rep = Hq // Hkv
     m0 = B * rep
-    BQ, BK, WM, WN = tiles(D)
+    tile = tiles(D, m0)
+    BQ, BK, WM, WN, _ = tile
     blocks = -(-m0 // BQ)
     chunk = chunk or pick_chunk(P, Hkv, blocks)
     if chunk % BK:
         raise ValueError(f"cascade_mma: chunk {chunk} not a multiple of {BK}")
     n = items(P, chunk)
     meta = _meta(m0, P, cap, chunk)
-    p1, p2 = _kernels(D, Hkv, scale)
+    p1, p2 = _kernels(D, Hkv, scale, tile, Hq)[:2]
     # (Hkv, M0, D): kv head major, row b * rep + r (metal_kernel copies it
     # row-contiguous: 128 KiB at 16 rows on the 9B)
     qs = q.reshape(B, Hkv, rep, D).transpose(1, 0, 2, 3).reshape(Hkv, m0, D)
@@ -503,6 +672,54 @@ def prefix_attention(q, k, v, P, scale, chunk=None):
     return out, lse
 
 
+def _smeta(capS, n_pieces):
+    key = (capS, n_pieces)
+    hit = _SMETA.get(key)
+    if hit is None:
+        hit = mx.array([capS, n_pieces], dtype=mx.int32)
+        with _LOCK:
+            if len(_SMETA) >= 64:
+                _SMETA.pop(next(iter(_SMETA)))
+            _SMETA[key] = hit
+    return hit
+
+
+def group_attention(q, k, v, P, sk, sv, slen, scale, chunk=None):
+    """The whole grouped attention of one layer on Metal: prefix (pass 1) +
+    the members' fp32 suffix stacks (suffix pass) + one merge into the fp16
+    output. q (B, Hq, 1, D) fp16, k / v the prefix buffers (as
+    prefix_attention), sk / sv (B, Hkv, capS, D) fp32 stacks, slen int32 (B,)
+    attended slots per row (0 = empty suffix) -> (B, Hq, 1, D) fp16. CPU:
+    reference prefix + cascade's mx suffix merge (the caller's fallback)."""
+    check(q, k, v, P)
+    B, Hq, _, D = q.shape
+    Hkv, cap = k.shape[1], k.shape[2]
+    if sk.dtype != F32 or sv.dtype != F32 or sk.shape != (B, Hkv, sk.shape[2], D) or sv.shape != sk.shape:
+        raise ValueError(f"cascade_mma: stacks {tuple(sk.shape)} {sk.dtype} / {tuple(sv.shape)} for "
+                         f"q {tuple(q.shape)}")
+    rep = Hq // Hkv
+    m0 = B * rep
+    tile = tiles(D, m0)
+    BQ, BK, WM, WN, _ = tile
+    blocks = -(-m0 // BQ)
+    chunk = chunk or pick_chunk(P, Hkv, blocks)
+    n = items(P, chunk)
+    capS = sk.shape[2]
+    npc = -(-capS // SCH)
+    meta, smeta = _meta(m0, P, cap, chunk), _smeta(capS, npc)
+    p1, _, ps, p3 = _kernels(D, Hkv, scale, tile, Hq)
+    qs = q.reshape(B, Hkv, rep, D).transpose(1, 0, 2, 3).reshape(Hkv, m0, D)
+    tg = 32 * WM * WN
+    po, pml = p1(inputs=[qs, k, v, meta], grid=(tg * n, Hkv, blocks), threadgroup=(tg, 1, 1),
+                 output_shapes=[(n * Hkv * m0 * D,), (n * Hkv * m0 * 2,)], output_dtypes=[F32, F32])
+    so, sml = ps(inputs=[q, sk, sv, slen, smeta], grid=(32 * SNS * npc, Hkv, B),
+                 threadgroup=(32 * SNS, 1, 1),
+                 output_shapes=[(B * npc * Hkv * rep * D,), (B * npc * Hkv * rep * 2,)],
+                 output_dtypes=[F32, F32])
+    return p3(inputs=[po, pml, so, sml, meta, smeta], grid=(D * m0, Hkv, 1), threadgroup=(D, 1, 1),
+              output_shapes=[(B, Hq, 1, D)], output_dtypes=[mx.float16])[0]
+
+
 def warm(D: int, hkv: int, hq: int, scale: float):
     """Compile both pipelines now (the scheduler thread's first group would
     otherwise pay the Metal compile). Tiny zero inputs: only the layout
@@ -511,4 +728,6 @@ def warm(D: int, hkv: int, hq: int, scale: float):
         return
     q = mx.zeros((1, hq, 1, D), mx.float16)
     kv = mx.zeros((1, hkv, 16, D), mx.float16)
-    mx.eval(prefix_attention(q, kv, kv, 16, scale))
+    st = mx.zeros((1, hkv, 16, D), F32)
+    mx.eval(prefix_attention(q, kv, kv, 16, scale),
+            group_attention(q, kv, kv, 16, st, st, mx.array([1], dtype=mx.int32), scale))

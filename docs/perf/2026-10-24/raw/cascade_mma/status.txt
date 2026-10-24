@@ -1,0 +1,11 @@
+2026-10-24 03:37:58 WARNING: CPU pytest running (noise accepted): 81994 /Users/user/Projects/llm/src/worker/.venv/bin/python -m pytest -q --ignore tests/test_mrqmm.py -p no:cacheprovider 
+2026-10-24 03:37:58 === start (T M), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 4eecc91+dirty
+2026-10-24 03:37:58 state: therm  | load { 3.72 4.15 4.56 } | free 12937 MiB | swap 5490.94M
+2026-10-24 03:37:58 phase T start
+2026-10-24 03:38:13 phase T Metal tests rc=0: 130 passed, 2 warnings in 13.34s
+2026-10-24 03:38:24 phase T CPU tests rc=0: 74 passed, 110 skipped, 2 warnings in 8.82s
+2026-10-24 03:38:24 state: therm  | load { 4.56 4.32 4.61 } | free 16406 MiB | swap 5490.94M
+2026-10-24 03:38:24 phase M start (bench_attn.py)
+2026-10-24 03:39:36 phase M end rc=0: 264 lines
+2026-10-24 03:39:36 state: therm  | load { 5.08 4.60 4.70 } | free 16659 MiB | swap 5482.94M
+2026-10-24 03:39:36 === done (T M)

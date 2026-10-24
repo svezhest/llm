@@ -376,8 +376,10 @@ def attention(queries, group: "PrefixGroup", layer, scale):
     if group._pending and layer not in group._appended:
         raise RuntimeError(f"cascade: attention() on layer {layer!r} before its append() in this step")
     kc, vc, sk, sv = group.kc[layer], group.vc[layer], group.sk[layer], group.sv[layer]
-    smask = group.smask()
+    smask = None if group.kernel and cascade_mma.use_kernel() else group.smask()
     if group.kernel:
+        if cascade_mma.use_kernel():    # prefix + suffix + merge on Metal, fp16 out
+            return cascade_mma.group_attention(queries, kc, vc, group.P, sk, sv, group.slens(), scale)
         op, lse = cascade_mma.prefix_attention(queries, kc, vc, group.P, scale)
         return compiled_merge(scale, queries, sk)(queries, op, lse, sk, sv, smask)
     fn = compiled(scale, queries, kc, group.pmask, sk)
@@ -433,6 +435,7 @@ class PrefixGroup:
         self._failed = False            # abort_step's eval failed: the group is unusable
         self._upos = None
         self._smask = None
+        self._slens = None
 
     # ---- construction
 
@@ -575,7 +578,7 @@ class PrefixGroup:
             raise RuntimeError(f"cascade: {what} inside a decode step")
 
     def _changed(self):
-        self._upos = self._smask = None
+        self._upos = self._smask = self._slens = None
 
     # ---- membership
 
@@ -738,7 +741,7 @@ class PrefixGroup:
         self._upos = mx.broadcast_to(lens[:, None, None, None], (self.n, self.Hkv, 1, self.D))
         self._appended = set()
         self._pending = True
-        self._smask = None
+        self._smask = self._slens = None
 
     def append(self, layer, keys, values):
         """Write this step's token (keys/values (n, Hkv, 1, D) in member order
@@ -796,6 +799,14 @@ class PrefixGroup:
         except Exception as e:
             self._failed = True
             raise RuntimeError("cascade: abort_step could not restore the stacks; drop the group") from e
+
+    def slens(self):
+        """(n,) int32: the suffix slots attended per row -- S_j, + 1 inside a
+        step (kernel mode's suffix pass; the counterpart of `smask`). Cached
+        until the lengths / cap change."""
+        if self._slens is None:
+            self._slens = mx.array([s + (1 if self._pending else 0) for s in self._lens], dtype=mx.int32)
+        return self._slens
 
     def smask(self):
         """(n, 1, 1, cap) fp32 additive suffix mask: 0 for slots < S_j (+1
