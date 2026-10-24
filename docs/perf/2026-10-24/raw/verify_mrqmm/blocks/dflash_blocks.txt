@@ -1,0 +1,104 @@
+loaded; max_batch 16, verify exact max T 8
+r0 code0 off/ad   n=256 tps=  46.9 accept= 53.2%
+r0 code0 on/ad    n=256 tps=  58.0 accept= 53.2%
+r0 code0 on/6     n=256 tps=  59.4 accept= 45.4%
+r0 code0 on/8     n=256 tps=  66.6 accept= 39.7%
+r0 code0 on/10    n=256 tps=  54.9 accept= 33.0%
+r0 code0 on/12    n=256 tps=  54.9 accept= 27.0%
+r0 code1 on/12    n=256 tps=  42.0 accept= 18.1%
+r0 code1 on/10    n=256 tps=  43.6 accept= 22.8%
+r0 code1 on/8     n=256 tps=  53.5 accept= 27.7%
+r0 code1 on/6     n=256 tps=  54.8 accept= 37.3%
+r0 code1 on/ad    n=256 tps=  52.3 accept= 45.0%
+r0 code1 off/ad   n=256 tps=  42.8 accept= 45.0%
+r0 code2 off/ad   n=256 tps=  46.3 accept= 49.6%
+r0 code2 on/ad    n=256 tps=  64.0 accept= 49.6%
+r0 code2 on/6     n=256 tps=  65.5 accept= 49.1%
+r0 code2 on/8     n=256 tps=  67.6 accept= 38.1%
+r0 code2 on/10    n=256 tps=  53.7 accept= 30.4%
+r0 code2 on/12    n=256 tps=  53.7 accept= 25.4%
+r0 code3 on/12    n=256 tps=  58.9 accept= 28.7%
+r0 code3 on/10    n=256 tps=  57.2 accept= 33.5%
+r0 code3 on/8     n=256 tps=  72.0 accept= 42.2%
+r0 code3 on/6     n=256 tps=  65.7 accept= 50.1%
+r0 code3 on/ad    n=256 tps=  62.8 accept= 56.8%
+r0 code3 off/ad   n=256 tps=  48.3 accept= 56.8%
+r0 code4 off/ad   n=256 tps=  51.1 accept= 59.2%
+r0 code4 on/ad    n=256 tps=  71.4 accept= 59.2%
+r0 code4 on/6     n=256 tps=  67.3 accept= 52.3%
+r0 code4 on/8     n=256 tps=  77.3 accept= 47.9%
+r0 code4 on/10    n=256 tps=  58.5 accept= 35.9%
+r0 code4 on/12    n=256 tps=  61.4 accept= 31.6%
+r1 code0 off/ad   n=256 tps=  46.1 accept= 53.2%
+r1 code0 on/12    n=256 tps=  53.7 accept= 27.0%
+r1 code0 on/10    n=256 tps=  54.1 accept= 33.0%
+r1 code0 on/8     n=256 tps=  66.4 accept= 39.7%
+r1 code0 on/6     n=256 tps=  59.0 accept= 45.4%
+r1 code0 on/ad    n=256 tps=  57.6 accept= 53.2%
+r1 code1 on/ad    n=256 tps=  48.6 accept= 45.0%
+r1 code1 on/6     n=256 tps=  50.3 accept= 37.3%
+r1 code1 on/8     n=256 tps=  49.0 accept= 27.7%
+r1 code1 on/10    n=256 tps=  39.8 accept= 22.8%
+r1 code1 on/12    n=256 tps=  39.5 accept= 18.1%
+r1 code1 off/ad   n=256 tps=  36.1 accept= 45.0%
+r1 code2 off/ad   n=256 tps=  41.0 accept= 49.6%
+r1 code2 on/12    n=256 tps=  48.2 accept= 25.4%
+r1 code2 on/10    n=256 tps=  47.2 accept= 30.4%
+r1 code2 on/8     n=256 tps=  60.2 accept= 38.1%
+r1 code2 on/6     n=256 tps=  63.1 accept= 49.1%
+r1 code2 on/ad    n=256 tps=  56.9 accept= 49.6%
+r1 code3 on/ad    n=256 tps=  60.3 accept= 56.8%
+r1 code3 on/6     n=256 tps=  60.9 accept= 50.1%
+r1 code3 on/8     n=256 tps=  67.6 accept= 42.2%
+r1 code3 on/10    n=256 tps=  52.1 accept= 33.5%
+r1 code3 on/12    n=256 tps=  52.0 accept= 28.7%
+r1 code3 off/ad   n=256 tps=  45.8 accept= 56.8%
+r1 code4 off/ad   n=256 tps=  46.4 accept= 59.2%
+r1 code4 on/12    n=256 tps=  58.0 accept= 31.6%
+r1 code4 on/10    n=256 tps=  55.5 accept= 35.9%
+r1 code4 on/8     n=256 tps=  68.1 accept= 47.9%
+r1 code4 on/6     n=256 tps=  63.6 accept= 52.3%
+r1 code4 on/ad    n=256 tps=  67.4 accept= 59.2%
+r2 code0 on/6     n=256 tps=  59.0 accept= 45.4%
+r2 code0 on/8     n=256 tps=  64.3 accept= 39.7%
+r2 code0 on/10    n=256 tps=  55.9 accept= 33.0%
+r2 code0 on/12    n=256 tps=  52.8 accept= 27.0%
+r2 code0 off/ad   n=256 tps=  45.6 accept= 53.2%
+r2 code0 on/ad    n=256 tps=  57.5 accept= 53.2%
+r2 code1 on/ad    n=256 tps=  48.9 accept= 45.0%
+r2 code1 off/ad   n=256 tps=  41.7 accept= 45.0%
+r2 code1 on/12    n=256 tps=  41.2 accept= 18.1%
+r2 code1 on/10    n=256 tps=  40.3 accept= 22.8%
+r2 code1 on/8     n=256 tps=  50.8 accept= 27.7%
+r2 code1 on/6     n=256 tps=  53.0 accept= 37.3%
+r2 code2 on/6     n=256 tps=  64.1 accept= 49.1%
+r2 code2 on/8     n=256 tps=  61.8 accept= 38.1%
+r2 code2 on/10    n=256 tps=  52.1 accept= 30.4%
+r2 code2 on/12    n=256 tps=  46.4 accept= 25.4%
+r2 code2 off/ad   n=256 tps=  40.8 accept= 49.6%
+r2 code2 on/ad    n=256 tps=  55.7 accept= 49.6%
+r2 code3 on/ad    n=256 tps=  58.8 accept= 56.8%
+r2 code3 off/ad   n=256 tps=  46.8 accept= 56.8%
+r2 code3 on/12    n=256 tps=  53.1 accept= 28.7%
+r2 code3 on/10    n=256 tps=  48.1 accept= 33.5%
+r2 code3 on/8     n=256 tps=  63.3 accept= 42.2%
+r2 code3 on/6     n=256 tps=  58.7 accept= 50.1%
+r2 code4 on/6     n=256 tps=  60.0 accept= 52.3%
+r2 code4 on/8     n=256 tps=  68.6 accept= 47.9%
+r2 code4 on/10    n=256 tps=  53.1 accept= 35.9%
+r2 code4 on/12    n=256 tps=  55.8 accept= 31.6%
+r2 code4 off/ad   n=256 tps=  45.6 accept= 59.2%
+r2 code4 on/ad    n=256 tps=  62.3 accept= 59.2%
+
+== speed: median decode tok/s over rounds x tasks (median of per-task medians) ==
+off/ad   tps   46.1  per task  46.1  41.7  41.0  46.8  46.4  accept  53.2%  == plain 0/15
+on/ad    tps   57.6  per task  57.6  48.9  56.9  60.3  67.4  accept  53.2%  == plain 0/15
+on/6     tps   60.9  per task  59.0  53.0  64.1  60.9  63.6  accept  49.1%  == plain 0/15
+on/8     tps   66.4  per task  66.4  50.8  61.8  67.6  68.6  accept  39.7%  == plain 0/15
+on/10    tps   52.1  per task  54.9  40.3  52.1  52.1  55.5  accept  33.0%  == plain 0/15
+on/12    tps   53.1  per task  53.7  41.2  48.2  53.1  58.0  accept  27.0%  == plain 0/15
+
+== identity vs plain greedy, 16 tasks ==
+on/8     identical 15/16; divergence at [69]
+peak 11.06 GB
+wrote /tmp/perf/verify_mrqmm/blocks/dflash_blocks.json

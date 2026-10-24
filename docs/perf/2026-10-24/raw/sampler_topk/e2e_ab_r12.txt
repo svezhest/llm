@@ -1,0 +1,13 @@
+loaded; max_batch 16
+round 0 off: per-request  17.4 tok/s, step  57.5 ms, aggregate  277.5 tok/s
+round 1 on : per-request  18.7 tok/s, step  53.4 ms, aggregate  298.7 tok/s
+round 2 on : per-request  19.2 tok/s, step  52.2 ms, aggregate  305.5 tok/s
+round 3 off: per-request  17.9 tok/s, step  55.9 ms, aggregate  285.4 tok/s
+round 4 off: per-request  17.5 tok/s, step  57.1 ms, aggregate  279.3 tok/s
+round 5 on : per-request  18.3 tok/s, step  54.5 ms, aggregate  292.5 tok/s
+round 6 on : per-request  18.1 tok/s, step  55.1 ms, aggregate  289.2 tok/s
+round 7 off: per-request  16.5 tok/s, step  60.6 ms, aggregate  263.0 tok/s
+round 8 off: per-request  15.8 tok/s, step  63.3 ms, aggregate  251.8 tok/s
+round 9 on : per-request  16.7 tok/s, step  59.9 ms, aggregate  266.1 tok/s
+round 10 on : per-request  16.5 tok/s, step  60.7 ms, aggregate  262.5 tok/s
+round 11 off: per-request  15.3 tok/s, step  65.5 ms, aggregate  243.3 tok/s

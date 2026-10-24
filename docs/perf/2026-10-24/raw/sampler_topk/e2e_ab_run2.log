@@ -1,0 +1,31 @@
+2026-10-24 03:07:56,745 INFO qwen.worker loading model: /Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit
+2026-10-24 03:07:56,745 WARNING qwen.worker no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+2026-10-24 03:07:56,811 WARNING root Checkpoint has no weights for module(s): vision_tower. Disabling them.
+2026-10-24 03:07:58,918 INFO qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-10-24 03:07:58,918 INFO qwen.worker eos token ids: [248044, 248046]
+2026-10-24 03:08:00,511 INFO qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-10-24 03:08:00,605 INFO qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-24 03:08:00,606 INFO qwen.worker prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-10-24 03:08:01,255 INFO worker.pfqmm pfqmm 8-bit g64: tested, 249 modules on (lm_head K=4096 N=248320 M=256/264/288/296)
+2026-10-24 03:08:01,255 INFO worker.pfqmm pfqmm: 249 modules on the 64-row prefill qmm, >= 64 rows (8-bit g64 tested)
+2026-10-24 03:08:01,258 INFO worker.mrqmm mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8); left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-24 03:08:01,373 INFO qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 24 layers
+2026-10-24 03:08:01,375 INFO qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 1.00, prompt cache off
+2026-10-24 03:08:01,375 INFO qwen.worker cascade attention (QWEN_CASCADE): off (no prompt cache)
+2026-10-24 03:08:01,375 INFO qwen.worker model loaded in 3766 ms
+2026-10-24 03:08:11,404 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=13.7 mean_rows=16.00 step_ms=56.9 gbps=178 decode_s=7.8 prefill_s=2.0 reserved=1.81/15.75GiB pcache=0.00GiB active=10.09GiB groups=0 grouped=0
+2026-10-24 03:08:21,425 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=14.7 mean_rows=16.00 step_ms=54.8 gbps=186 decode_s=8.1 prefill_s=1.9 reserved=1.81/15.75GiB pcache=0.00GiB active=9.99GiB groups=0 grouped=0
+2026-10-24 03:08:31,425 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=19.7 mean_rows=16.00 step_ms=50.8 gbps=200 decode_s=10.0 prefill_s=0.0 reserved=1.81/15.75GiB pcache=0.00GiB active=10.09GiB groups=0 grouped=0
+2026-10-24 03:08:41,451 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=14.6 mean_rows=16.00 step_ms=54.6 gbps=186 decode_s=8.0 prefill_s=2.0 reserved=1.81/15.75GiB pcache=0.00GiB active=10.09GiB groups=0 grouped=0
+2026-10-24 03:08:51,515 INFO qwen.worker batch: rows=12 waiting=4 prefilling=- steps/s=14.3 mean_rows=16.00 step_ms=57.8 gbps=176 decode_s=8.3 prefill_s=1.7 reserved=1.36/15.75GiB pcache=0.00GiB active=9.53GiB groups=0 grouped=0
+2026-10-24 03:09:01,561 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=16.4 mean_rows=16.00 step_ms=57.5 gbps=176 decode_s=9.5 prefill_s=0.6 reserved=1.81/15.75GiB pcache=0.00GiB active=9.99GiB groups=0 grouped=0
+2026-10-24 03:09:11,579 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=12.7 mean_rows=16.00 step_ms=59.4 gbps=171 decode_s=7.5 prefill_s=2.4 reserved=1.81/15.75GiB pcache=0.00GiB active=9.99GiB groups=0 grouped=0
+2026-10-24 03:09:21,608 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=16.9 mean_rows=16.00 step_ms=59.3 gbps=171 decode_s=10.0 prefill_s=0.0 reserved=1.81/15.75GiB pcache=0.00GiB active=9.99GiB groups=0 grouped=0
+2026-10-24 03:09:31,647 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=12.3 mean_rows=16.00 step_ms=61.3 gbps=166 decode_s=7.5 prefill_s=2.5 reserved=1.81/15.75GiB pcache=0.00GiB active=10.09GiB groups=0 grouped=0
+2026-10-24 03:09:41,651 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=16.3 mean_rows=16.00 step_ms=61.4 gbps=166 decode_s=10.0 prefill_s=0.0 reserved=1.81/15.75GiB pcache=0.00GiB active=10.21GiB groups=0 grouped=0
+2026-10-24 03:09:51,674 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=12.8 mean_rows=16.00 step_ms=60.1 gbps=169 decode_s=7.7 prefill_s=2.3 reserved=1.81/15.75GiB pcache=0.00GiB active=10.09GiB groups=0 grouped=0
+2026-10-24 03:10:01,818 INFO qwen.worker batch: rows=8 waiting=8 prefilling=- steps/s=15.1 mean_rows=16.00 step_ms=58.7 gbps=174 decode_s=9.0 prefill_s=1.1 reserved=0.91/15.75GiB pcache=0.00GiB active=9.31GiB groups=0 grouped=0
+2026-10-24 03:10:11,837 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=16.8 mean_rows=16.00 step_ms=53.4 gbps=190 decode_s=9.0 prefill_s=1.0 reserved=1.81/15.75GiB pcache=0.00GiB active=9.99GiB groups=0 grouped=0
+2026-10-24 03:10:21,844 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=14.7 mean_rows=16.00 step_ms=53.3 gbps=191 decode_s=7.8 prefill_s=2.1 reserved=1.81/15.75GiB pcache=0.00GiB active=9.99GiB groups=0 grouped=0
+2026-10-24 03:10:31,885 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=18.7 mean_rows=16.00 step_ms=53.4 gbps=191 decode_s=10.0 prefill_s=0.0 reserved=1.81/15.75GiB pcache=0.00GiB active=10.11GiB groups=0 grouped=0
+2026-10-24 03:10:41,934 INFO qwen.worker batch: rows=16 waiting=0 prefilling=- steps/s=13.8 mean_rows=16.00 step_ms=56.6 gbps=179 decode_s=7.9 prefill_s=2.1 reserved=1.81/15.75GiB pcache=0.00GiB active=10.09GiB groups=0 grouped=0

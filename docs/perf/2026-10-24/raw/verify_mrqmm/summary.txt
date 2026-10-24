@@ -1,0 +1,20 @@
+== 0. Metal correctness (small shapes) ==
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+22 passed, 2 warnings in 2.50s
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+== 1. DFlash A/B in-process (9B + drafter): speed x 3 rounds, identity on 16 tasks ==
+== speed: median decode tok/s over rounds x tasks (median of per-task medians) ==
+plain    tps   34.5  per task  34.6  34.4  34.5  34.5  34.8  accept   0.0%  == plain 15/15
+off/ad   tps   39.2  per task  39.2  35.4  38.2  41.2  44.9  accept  53.2%  == plain 15/15
+head/ad  tps   41.4  per task  41.4  36.9  40.2  43.1  45.7  accept  53.2%  == plain 15/15
+on/ad    tps   52.4  per task  51.9  43.4  52.4  52.9  62.6  accept  53.2%  == plain 15/15
+off/8    tps   34.4  per task  34.1  26.3  34.4  36.0  40.3  accept  39.7%  == plain 15/15
+on/8     tps   59.1  per task  59.1  45.1  56.1  60.9  70.4  accept  39.7%  == plain 15/15
+off/16   tps   29.0  per task  29.0  20.5  28.2  29.7  33.6  accept  21.0%  == plain 15/15
+on/16    tps   48.6  per task  48.6  34.2  46.2  48.6  56.7  accept  21.4%  == plain 15/15
+
+== identity vs plain greedy, 16 tasks ==
+off/ad   identical 13/16; divergence at [121, 105, 55]
+on/ad    identical 13/16; divergence at [105, 85, 55]
+on/16    identical 13/16; divergence at [105, 85, 55]
+peak 11.89 GB

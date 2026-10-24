@@ -1,0 +1,36 @@
+== 0. Metal correctness at V = 248320 ==
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 21 deselected, 2 warnings in 2.14s
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+== 1. sampler microbench, off vs on interleaved ==
+card       B= 1  off   2.91 ms  on   1.29 ms  x2.26
+card       B= 4  off   3.17 ms  on   1.64 ms  x1.94
+card       B= 8  off   4.40 ms  on   2.03 ms  x2.17
+card       B=16  off   7.79 ms  on   3.46 ms  x2.25
+card-think B= 1  off   1.30 ms  on   0.80 ms  x1.62
+card-think B= 4  off   2.56 ms  on   1.35 ms  x1.90
+card-think B= 8  off   4.28 ms  on   2.00 ms  x2.14
+card-think B=16  off   7.81 ms  on   3.49 ms  x2.24
+topk50     B= 1  off   0.84 ms  on   0.76 ms  x1.10
+topk50     B= 4  off   1.65 ms  on   1.22 ms  x1.35
+topk50     B= 8  off   3.08 ms  on   2.25 ms  x1.37
+topk50     B=16  off   4.79 ms  on   3.42 ms  x1.40
+card+minp  B= 1  off   1.42 ms  on   0.82 ms  x1.73
+card+minp  B= 4  off   3.12 ms  on   1.54 ms  x2.02
+card+minp  B= 8  off   4.47 ms  on   1.99 ms  x2.25
+card+minp  B=16  off   8.12 ms  on   3.50 ms  x2.32
+piece topk20       B=16:   2.46 ms
+piece argsort      B=16:   2.46 ms
+piece argpartition B=16:   2.47 ms
+piece categorical  B=16:   0.96 ms
+wrote /tmp/perf/sampler_topk/sampler_ab.json
+== 2. end-to-end, 9B, 16 card-sampled rows, rounds off/on/on/off ==
+loaded; max_batch 16
+round 0 off: per-request  17.6 tok/s, step  56.8 ms, aggregate  280.9 tok/s
+round 1 on : per-request  17.2 tok/s, step  58.0 ms, aggregate  274.8 tok/s
+round 2 on : per-request  16.8 tok/s, step  59.4 ms, aggregate  268.5 tok/s
+round 3 off: per-request  16.2 tok/s, step  61.6 ms, aggregate  259.1 tok/s
+round 4 off: per-request  16.9 tok/s, step  59.1 ms, aggregate  270.0 tok/s
+round 5 on : per-request  18.8 tok/s, step  53.3 ms, aggregate  299.3 tok/s
+round 6 on : per-request  18.8 tok/s, step  53.3 ms, aggregate  299.4 tok/s
+round 7 off: per-request  17.2 tok/s, step  58.0 ms, aggregate  274.8 tok/s

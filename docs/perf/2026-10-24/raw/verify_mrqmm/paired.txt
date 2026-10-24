@@ -1,0 +1,22 @@
+/tmp/perf/verify_mrqmm/dflash_ab.json (peak 11.89 GB)
+  plain    x0.839 (q1 0.77 q3 0.90) vs off/ad, paired n=15
+  off/ad   x1.000 (q1 1.00 q3 1.00) vs off/ad, paired n=15
+  head/ad  x1.047 (q1 1.04 q3 1.06) vs off/ad, paired n=15
+  on/ad    x1.315 (q1 1.27 q3 1.38) vs off/ad, paired n=15
+  off/8    x0.863 (q1 0.82 q3 0.90) vs off/ad, paired n=15
+  on/8     x1.480 (q1 1.43 q3 1.51) vs off/ad, paired n=15
+  off/16   x0.723 (q1 0.67 q3 0.74) vs off/ad, paired n=15
+  on/16    x1.178 (q1 1.10 q3 1.24) vs off/ad, paired n=15
+/tmp/perf/verify_mrqmm/blocks/dflash_blocks.json (peak 11.06 GB)
+  off/ad   x1.000 (q1 1.00 q3 1.00) vs off/ad, paired n=15
+  on/ad    x1.317 (q1 1.25 q3 1.38) vs off/ad, paired n=15
+  on/6     x1.317 (q1 1.28 q3 1.39) vs off/ad, paired n=15
+  on/8     x1.461 (q1 1.36 q3 1.49) vs off/ad, paired n=15
+  on/10    x1.160 (q1 1.10 q3 1.18) vs off/ad, paired n=15
+  on/12    x1.160 (q1 1.13 q3 1.20) vs off/ad, paired n=15
+/tmp/perf/verify_mrqmm/blocks/dflash_ad8.json (peak 11.45 GB)
+  plain    x0.815 (q1 0.75 q3 0.86) vs off/ad, paired n=15
+  off/ad   x1.000 (q1 1.00 q3 1.00) vs off/ad, paired n=15
+  on/8     x1.471 (q1 1.41 q3 1.61) vs off/ad, paired n=15
+  on/ad8   x1.398 (q1 1.30 q3 1.46) vs off/ad, paired n=15
+  off/ad8  x1.035 (q1 0.97 q3 1.07) vs off/ad, paired n=15
