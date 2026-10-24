@@ -211,3 +211,33 @@ def test_dflash_rounds_on_mrqmm(mr, monkeypatch):
     assert run(sched, [request(p, 30, "a")])["a"] == plain
     assert mr.calls and all(3 <= c[0][0] <= 16 for c in mr.calls)
     assert callable(sched.eng.draft.lm_head) and sched.eng.draft.lm_head is not lm.lm_head
+
+
+def test_setup_at_load(mr, monkeypatch):
+    """Engine.load's step: nothing covered -> off (block untouched); "head" ->
+    the head only; "1" -> the fused GDN verify + the fixed block 8 unless
+    QWEN_DRAFT_BLOCK is set."""
+    import types
+    draft = types.SimpleNamespace(prefer_requested_block_size=False)
+    knob(monkeypatch, "1")
+    monkeypatch.setattr(worker, "DRAFT_BLOCK", 0)
+    plain = build_lm("dense", 8, mx.float16)              # mrqmm not installed: nothing covered
+    assert worker._setup_verify_mrqmm(plain, draft) == "off: nothing covered"
+    assert worker.DRAFT_BLOCK == 0 and not draft.prefer_requested_block_size
+    lm = model(mr)
+    knob(monkeypatch, "head")
+    assert worker._setup_verify_mrqmm(lm, draft) == "drafter lm_head only"
+    assert worker.DRAFT_BLOCK == 0 and not draft.prefer_requested_block_size
+    knob(monkeypatch, "1")
+    monkeypatch.setattr(worker, "DRAFT_BLOCK", 12)          # explicit: kept
+    assert "block 12" in worker._setup_verify_mrqmm(lm, draft)
+    assert worker.DRAFT_BLOCK == 12 and not draft.prefer_requested_block_size
+    monkeypatch.setattr(worker, "DRAFT_BLOCK", 0)
+    how = worker._setup_verify_mrqmm(lm, draft)
+    assert worker.DRAFT_BLOCK == worker.VERIFY_MR_BLOCK == 8 and draft.prefer_requested_block_size
+    assert "6 GDN layers" in how and "block 8" in how
+
+
+def test_default_is_on():
+    if "QWEN_VERIFY_MRQMM" not in os.environ:
+        assert worker.VERIFY_MRQMM == "1" and worker.VERIFY_MR and worker.VERIFY_MR_HEAD

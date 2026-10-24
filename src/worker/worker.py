@@ -2206,7 +2206,7 @@ def _fast_gdn_kernel(q, k, v, g, beta, state, mask=None):
     return _GDN_KERNEL(q, k, v, g, beta, state, mask)
 
 
-# QWEN_VERIFY_MRQMM (0): DFlash rounds through mrqmm, the batched-decode
+# QWEN_VERIFY_MRQMM (1): DFlash rounds through mrqmm, the batched-decode
 #   kernel. "1": a verify block of 3..16 tokens (1, T, K) runs every linear
 #   mrqmm.install covered (8-bit affine g64 fp16, N >= 512: on the 9B all of
 #   them incl. lm_head; the GDN in-projections as their fused concatenation,
@@ -2223,11 +2223,19 @@ def _fast_gdn_kernel(q, k, v, g, beta, state, mask=None):
 #   output != plain greedy byte for byte (the batched-decode numerics class,
 #   9B teacher-forced top-1 >= 99.7 %); "head" keeps DFlash == greedy (the
 #   target verifies; the drafts only move acceptance and the adaptive block).
-#   Off unless a drafter is loaded; installs mrqmm also at max_batch < 3
-#   (decode at B <= 2 never takes it). docs/perf/2026-10-24/design/verify_mrqmm.md.
-VERIFY_MRQMM = os.environ.get("QWEN_VERIFY_MRQMM", "0") or "0"
+#   Default 1 (GPU 2026-10-24: DFlash x1.47 with the fixed block 8 below, 15/16
+#   answers == plain greedy vs 13/16 today); without a drafter nothing changes.
+#   Installs mrqmm also at max_batch < 3 when a drafter is loaded (decode at
+#   B <= 2 never takes it). docs/perf/2026-10-24/design/verify_mrqmm.md.
+VERIFY_MRQMM = os.environ.get("QWEN_VERIFY_MRQMM", "1") or "1"
 VERIFY_MR = VERIFY_MRQMM == "1"
 VERIFY_MR_HEAD = VERIFY_MRQMM in ("1", "head")
+# The DFlash block with "1" when QWEN_DRAFT_BLOCK is unset / 0 and mrqmm covers
+# something: fixed 8. GPU 2026-10-24 (9B, paired vs today's adaptive DFlash):
+# fixed 8 x1.46-1.48, adaptive x1.32, adaptive capped at 8 x1.40, 16 x1.18 —
+# mrqmm runs 3..8 rows as one bucket (~33 ms of linears), 9..16 as the next
+# (~46 ms), and acceptance falls with depth. An explicit QWEN_DRAFT_BLOCK wins.
+VERIFY_MR_BLOCK = 8
 
 
 def _verify_mr(linear, x):
@@ -2289,6 +2297,25 @@ def _install_verify_mrqmm(lm):
         ls[0].__dict__["_verify_fused"] = (tuple(map(id, ls)), f[0], f[1], f[2], f[3], f[7])
         n += 1
     return n
+
+
+def _setup_verify_mrqmm(lm, draft):
+    """At load, with a drafter and QWEN_VERIFY_MRQMM 1 / head: nothing when
+    mrqmm covers no module (QWEN_MRQMM=0, QWEN_FP16=0, the 5-bit 27B); else
+    the fused GDN verify (1) and, unless QWEN_DRAFT_BLOCK is set, the fixed
+    block VERIFY_MR_BLOCK. -> what the load log says."""
+    global DRAFT_BLOCK
+    mr = sys.modules.get("mrqmm")
+    if mr is None or not any(type(m) is mr.MRQuantizedLinear for _, m in lm.named_modules()):
+        return "off: nothing covered"
+    if not VERIFY_MR:
+        return "drafter lm_head only"
+    gdn = _install_verify_mrqmm(lm)
+    if not DRAFT_BLOCK:
+        DRAFT_BLOCK = VERIFY_MR_BLOCK
+        draft.prefer_requested_block_size = True
+    return (f"verify blocks of 3..16 tokens + drafter lm_head ({gdn} GDN layers fused), "
+            f"block {DRAFT_BLOCK}")
 
 
 def _verify_head(head):
@@ -4757,9 +4784,8 @@ class Engine:
         if VERIFY_MRQMM not in ("0", "1", "head"):
             log.warning("QWEN_VERIFY_MRQMM=%r: not 0 / 1 / head, off", VERIFY_MRQMM)
         if self.draft is not None and VERIFY_MR_HEAD:
-            log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM,
-                     f"verify blocks of 3..16 tokens + drafter lm_head ({_install_verify_mrqmm(lm)} "
-                     "GDN layers fused)" if VERIFY_MR else "drafter lm_head only")
+            how = _setup_verify_mrqmm(lm, self.draft)
+            log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
         reserve = _prefill_reserve(lm.args.num_attention_heads)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
