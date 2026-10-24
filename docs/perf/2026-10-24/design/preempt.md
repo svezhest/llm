@@ -30,27 +30,35 @@ CPU-only work so far. The GPU plan is at the end.
 3. **Store** (`_store_preempt`). The entry is ids = prompt + generated[:-1] (exactly the row's KV), with
    the row's recurrent state as its end state.
    - It goes through `pc.store` with `reply=`: resumable at its end, which is no slab end.
-   - It inherits the prompt entry's chain when that entry is still there, so only the generated part is
-     copied. Otherwise everything is copied.
-   - `tick=False`, and the prompt entry's clock is kept. The usual limit is budget + prefill reserve −
-     reserved, with the row still counted, because its KV is still alive during the copy.
-   - The copy and the end-state gathers are evaluated right there (a host wait for a rare event, before
-     the step).
+   - **No copy** (review 2026-10-24): the row is dropped first, and its own KV buffers become the
+     entry's single segment over `[0, len)` (`_Seg.adopt`: views `[..., :len, :]`; nothing writes them
+     again, the row never steps). `pc.store(seg=…)` attaches it instead of copying. The entry inherits
+     nothing and absorbs the row's prompt entry (its checkpoints move over), so `_regrow(ahead=1)` having
+     evicted that prompt entry first costs nothing. The buffers keep their capacity tail (< one
+     256-token KVCache step), which `nbytes` does not count.
+   - The limit is budget + prefill reserve − reserved **without the row** (its reservation is released
+     before the store: its buffers are what the entry holds). Before this fix the limit still counted
+     the row and the entry needed a fresh copy, so under real pressure it was almost never kept and the
+     resume was a cold recompute. The real-budget test now checks "KV kept" and a full HIT.
+   - `tick=False`, and the prompt entry's clock is kept.
+   - The end-state gathers are evaluated right there (a host wait for a rare event, before the step). If
+     that eval fails, the entry goes and the entries it absorbed come back.
    - Unlike a reply store, the entry is kept also when the output has reasoning: the resumed prompt
      contains it exactly.
 4. **Requeue.**
    - The row is dropped without an event: `done`, its reservation released, `fed` = None (so no reply
      store at the drop).
-   - The request goes back to the **head** of the queue (`waiting.appendleft`) with `ids` = prompt +
+   - The request goes back to the **head** of the queue with `ids` = prompt +
      generated, `max_tokens` −= sent, `carry` = (sampler, penalties), `preempts` += 1, and its `bounds` /
-     `peeked` / `keep_since` memos reset.
+     `peeked` / `keep_since` memos reset. Several rows preempted before the same step go back in batch
+     (admission) order, ahead of what was waiting (`extendleft(reversed(…))`).
    - The original prompt is kept in `req.orig`. The handler reads `prompt_ids` (Usage.prompt_tokens, the
      tool-call id seed, `prompt_logprobs`).
 5. **Resume.** Normal admission.
    - `_setup` takes the carried sampler (the RNG key goes on: a seeded stream continues where it was,
      not from the start) and penalty counts, and skips `_Control.build` (its masks exist).
    - The lookup finds the entry at `len(ids) − 1`, prefills nothing, and the row joins with `y` as its
-     first input at the same position. The KV and state are the row's own bits, copied.
+     first input at the same position. The KV and state are the row's own bits.
    - `t0` / `queue_ms` / `reused` (Usage `cached_tokens`) keep the first prefill's values.
    - `_spec_ok` is False (no DFlash after a preemption).
    - `_fits` never makes it "give up" its hit: prompt + generated is worth waiting for. It waits until a
@@ -114,7 +122,7 @@ wait any large request has.
 
 ## Numerics
 
-- No resumed bits are new. The KV over the generated part is the row's own decode KV (copied), the GDN
+- No resumed bits are new. The KV over the generated part is the row's own decode KV (its own buffers), the GDN
   state is the row's own (gathered), and the next step is the same decode call at the same position.
 - At B ≤ 2 (the per-row qmv path) a preempted stream is bit-identical to an uninterrupted one. The GPU
   check verifies this.
@@ -125,13 +133,21 @@ wait any large request has.
 
 ## Memory
 
-- **During the store.** Peak = reserved (row included) + pc.bytes + the new segment. The new segment is
-  the generated part only, or the whole KV when the prompt entry is gone. The store's limit is exactly
-  that headroom.
-- **After.** The row's reservation is released and the entry counts in pc.bytes (evictable).
-- **Resume.** The reservation is prompt + generated + min(left, `RESERVE_TOKENS`). The restore copies the
-  entry (as any hit), and the resumed prefill's store re-publishes the same pieces as its prompt entry,
-  with no new copy.
+- **The store allocates nothing** but the end state's gathers (one row's recurrent state). The row's
+  reservation moves into pc.bytes (evictable), and the prompt entry it absorbs goes (its segments too,
+  unless another entry shares them).
+- **Resume costs 2× the row's KV until the entry goes.** The reservation is prompt + generated +
+  min(left, `RESERVE_TOKENS`), and the restore copies the entry (as any hit). The resumed prefill's store
+  re-publishes the same pieces as its prompt entry (no new copy), which the next reply-KV store extends.
+  Both are counted (`_fits`: reserved + need + pc.bytes), so a preempted request waits at the head until
+  rows end; it is never an OOM.
+- **Not done:** handing the entry's buffers back to the resumed row instead of copying them (review item
+  1c). A KVCache writes its next token in place only when nothing else holds its buffer (MLX
+  copy-on-write). Moving the buffers would therefore mean dropping the entry and storing no prompt entry
+  for the resumed row, which loses its reply KV for the next turn: the AppWorld gain (−21 % prefill
+  tokens). Otherwise the first decode step copies the buffer anyway. It also needs a KVCache built
+  around a view whose capacity tail the view hides. Too invasive for the gain (a transient at a rare
+  event).
 
 ## Default unchanged
 

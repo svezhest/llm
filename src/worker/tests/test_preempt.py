@@ -222,8 +222,42 @@ def test_real_budget_preempts_instead_of_length(pre, dense, caplog):
     assert cut["a"][-1] == ("done", "length") and len(tokens(cut["a"])) < 200
     sched = scheduler(dense, budget=budget)
     reqs = make()
+    caplog.clear()
     got = drive(sched, reqs)
     assert reqs[0].preempts >= 1
+    # the KV was kept (the row's own buffers: nothing to copy beside them) and
+    # every resume was a full hit (nothing prefilled), never a recompute
+    msgs = [m for m in caplog.messages if "id=a " in m]
+    pre = [k for k, m in enumerate(msgs) if "preempted at" in m]
+    assert pre and all("its KV kept" in msgs[k] for k in pre)
+    for k in pre:
+        nxt = next(m for m in msgs[k + 1:] if "prompt cache HIT" in m or "MISS" in m)
+        assert "HIT" in nxt and "prefilling 1" in nxt, nxt
     assert tokens(got["a"]) == tokens(full["a"]) and len(tokens(got["a"])) == 200
     assert tokens(got["b"]) == tokens(full["b"])
     assert sched.reserved == 0
+
+
+def test_rows_preempted_in_one_step_keep_their_order(pre, dense, monkeypatch):
+    """Two rows preempted before the same step go back to the head of the
+    queue in batch (admission) order, ahead of what was waiting."""
+    monkeypatch.setattr(worker, "RESERVE_TOKENS", 6)
+    ps = prompts([12, 12, 12, 12], 63)
+    reqs = [request(p, 20, k) for p, k in zip(ps, "abcw")]
+    sched = scheduler(dense, max_batch=3)
+    force(sched, "a")
+    force(sched, "b")
+    orig, seen = sched._preempt_rows, []
+
+    def pre_rows():
+        orig()
+        q = [r.id for r in sched.waiting]
+        if "a" in q or "b" in q:
+            seen.append(q)
+    sched._preempt_rows = pre_rows
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(worker, "PREEMPT", 0)
+        ref = drive(scheduler(dense, max_batch=3), [request(p, 20, k) for p, k in zip(ps, "abcw")])
+    got = drive(sched, reqs)
+    assert seen and seen[0][:2] == ["a", "b"] and seen[0][-1] == "w", seen
+    assert all(tokens(got[k]) == tokens(ref[k]) for k in "abcw")

@@ -94,6 +94,14 @@ segments until that prefill stores. Bounded and rare (not seen in AppWorld); not
 **Partial store, cancel, failure.** These are per-row, so nothing changed. A cancelled lane request stops
 at its next slab boundary as before. With `N ≤ 2048` a lane request is usually a single tick.
 
+**Others' hits** (review 2026-10-24, both repros now in `test_lane.py`):
+
+- No lane while the main prefill is admitted but not started (`task_row.started`). Its lookup has not
+  run yet, so its hit is no parent; a lane admission in the same tick evicted it (main reused 61 → 0).
+- When the lane request overtakes waiting requests, the entries their peeks find are spared by the
+  lane's `_fits` (`protect=`). The budget held the head's reservation but not its hit (head reused
+  61 → 0). With the hit spared, the lane request waits instead.
+
 **`_wanted`, `req.peeked`.** Both not-started rows are inserted. Peek memos are per request and still
 valid: `_lane_tokens` uses the memoized `_peek`.
 

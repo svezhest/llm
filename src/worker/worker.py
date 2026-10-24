@@ -885,6 +885,17 @@ class _Seg:
             mx.eval(seg.arrays)
         return seg
 
+    @classmethod
+    def adopt(cls, cache, b):
+        """[0, b) of a DYING row's caches without a copy (QWEN_PREEMPT): the
+        segment's arrays are views of the row's own buffers, which nothing
+        writes again (the row is dropped right after; its next decode never
+        runs). The buffers keep their capacity tail (< one 256-token KVCache
+        step) that `nbytes` does not count."""
+        def view(x):
+            return tuple(y[..., :b, :] for y in x) if isinstance(x, (tuple, list)) else x[..., :b, :]
+        return cls(0, b, [(view(c.keys), view(c.values)) for c in cache if not hasattr(c, "cache")])
+
     @staticmethod
     def estimate(cache, a, b):
         """The bytes copy_from(cache, a, b) will hold, from the row's shapes
@@ -1148,7 +1159,7 @@ class _PrefixCache:
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
               kv_start=None, chain=None, wanted=(), reply=None, tick=True, sync=True, spare=(),
-              clock=None, fresh=None, partial=False):
+              clock=None, fresh=None, partial=False, seg=None):
         """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
         and checkpoints -> (entry or None when it was not kept, the older
         entries it absorbed). A reply store (_Scheduler._store_reply)
@@ -1212,7 +1223,10 @@ class _PrefixCache:
         # The new segment is sized before anything changes: an entry that
         # does not fit the batch's headroom alone is neither copied nor
         # allowed to absorb or evict anything (the cache stays as it was).
-        extra = _Seg.estimate(cache, lo, L) if L > lo else 0
+        # `seg` (a preempted row: _Scheduler._store_preempt): the new KV is
+        # given, the dying row's own buffers [lo, L), nothing is copied
+        assert seg is None or (seg.a, seg.b) == (lo, L), (seg and (seg.a, seg.b), lo, L)
+        extra = seg.nbytes if seg is not None else _Seg.estimate(cache, lo, L) if L > lo else 0
         # An entry whose ids are a prefix of the new one (the previous turn of
         # this conversation, an exact repeat) is covered by it: its
         # checkpoints move over and it goes. Not an unquantized entry for a
@@ -1295,8 +1309,9 @@ class _PrefixCache:
                         self.evict(keep=(new, *spare), wanted=wanted):
                     pass
             if L > lo:                                # copied once room is made
-                seg = (_Seg.copy_from(cache, lo, L) if sync
-                       else _Seg.copy_from(cache, lo, L, sync=False))
+                if seg is None:
+                    seg = (_Seg.copy_from(cache, lo, L) if sync
+                           else _Seg.copy_from(cache, lo, L, sync=False))
                 new.chain = pieces + [(seg, lo, L)]
                 new.index()
         except BaseException:
@@ -2889,7 +2904,8 @@ class _Scheduler:
             # prefill's turn: the lane first (a short request beside a running
             # plain prefill; at most PREFILL_LANE_BURST of them in a row)
             if (PREFILL_LANE and self.lane is None and self.waiting and self.task is not None
-                    and self.lane_run < PREFILL_LANE_BURST and self.task.__name__ == "_prefill"):
+                    and self.lane_run < PREFILL_LANE_BURST and self.task.__name__ == "_prefill"
+                    and self.task_row.started):     # (its lookup ran: its hit is its parent)
                 self._admit_lane()
             if self.lane is not None:
                 self._advance_lane()
@@ -2999,7 +3015,7 @@ class _Scheduler:
         whatever the count says). () unless a prefill is running."""
         return tuple(r.parent for r in self._tasks() if r is not but and r.parent is not None)
 
-    def _fits(self, req, rows, lane=False, extra=0):
+    def _fits(self, req, rows, lane=False, extra=0, protect=()):
         """Would `req` (the head of the queue) be admitted next to `rows`
         running rows? The rows' reservations + the prompt cache's live bytes
         + `req` within the budget: when only the cache is in the way, its
@@ -3015,7 +3031,9 @@ class _Scheduler:
         whatever its depth and never given up (without it the request is no
         lane request); a preempted request (_preempt) never gives its up
         either: its prompt + generated tokens are worth waiting for. `extra`:
-        bytes reserved beside it (the head a lane request overtakes)."""
+        bytes reserved beside it (the head a lane request overtakes);
+        `protect`: entries never evicted here (the hits of the requests it
+        overtakes)."""
         if rows == 0:
             return True
         need = self._reserve(req) + extra
@@ -3029,7 +3047,8 @@ class _Scheduler:
                 e, depth = self._peek(req)
                 if e is not None and (depth >= PREFILL_STEP or lane):
                     keep = (e,)
-            spare = tuple(x for x in self._parents() if not any(x is k for k in keep))
+            spare = tuple(x for x in {id(x): x for x in self._parents() + tuple(protect)}.values()
+                          if not any(x is k for k in keep))
 
             def blocked(floor):                 # out even with every other entry evicted
                 return (self.reserved + need + floor > self.budget
@@ -3200,8 +3219,11 @@ class _Scheduler:
             return
         over = req is not head
         # the main prefill's row (not in self.rows yet) and, overtaken, the head's
+        # the requests it overtakes keep their hits (their entries are spared)
+        ahead = cand[:cand.index(req)]
+        protect = tuple(e for e in (self._peek(x)[0] for x in ahead if not x.images) if e is not None)
         if not self._fits(req, len(self.rows) + 1 + over, lane=True,
-                          extra=self._reserve(head) if over else 0):
+                          extra=self._reserve(head) if over else 0, protect=protect):
             return
         with self.cv:
             if req.cancel.is_set() or not any(req is x for x in self.waiting):
@@ -3957,10 +3979,12 @@ class _Scheduler:
         # </think> id inside the content is content (_GenState: plain text /
         # dropped), so it does not skip the store.
         think = getattr(self.eng, "_think", None)
-        state = _GenState.for_prompt(req.ids, think)
+        # (a resumed preempted row: its reply began at the prompt as sent;
+        # the tokens before the preemption are in req.ids)
+        state = _GenState.for_prompt(req.prompt_ids, think)
         if state.in_thinking:
             tags = getattr(self.eng, "_tool_tags", None)
-            for t in fed[:n]:
+            for t in req.ids[len(req.prompt_ids):] + fed[:n]:
                 state.token(t, think[1], tags[0] if tags else -1)
             log.info("id=%s prompt cache reply not kept: reasoning in the reply (thinking on, "
                      "%d of %d generated tokens)", req.id, state.reasoning_tokens, n)
@@ -4652,14 +4676,20 @@ class _Scheduler:
         (_regrow ahead=1: the cache gives way first, as in the step) is
         preempted instead of cut (_preempt); the others are re-accounted one
         step early (the same numbers _regrow would set in the step). Only
-        rows _preemptable; the rest are cut in _step as before."""
+        rows _preemptable; the rest are cut in _step as before. Several rows
+        preempted at once go back to the head of the queue in their batch
+        (= admission) order."""
         ahead = not any(r.sync for r in self.rows)
-        hit = False
+        back = []
         for i, r in enumerate(self.rows):
             if r.pos + 1 >= r.tokens and self._preemptable(r) and not self._regrow(r, ahead=1):
-                self._preempt(r, i, ahead)
-                hit = True
-        if hit:
+                req = self._preempt(r, i, ahead)
+                if req is not None:
+                    back.append(req)
+        if back:
+            with self.cv:
+                self.waiting.extendleft(reversed(back))
+        if any(r.done for r in self.rows):
             self._compact()
 
     def _preemptable(self, row):
@@ -4683,15 +4713,16 @@ class _Scheduler:
         token y: read y and send it (as _iterate's read loop does: thinking
         budget, stop, grammar / bad-word history, logprobs), do with it what
         _logits does to a next input (penalty count, _Control's count: the
-        resumed row's first input is `first`, skipped there), store the row
-        (KV of prompt + generated[:-1] = everything but y, its recurrent state
-        after them) as a reply-KV entry (_store_preempt) and put the request
-        back at the head of the queue with ids = prompt + generated: its
-        lookup resumes at the entry's end, prefills nothing, and its first
-        decode input is y at the same position. A row that stops on y (EOS,
-        stop id) or reaches max_tokens ends normally instead. When the entry
-        is not kept (over the headroom) the request still resumes, from what
-        the cache holds (a recompute)."""
+        resumed row's first input is `first`, skipped there), drop the row,
+        hand its KV (prompt + generated[:-1] = everything but y) and its
+        recurrent state after them to the prompt cache (_store_preempt: no
+        copy) and -> its request, set to resume (the caller puts it back at
+        the head of the queue): ids = prompt + generated, its lookup resumes
+        at the entry's end, prefills nothing, and its first decode input is y
+        at the same position. A row that stops on y (EOS, stop id) or reaches
+        max_tokens ends normally instead (-> None). When the entry is not
+        kept the request still resumes, from what the cache holds (a
+        recompute)."""
         req = row.req
         tok = row.y.item()                          # waits for its own step only
         lpi = _read_logprobs(row.lp) if row.lp is not None else None
@@ -4705,7 +4736,7 @@ class _Scheduler:
                 if lpi is not None:
                     req.stop_lp = (tok, *lpi)
                 self._finish(row, "stop")
-                return
+                return None
             if not ahead:
                 if req.guide is not None:
                     req.guide.consume(tok)
@@ -4715,25 +4746,28 @@ class _Scheduler:
             row.n += 1
             if row.n == req.max_tokens:
                 self._finish(row, "length")
-                return
+                return None
             if row.pen.active:
                 row.pen.add(row.y)
             if req.ctl.active:
                 req.ctl.n += 1
         except Exception as e:  # noqa: BLE001 — e.g. grammar rejected the token
             self._fail(row, e)
-            return
+            return None
         row.why = "preempted"
+        fed, n = row.fed, row.n
+        # The row ends here: its reservation goes first, its KV buffers become
+        # the entry's (no copy, so nothing is allocated beside them: the
+        # entry fits wherever the row did)
+        row.done = True
+        self.reserved -= row.reserved
+        self.clear = True
         kept = None
         try:
             kept = self._store_preempt(row, self._reply_cache(row, i))
         except Exception:  # noqa: BLE001 — costs the entry only: the request resumes by recompute
             log.exception("id=%s preempt: storing the row failed", req.id)
-        fed, n = row.fed, row.n
         row.fed = row.entry = None                  # no reply store at its drop
-        row.done = True
-        self.reserved -= row.reserved
-        self.clear = True
         if req.orig is None:
             req.orig = req.ids
         req.ids = req.ids + fed
@@ -4741,24 +4775,28 @@ class _Scheduler:
         req.carry = (row.sampler, row.pen)
         req.preempts += 1
         req.bounds = req.peeked = req.keep_since = None
-        with self.cv:
-            self.waiting.appendleft(req)
         log.warning("id=%s preempted at %d tokens (%d of %d preemptions): the batch's KV would "
                     "pass its memory headroom (%.2f GiB reserved); %s, back at the head of the "
                     "queue (%d tokens, %d left to generate)", req.id, len(req.ids) - len(req.orig),
                     req.preempts, PREEMPT, self.reserved / GIB,
                     "its KV kept in the prompt cache" if kept is not None
                     else "its KV NOT kept (resumes by recompute)", len(req.ids), req.max_tokens)
+        return req
 
     def _store_preempt(self, row, cache):
-        """The preempted row as a prompt-cache entry: ids = prompt +
-        generated[:-1] (the KV it holds), the end state its own; resumable at
-        its end (`reply`, as a reply-KV entry: no slab end, decode bits). The
-        prompt entry's pieces are inherited when it is still there (only the
-        generated part is copied), else everything is copied. Unlike a reply
-        store: also with reasoning in the output (the resumed prompt holds it
-        exactly), copied and evaluated here (we are before the step; one
-        host wait for a rare event) -> the entry or None (not kept)."""
+        """The preempted (already dropped) row as a prompt-cache entry: ids =
+        prompt + generated[:-1] (the KV it holds), the end state its own;
+        resumable at its end (`reply`, as a reply-KV entry: no slab end,
+        decode bits). Its KV is the row's own buffers (_Seg.adopt: views,
+        nothing copied; nothing writes them again), over [0, len): it
+        inherits nothing and absorbs the row's prompt entry (its checkpoints
+        move over) -- so _regrow having evicted that entry first costs
+        nothing. The limit: the headroom beside the other rows (the row's
+        reservation is released: its buffers are what the entry holds).
+        Unlike a reply store: also with reasoning in the output (the resumed
+        prompt holds it exactly); the end state's gathers are evaluated here
+        (before the step; one host wait for a rare event) -> the entry or
+        None (not kept)."""
         if cache is None:
             return None
         req, pc = row.req, self.eng._pcache
@@ -4767,28 +4805,25 @@ class _Scheduler:
             log.warning("id=%s preempt: the row's cache does not hold its tokens", req.id)
             return None
         e = row.entry() if row.entry is not None else None
-        if (e is not None and any(e is x for x in pc.entries)
-                and e.ids == ids[:len(e.ids)]):
-            inherit, at, clock = _Inherit(e.chain, {}, None, e.quantized), len(e.ids), (e.used, e.seq)
-        else:
-            inherit, at, clock = None, 0, None
+        clock = (e.used, e.seq) if e is not None and any(e is x for x in pc.entries) else None
         ends, protect = row.plan
-        new, _ = pc.store(ids, cache, {}, inherit, at, ends, protect,
-                          limit=self.budget + self.prefill_reserve - self.reserved,
-                          kv_start=self.kv["quantized_kv_start"], wanted=self._wanted,
-                          reply=at if inherit is not None else len(req.ids) - 1, tick=False,
-                          spare=self._parents(), clock=clock)
+        new, covered = pc.store(ids, cache, {}, None, 0, ends, protect,
+                                limit=self.budget + self.prefill_reserve - self.reserved,
+                                kv_start=self.kv["quantized_kv_start"], wanted=self._wanted,
+                                reply=len(req.ids) - 1, tick=False, spare=self._parents(),
+                                clock=clock, seg=_Seg.adopt(row.cache, len(ids)))
         if new is not None:
             try:
                 mx.eval(new.arrays)                 # (the end state: gathers from the stack)
             except Exception:
-                # no entry whose arrays cannot run (the absorbed ones are gone: a recompute)
+                # no entry whose arrays cannot run: it goes, the absorbed ones come back
                 pc.entries = [x for x in pc.entries if x is not new]
+                pc.entries += [c for c in covered if not any(c is x for x in pc.entries)]
                 pc._recount()
                 raise
-            log.info("id=%s preempt: stored %d tokens (%d inherited), %.1f MB (%d entries, "
-                     "%.1f MB total)", req.id, len(ids), at, new.nbytes / 1e6,
-                     len(pc.entries), pc.bytes / 1e6)
+            log.info("id=%s preempt: stored %d tokens (the row's own buffers), %.1f MB (%d "
+                     "entries, %.1f MB total) absorbed=%d", req.id, len(ids), new.nbytes / 1e6,
+                     len(pc.entries), pc.bytes / 1e6, len(covered))
         return new
 
     def _log(self):

@@ -214,3 +214,44 @@ def test_multi_slab_lane_request_beside_a_cold_prefill(dense, small):
     assert seen[i + 1] == ("lane", "t") and seen[i + 2] == ("main", "long")
     assert got["long"] == cold(dense, long_ids, 4, "long")
     assert got["t"] == cold(dense, t_ids, 6, "t")
+
+
+# --- review 2026-10-24 (repros: the lane's admission must not cost others their hits) ---
+@pytest.mark.parametrize("lane", [0, 16])
+def test_lane_overtake_keeps_the_heads_hit(dense, small, monkeypatch, lane):
+    """A lane request overtaking the head must not evict the head's entry to
+    fit (the budget holds the head's reservation, not its hit)."""
+    sched = scheduler(dense, max_batch=4)
+    h0 = [IM_START] + prompts([60], 90)[0] + [IM_START] + prompts([4], 91)[0]
+    a, b = conv(92)
+    run(sched, [request(h0, 2, "wh"), request(a, 2, "wl")])
+    pc = sched.eng._pcache
+    el = next(e for e in pc.entries if e.ids == a[:-1])
+    M = request(prompts([120], 93)[0], 3, "long")
+    H = request(h0 + prompts([30], 94)[0], 3, "head")      # a hit, 30+ to prefill: no lane
+    L = request(b, 3, "short")                              # lane-eligible
+    R = sched._reserve
+    sched.budget = R(M) + R(L) + R(H) + pc.bytes_of([el]) + 1
+    monkeypatch.setattr(worker, "PREFILL_LANE", lane)
+    assert sched._lane_tokens(H) > 16 and sched._lane_tokens(L) <= 16
+    run(sched, [M, H, L], arrive={2: [H, L]})
+    assert H.reused > 0, "the head lost its prompt-cache hit"
+
+
+@pytest.mark.parametrize("lane", [0, 16])
+def test_lane_keeps_the_hit_of_a_main_prefill_not_started(dense, small, monkeypatch, lane):
+    """The main prefill admitted in this tick has not run its lookup yet (no
+    parent): no lane before it did."""
+    sched = scheduler(dense, max_batch=4)
+    m0 = [IM_START] + prompts([60], 95)[0] + [IM_START] + prompts([4], 96)[0]
+    a, b = conv(97)
+    run(sched, [request(m0, 2, "wm"), request(a, 2, "wl")])
+    pc = sched.eng._pcache
+    el = next(e for e in pc.entries if e.ids == a[:-1])
+    M = request(m0 + prompts([60], 98)[0], 3, "main")     # a hit + several slabs
+    L = request(b, 3, "short")
+    R = sched._reserve
+    sched.budget = R(M) + R(L) + pc.bytes_of([el]) + 1
+    monkeypatch.setattr(worker, "PREFILL_LANE", lane)
+    run(sched, [M, L])
+    assert M.reused > 0, "the main prefill lost its hit to the lane's admission"
