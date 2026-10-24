@@ -1019,6 +1019,13 @@ class _PrefixCache:
         if added:
             self.version += 1
 
+    def charged(self):
+        """What the cache costs the batch budget: its live bytes + the RAM
+        its disk tier still holds (evicted entries until written, loads until
+        inserted: pcdisk.DiskTier.held_bytes). Every budget check takes this,
+        the soft cap QWEN_PROMPT_CACHE_GB the live bytes alone."""
+        return self.bytes + (self.disk.held_bytes() if self.disk is not None else 0)
+
     def _scan(self, ids, ends):
         hit, at, split = None, 0, 0
         for e in self.entries:
@@ -1118,14 +1125,17 @@ class _PrefixCache:
                 or (not wanted and PROMPT_CACHE_STALE_S > 0
                     and now - e.used > PROMPT_CACHE_STALE_S))
 
-    def evict(self, keep=(), wanted=()):
+    def evict(self, keep=(), wanted=(), spill=True):
         """Drop an entry but those in `keep` (in `victim`'s order; `wanted`:
         the entries waiting requests would resume from, or a callable giving
         them, called only when there is a choice) -> False: nothing to drop.
         Its segments go with the last entry holding them. A row resumed from
         it holds copies (restore); a prefill still running from it holds its
         pieces until it ends (the scheduler keeps that entry:
-        _Scheduler._regrow)."""
+        _Scheduler._regrow). With the disk tier it is written there
+        (`spill`) and the RAM it frees stays held, charged, until written; a
+        caller that needs the memory now (it cannot wait for the writer)
+        passes spill False: freed at once, as without the tier."""
         left = [e for e in self.entries if not any(e is k for k in keep)]
         if not left:
             return False
@@ -1142,11 +1152,12 @@ class _PrefixCache:
                   len(e.ids), "wanted" if w else
                   "stale" if self.stale(e, time.time()) else "live",
                   self.seq - e.seq, time.time() - e.used)
+        before = self.bytes
         self.entries.remove(e)
         self.evictions += 1
         self._recount(added=False)
-        if self.disk is not None:                     # written at the end of the tick
-            self.disk.offer(e)
+        if self.disk is not None and spill:           # written at the end of the tick
+            self.disk.offer(e, before - self.bytes)   # (the RAM it frees once written)
         return True
 
     def insert(self, new, limit=None, wanted=(), spare=()):
@@ -1158,7 +1169,8 @@ class _PrefixCache:
         (it was an entry of this cache: the store that made it absorbed its
         older turns) and is used now (a waiting request resumes from it)."""
         stays = [s for s in spare if any(s is e for e in self.entries)]
-        if limit is not None and self.bytes_of([new, *stays]) > limit:
+        held = self.charged() - self.bytes
+        if limit is not None and self.bytes_of([new, *stays]) + held > limit:
             return False
         budget = PROMPT_CACHE_GB * GIB
         if callable(wanted):
@@ -1173,10 +1185,15 @@ class _PrefixCache:
         new.used, new.seq = time.time(), self.seq
         self.entries.append(new)
         self._recount()
-        for cap in (budget, limit):
-            while cap is not None and len(self.entries) > 1 and self.bytes > cap and \
-                    self.evict(keep=(new, *spare), wanted=wanted):
-                pass
+        # the soft cap: written to disk while the held RAM still fits the
+        # headroom; the headroom: freed at once (a spill would hold as much)
+        while len(self.entries) > 1 and self.bytes > budget and self.evict(
+                keep=(new, *spare), wanted=wanted,
+                spill=limit is None or self.charged() <= limit):
+            pass
+        while limit is not None and len(self.entries) > 1 and self.charged() > limit and \
+                self.evict(keep=(new, *spare), wanted=wanted, spill=False):
+            pass
         return True
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
@@ -1289,7 +1306,9 @@ class _PrefixCache:
         # what can never be evicted for it: the spared entries it does not absorb
         stays = [s for s in spare if any(s is e for e in self.entries)
                  and not any(s is c for c in covered)]
-        if limit is not None and self.bytes_of([new, *stays]) + extra > limit:
+        # (+ the RAM the disk tier still holds: evicted entries not written yet)
+        if limit is not None and self.bytes_of([new, *stays]) + extra + \
+                self.charged() - self.bytes > limit:
             # beside the batch (the rows' reservations + the cache within the
             # budget + the idle prefill reserve) it does not fit even alone
             # (beside the running prefill's entry, which stays)
@@ -1319,13 +1338,18 @@ class _PrefixCache:
         self.entries = rest + [new]
         try:
             self._recount()
-            while len(self.entries) > 1 and self.bytes + extra > budget and \
-                    self.evict(keep=(new, *spare), wanted=wanted):
+            # the soft cap: an evicted entry goes to disk (its RAM held until
+            # written) while that still fits the headroom with the new
+            # segment, which is copied right below; else it is freed at once
+            while len(self.entries) > 1 and self.bytes + extra > budget and self.evict(
+                    keep=(new, *spare), wanted=wanted,
+                    spill=limit is None or self.charged() + extra <= limit):
                 pass
             if limit is not None:
-                # it fits alone: others go (victim order) until it fits beside the batch
-                while len(self.entries) > 1 and self.bytes + extra > limit and \
-                        self.evict(keep=(new, *spare), wanted=wanted):
+                # it fits alone: others go (victim order) until it fits beside
+                # the batch, freed at once (a spill would hold what it frees)
+                while len(self.entries) > 1 and self.charged() + extra > limit and \
+                        self.evict(keep=(new, *spare), wanted=wanted, spill=False):
                     pass
             if L > lo:                                # copied once room is made
                 seg = (_Seg.copy_from(cache, lo, L) if sync
@@ -2787,7 +2811,7 @@ class _Scheduler:
         disk = self.eng._pcache.disk
         if disk is not None:                        # a load finished for no one waiting: freed
             for job in disk.done():
-                self._disk_insert(disk, job)
+                self._disk_take(disk, job)
         if CLEAR_CACHE:
             mx.clear_cache()
 
@@ -2874,18 +2898,19 @@ class _Scheduler:
             rows = self.reserved + need - g.reserved
         headroom = self.budget + self.prefill_reserve
         pc = self.eng._pcache
-        if rows <= headroom < rows + pc.bytes:
+        if rows <= headroom < rows + pc.charged():
             # not the entry a running prefill resumed from: its pieces stay
-            # allocated until that prefill stores, whatever the count says
+            # allocated until that prefill stores, whatever the count says;
+            # freed at once (spill False: the growth cannot wait for a write)
             task = self.task_row
             keep = (task.parent,) if task is not None and task.parent is not None else ()
             n = 0
-            while rows + pc.bytes > headroom and pc.evict(keep, self._wanted):
+            while rows + pc.charged() > headroom and pc.evict(keep, self._wanted, spill=False):
                 n += 1
             if n:
                 log.info("prompt cache: %d entries evicted for the growth of id=%s "
                          "(%.2f GiB left)", n, row.req.id, pc.bytes / GIB)
-        if rows + pc.bytes > headroom and sum(not r.done for r in self.rows) > 1:
+        if rows + pc.charged() > headroom and sum(not r.done for r in self.rows) > 1:
             log.warning("id=%s ended at %d tokens: the batch's KV would pass its memory "
                         "headroom (%.2f GiB reserved)", row.req.id, row.n, self.reserved / GIB)
             self._finish(row, "length")
@@ -2917,7 +2942,10 @@ class _Scheduler:
             return False
         pc = self.eng._pcache
         live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
-        if self.reserved + need + pc.bytes > self.budget:
+        # held: RAM the disk tier still holds (evicted entries until written,
+        # loads until inserted); 0 without it
+        held = pc.charged() - pc.bytes
+        if self.reserved + need + pc.bytes + held > self.budget:
             keep, depth, first = (), 0, None
             if PROMPT_CACHE and not req.images:
                 e, depth = self._peek(req)
@@ -2925,7 +2953,7 @@ class _Scheduler:
                     keep = (e,)
 
             def blocked(floor):                 # out even with every other entry evicted
-                return (self.reserved + need + floor > self.budget
+                return (self.reserved + need + floor + held > self.budget
                         or live - (pc.bytes - floor) + need + self.prefill_reserve > self.cap)
             floor = pc.bytes_of(keep)
             if keep and blocked(floor) and not blocked(0):
@@ -2950,6 +2978,10 @@ class _Scheduler:
             if n:
                 log.info("prompt cache: %d entries evicted to admit id=%s (%.2f GiB left)",
                          n, req.id, pc.bytes / GIB)
+            if self.reserved + need + pc.charged() > self.budget:
+                # the entries just evicted went to disk: their RAM is free once
+                # written (~0.3-0.8 s/GB); admitted then, nothing more evicted
+                return False
             live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
         return live + need + self.prefill_reserve <= self.cap
 
@@ -3797,7 +3829,7 @@ class _Scheduler:
         than spinning). Never raises: a failure costs the load only."""
         try:
             for job in disk.done():
-                self._disk_insert(disk, job)
+                self._disk_take(disk, job)
             with self.cv:
                 reqs = list(itertools.islice(self.waiting, self.max_batch))
             if reqs and not disk.busy():
@@ -3843,18 +3875,32 @@ class _Scheduler:
             w.key = key
         if w.dent is None or w.depth < w.ram + PREFILL_STEP:
             return False
+        # beside the batch and what the tier already holds (the insert evicts
+        # cache entries for it, the hold it cannot); from here until inserted
+        # or dropped `need` is held, so every other budget check sees it
         need = disk.cost(w.dent, pc.entries)
         live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
-        if (need > self.budget + self.prefill_reserve - self.reserved
+        if (need + pc.charged() - pc.bytes > self.budget + self.prefill_reserve - self.reserved
                 or live + need + self.prefill_reserve > self.cap):
             return False
-        w.job, w.t0 = disk.load(w.dent, pc.entries, req), time.time()
+        w.job, w.t0 = disk.load(w.dent, pc.entries, req, need), time.time()
         if w.job is None:                       # gone from disk since the peek: peek again
             w.key = None
             return False
         log.info("id=%s prompt cache disk: loading an entry of %d tokens (%.1f MB to read) for a "
                  "%d-token hit (%d in RAM)", req.id, w.dent.L, need / 1e6, w.depth, w.ram)
         return True
+
+    def _disk_take(self, disk, job):
+        """_disk_insert, never raising: a failure drops that load (unpinned,
+        its hold released), the batch's other loads go on (else busy()
+        stayed true for good)."""
+        try:
+            self._disk_insert(disk, job)
+        except Exception:  # noqa: BLE001 — costs this load only
+            log.exception("prompt cache disk: inserting a loaded entry of %d tokens failed",
+                          job.dent.L)
+            disk.discard(job)
 
     def _disk_insert(self, disk, job):
         """A finished load into the RAM cache (pc.insert: its budget checks,
@@ -4023,7 +4069,7 @@ class _Scheduler:
         bytes (inside the budget, as for admissions: _fits) stay within the
         budget. Refused rather than evicting: grouping is optional, and the
         shared system prompt's entry is worth more as a future hit."""
-        return delta <= 0 or self.reserved + delta + self.eng._pcache.bytes <= self.budget
+        return delta <= 0 or self.reserved + delta + self.eng._pcache.charged() <= self.budget
 
     def _cascadable(self, row):
         """A running row that may be grouped: a text-only plain prefill (never
@@ -4254,7 +4300,7 @@ class _Scheduler:
         # beside it; take is lazy: nothing of the group goes before the next
         # step), so the group's shrink is not credited (review cascade_b2b3_fixes A)
         need = sum(self._bytes(x.tokens) - x.reserved for x in out)
-        if self.reserved + need + self.eng._pcache.bytes > self.budget + self.prefill_reserve:
+        if self.reserved + need + self.eng._pcache.charged() > self.budget + self.prefill_reserve:
             return [], live, None
         return out, stay, why
 
@@ -4748,9 +4794,24 @@ class Engine:
             if os.path.exists(p):
                 with open(p, "rb") as fh:
                     src.update(fh.read())
-        weights = sorted((n, os.path.getsize(os.path.join(self.model_path, n)))
-                         for n in os.listdir(self.model_path)
-                         if n.endswith((".safetensors", ".json")))
+        # weights: name, size and a digest of what identifies the tensors
+        # without reading 10 GB: a .safetensors file's header (names, dtypes,
+        # shapes, offsets: the 8-byte length + its JSON), a .json file whole
+        weights = []
+        for n in sorted(os.listdir(self.model_path)):
+            p = os.path.join(self.model_path, n)
+            if not n.endswith((".safetensors", ".json")) or not os.path.isfile(p):
+                continue
+            with open(p, "rb") as fh:
+                if n.endswith(".json"):
+                    head = fh.read()
+                else:
+                    raw = fh.read(8)
+                    k = int.from_bytes(raw, "little") if len(raw) == 8 else 0
+                    head = raw + fh.read(min(k, 1 << 28))
+            weights.append((n, os.path.getsize(p), hashlib.sha256(head).hexdigest()))
+        # the sizing / eviction-order knobs move no bit; QWEN_PROMPT_CACHE_REPLY
+        # does (reply entries hold decode-kernel KV), so it is in `reply` below
         free = ("QWEN_PROMPT_CACHE", "QWEN_BATCH_MEM_GB", "QWEN_GEN_SLOTS", "QWEN_WIRED_LIMIT_GB",
                 "QWEN_CACHE_LIMIT_GB", "QWEN_BATCH_RESERVE_TOKENS", "QWEN_BATCH_PREFILL_SHARE")
         env = {k: v for k, v in os.environ.items()
@@ -4759,8 +4820,8 @@ class Engine:
             format=pcdisk.FORMAT, model=self.model_id, weights=weights, kv=KV_KWARGS, fp16=FP16,
             slab=[PREFILL_STEP, PREFILL_MIN_STEP, PREFILL_BUDGET, _FIXED_SLAB],
             sdpa_fused=SDPA_FUSED, gdn_fast=GDN_FAST, gdn_fuse=GDN_FUSE, max_batch=self.max_batch,
-            env=env, mlx=mx.__version__, mlx_vlm=importlib.metadata.version("mlx-vlm"),
-            src=src.hexdigest())
+            reply=PROMPT_CACHE_REPLY, env=env, mlx=mx.__version__,
+            mlx_vlm=importlib.metadata.version("mlx-vlm"), src=src.hexdigest())
 
     # --- cancellation -----------------------------------------------------
     def cancel(self, req_id: str) -> bool:
@@ -5479,6 +5540,13 @@ def main():
         if not engine.sched.stop(timeout=10.0):
             # a tick still inside MLX: interpreter teardown under it can crash
             log.error("scheduler did not stop within 10 s; exiting now")
+            server.stop(0)
+            os._exit(1)
+        disk = engine._pcache.disk
+        if disk is not None and not disk.close(timeout=10.0):
+            # a file write over an MLX buffer / an mx.array of a load still
+            # running: interpreter teardown under it can crash, as above
+            log.error("prompt cache disk: writer / loader still busy after 10 s; exiting now")
             server.stop(0)
             os._exit(1)
         server.stop(grace=2).wait()

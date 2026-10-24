@@ -38,7 +38,7 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
 | `QWEN_PROMPT_CACHE_DISK` | unset = off | Directory for the cache files. Only our file names in it are ever touched. Needs `QWEN_PROMPT_CACHE=1`. |
 | `QWEN_PROMPT_CACHE_DISK_GB` | `32` | Disk limit. The least recently used entries go first (used = written or loaded). |
 | `QWEN_PROMPT_CACHE_DISK_KEEP` | `0` | `0`: our files are deleted at start. `1`: a previous run's files are kept when the validity key matches, else cleared. |
-| `QWEN_PROMPT_CACHE_DISK_QUEUE_GB` | `2` | Evicted bytes waiting for the writer. Their MLX buffers stay alive until written. Past this, an evicted entry is not written. One entry is always taken when the queue is empty. |
+| `QWEN_PROMPT_CACHE_DISK_QUEUE_GB` | `4` | RAM of evicted entries waiting for the writer. Their MLX buffers stay alive until written and are charged in every budget check (`held_bytes`). An eviction past this cap is a plain deletion, as without the tier. There is no "one entry always" exception. `4` fits one 50K-token entry (~2.5 GB) or two 1 GB AppWorld entries. |
 | `QWEN_PROMPT_CACHE_DISK_MIN_TOKENS` | `4096` | Shorter entries are not written. Their hit saves under ~2 slabs. |
 | `QWEN_PROMPT_CACHE_DISK_WAIT_S` | `10` | How long the head of the queue waits for its own load. After that it is admitted without it. |
 | `QWEN_PROMPT_CACHE_DISK_NOCACHE` | `1` | `F_NOCACHE` on every file, so the cache's GBs never sit in the macOS unified buffer cache next to the model. `0`: the OS caches as usual. |
@@ -61,6 +61,13 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
 - **Shutdown does not flush the RAM cache.** It is optional, and the `KEEP` use case only.
   `_Scheduler.stop()` returns as soon as `_close` sets `closed`, so a flush there would race the
   exit. This needs `stop()` to wait for a drain. Not done.
+- **Shutdown drains the tier.** `main()` calls `disk.close(10)` after `sched.stop()`:
+  1. nothing new is taken, and the offers not flushed are dropped;
+  2. it waits until the writer and the loader are idle, so neither is inside a file write over
+     an MLX buffer or an `mx.array` when the interpreter tears MLX down;
+  3. if they are still busy after 10 s, `os._exit(1)`, as for a stuck scheduler tick.
+- **One worker per directory.** `flock` on `pcdisk.lock`. A second worker on the same directory
+  gets a `RuntimeError` at start, and its tier is off (logged).
 
 ### How an entry is written without blocking the scheduler
 
@@ -68,8 +75,14 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
 - **`flush`**, at the end of the tick, on the scheduler thread:
   1. It takes the entry's segments (`_Seg`) and recurrent states, and finds the ones not already
      on disk (dedup, below).
-  2. It sizes the files, then applies the queue cap and the disk LRU.
-  3. It registers the entry as `pending`.
+  2. It sizes the files, then plans the disk LRU (`_plan`) before anything changes. The plan
+     simulates the refcounts and never counts the blobs this entry shares as freed. When
+     deleting every LRU entry would still leave no room, nothing is deleted and the entry is
+     skipped.
+  3. It registers the entry as `pending` and takes its blob references first. Only then are the
+     planned entries dropped, so a blob it shares (a system segment whose last other holder was
+     the LRU entry) can never go. The old order raised a KeyError there and left `pending`
+     blobs behind (review #1).
   4. It takes **zero-copy numpy views** of the arrays: `mx.eval` (a no-op wait; they are
      evaluated), then `np.asarray(a)`. Checked on the GPU device: the numpy array shares the MLX
      buffer, with no memcpy and no stall. bfloat16 has no buffer format, so it goes as an MLX
@@ -79,13 +92,36 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
   - then it drops the views. The MLX buffers are freed there: constant, evaluated arrays,
     through the allocator's lock. Handler threads already free the image processor's `to_mlx`
     arrays the same way.
-- **Memory.** An evicted entry's RAM is freed when its write ends (~0.3–0.8 s/GB, not measured),
-  not at the eviction. `mx.get_active_memory()` keeps counting it until then, so `_fits`'s live
-  check stays honest.
-  - `_fits` may hold an admission for a tick or so while a write runs.
-  - `_regrow`'s reservation-based eviction does not see the delay. The KV grows by 256-token
-    steps, which is small over ≤ 1 s.
-  - The queue cap bounds the total.
+- **Unlinks are queued under the index lock.** The writer's own drops (covered entries, LRU)
+  queue their unlink while the index already says the files are gone. A re-offer of a live
+  segment registered after that is therefore written after the unlink (FIFO), and a late unlink
+  can never delete the fresh file (review #5).
+- **Memory: an eviction to disk does not free RAM until the write ends** (~0.3–0.8 s/GB, not
+  measured). This was review #2: the class of OOM on the 27B / 35B.
+  - **What is held.** `DiskTier.held_bytes()` is the RAM the tier holds outside `pc.bytes`:
+    - an evicted entry's freed bytes (`evict` passes `bytes before − after`), from the offer
+      until its views are dropped after the write;
+    - a load's `need`, from its start (before its arrays exist) until it is inserted (then it
+      is `pc.bytes`) or dropped.
+  - **What is charged.** `pc.charged() = pc.bytes + held` in every budget check: `_fits`,
+    `_regrow`, the `limit` checks of `store` / `insert`, `_charge_fits`, the cascade tidy and
+    `_disk_want`. The soft cap `QWEN_PROMPT_CACHE_GB` stays on `pc.bytes` alone.
+  - **`evict(spill=…)`.** A spill (a write to disk) does not change `charged`, so a caller that
+    needs the memory now passes `spill=False` and the entry is freed at once, as without the
+    tier:
+    - the `limit` loops of `store` / `insert` (the new segment is copied right after);
+    - `_regrow`.
+  - **The soft-cap loops spill only while it fits.** They spill while `charged + extra ≤ limit`
+    (the held RAM still fits the headroom); else the entry is freed.
+  - **`_fits` waits.** It evicts (with spill) until `reserved + need + pc.bytes ≤ budget`, as
+    before. It then admits only when `reserved + need + charged ≤ budget`: a request whose
+    room went to disk waits for the writer (≤ ~1–2 s), and nothing more is evicted meanwhile.
+    Its live check sees the held buffers in `mx.get_active_memory()`.
+  - **The queue cap is honest.** `held + freed ≤ QUEUE_GB`, else the eviction is a plain
+    deletion.
+  - **With the tier off**, `charged == bytes` and `spill` is unused, so every check is the old
+    one bit for bit. The new `_fits` return can never trigger then: after its loop the bytes are
+    within the budget, or only `keep` is left, which `blocked()` already ruled out.
 - **Wake-up.** When the writer's and loader's queues drain, `on_drained` → `_Scheduler.wake()`
   wakes an idle loop. Its `_idle()` then clears the buffer pool and frees any load nobody waits
   for.
@@ -148,10 +184,12 @@ pcdisk.json     {format, key}
     reserved (what a store may take), and live + that + prefill reserve ≤ cap (`_fits`'s live
     check).
   - One load at a time (`busy()`): the SSD is the bottleneck.
-- **The loader thread** reads each blob into numpy (`readinto`, GIL released), then calls
-  `mx.array(numpy)`. The result is constant arrays: allocation + memcpy, no graph, no stream, the
-  same as the processor's `to_mlx` on a handler thread. The transient is one array, ≤ a layer's
-  K or V (~100 MB at 50K tokens), not 2× the entry.
+- **The loader thread** reads each array of a blob into numpy (`readinto`, GIL released) and
+  turns it into `mx.array(numpy)` at once, before reading the next one (`_read_blob(each=…)`).
+  The result is constant arrays: allocation + memcpy, no graph, no stream, the same as the
+  processor's `to_mlx` on a handler thread. The numpy transient is one array, ≤ a layer's K or
+  V (~100 MB at 50K tokens). Before review #3 it was the whole blob, i.e. 2× a 1.6 GB first
+  segment; a test bounds it under 2 arrays.
 - **Insert**, on the scheduler thread, at the next tick (`_disk_insert`). If the request still
   waits:
   1. `finish()` builds the `_Seg` / `_Entry` objects, reusing the live ones, and applies the
@@ -176,10 +214,14 @@ pcdisk.json     {format, key}
 
 `Engine._disk_key()` is a sha256 over:
 
-- the model id, and the names and sizes of the weights files (`*.safetensors`, `*.json`);
+- the model id; for each weights file its name, size and a sha256: of the header of a
+  `*.safetensors` (the 8-byte length + the JSON of names, dtypes, shapes and offsets; the 10 GB
+  of data are not read), of the whole of a `*.json`;
 - the resolved numerics settings: `KV_KWARGS`, `FP16`, the slab policy (`PREFILL_STEP`,
   `PREFILL_MIN_STEP`, `PREFILL_BUDGET`, `_FIXED_SLAB`), `SDPA_FUSED`, `GDN_FAST`, `GDN_FUSE`,
-  and `max_batch` (mrqmm install, which matters for reply KV);
+  `max_batch` (mrqmm install, which matters for reply KV), and `PROMPT_CACHE_REPLY`. Reply
+  entries hold decode-kernel KV, and the `QWEN_PROMPT_CACHE*` env prefix is otherwise excluded
+  (review #4);
 - every `QWEN_*` env var except the sizing and prompt-cache ones;
 - the mlx and mlx-vlm versions;
 - the sha256 of `worker.py`, `pfqmm.py`, `mrqmm.py`, `cascade.py` and `pcdisk.py`;
@@ -200,7 +242,7 @@ Disk errors are never a request's failure:
 |---|---|
 | write failed | the entry is lost, as before the tier; its `.tmp` files are removed |
 | read or validation failed | a miss |
-| flush / insert / tick exception | logged; the queue goes on |
+| flush / insert / tick exception | logged; the queue goes on; a load whose insert raised is dropped (`_disk_take`: unpinned, hold released, so `busy()` cannot stay true) |
 
 The writer's and loader's loops never die. A later entry that borrows a blob whose write failed
 fails its own check and drops itself.
@@ -216,7 +258,7 @@ mean a gateway change as well; that is left to the integrator.
   - `id=… prompt cache disk: entry of N tokens loaded (X MB read in T ms; …)`
   - `… not written: <why>`, `… failed`, `… dropped: its request no longer waits`, `… not kept`
 - **Counters.** `DiskTier.stats()` returns entries, bytes, writes, write_bytes, write_s, skipped,
-  errors, deleted, loads, load_bytes, hits, discards, read_ms and pending.
+  errors, deleted, loads, load_bytes, hits, discards, read_ms, pending and held.
 
 ## Invariants (self-review)
 
@@ -226,10 +268,13 @@ mean a gateway change as well; that is left to the integrator.
   - the writer reads raw memory;
   - the loader calls `mx.array(numpy)`.
 - **Memory accounting.**
+  - Evicted entries not yet written and loads not yet inserted are `held` and charged with the
+    cache in every budget check (`pc.charged()`). Evictions that need the RAM now free it at
+    once (`spill=False`).
   - **Loaded entries** are inserted through the same headroom as a store. A load starts only when
-    its non-live bytes fit, both by budget and live.
-  - **Pending writes** are bounded by `QUEUE_GB`. Their MLX buffers count in active memory
-    until written.
+    its non-live bytes fit beside what is already held, by budget and by live memory.
+  - **Pending writes** are bounded by `QUEUE_GB`, honestly, with no exception. Their MLX
+    buffers count in active memory until written.
 - **Bits.**
   - **The bytes are exact.** fp16, fp32, packed uint32 and bf16 (as uint16) are written and read
     back as raw bytes. The tests compare every restore position of the loaded entry with the
@@ -255,16 +300,26 @@ mean a gateway change as well; that is left to the integrator.
 | `test_write_errors_never_fail_a_request` | ENOSPC: nothing on disk, nothing pending |
 | `test_load_errors_are_misses` | a torn file and EIO both fall back to a miss |
 | `test_off_changes_nothing` | off and on-without-writes give identical results |
-| `test_keep_across_runs` | the index is rebuilt and loads; another key or KEEP off clears it |
+| `test_keep_across_runs` | the index is rebuilt and loads; another key or KEEP off clears it; a second worker on the directory is refused (flock); `close()` |
 | `test_blob_roundtrip` | dtypes, strided arrays, empty arrays, a truncated file |
 | `test_insert_respects_the_headroom` | `pc.insert` respects the headroom |
 | `test_disk_key` | the key is stable and moves with weights / numerics knobs, not with sizing knobs |
 | `test_reply_entry_through_disk` | a reply entry goes through the disk and the next turn resumes after the reply, as with RAM |
 | `test_load_while_rows_decode` | the head waits for its load while a row decodes |
 | `test_wait_bound_and_abandoned_load` | the `WAIT_S` bound, and the idle pass frees an abandoned load |
+| `test_lru_never_drops_a_blob_the_new_entry_shares` | review #1: an LRU entry that alone holds the shared segment is not dropped for nothing; the index equals the files; later entries are written and load |
+| `test_late_unlink_never_deletes_a_rewritten_blob` | review #5: a re-offer after the writer's drop keeps its file and loads |
+| `test_eviction_ram_is_charged_until_written` | review #2: `charged()` counts an evicted entry until its write ends; past the queue cap it is freed at once |
+| `test_headroom_evictions_free_at_once` | review #2: the `limit` loops of `insert` / `store` free at once, the soft cap spills only within the headroom |
+| `test_admission_waits_for_the_writer` | review #2: `_fits` admits only within the budget, the writer's hold included |
+| `test_load_is_charged_until_inserted` | review #2: a load is held from its start until inserted |
+| `test_load_reads_one_array_at_a_time` | review #3: the numpy peak is under 2 arrays, not the blob |
+| `test_insert_failure_drops_the_load` | review #6: a raising insert drops the load; `busy()` false, nothing held |
+
+The test file takes ~25 s.
 
 Full suite (`pytest -q --ignore tests/test_mrqmm.py`, 2026-10-24): 359 passed, 49 skipped,
-9.5 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
+9.5 min (before the review fixes; after them see the commit). A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
 device, came back bit-exact (zero-copy views and loader-thread `mx.array` on Metal); it was not
 a speed measurement.
 
@@ -360,8 +415,12 @@ the main tree's venv python. Never `uv`.
 
 - Write bandwidth competes with nothing on the GPU, but the SSD is shared with swap. Watch
   pageins and swapins against off.
-- `_fits`'s live check sees an evicted entry until its write ends, which can delay an admission
-  by ≤ ~1 s. Look for `queue_ms` growth in "on" at equal req/min.
+- `_fits` charges an evicted entry until its write ends (`held`), so a request whose room went to
+  disk waits for the writer, ≤ ~1–2 s per GB. Look for `queue_ms` growth in "on" at equal
+  req/min. With `QUEUE_GB` at 4 the budget can shrink by up to 4 GB for that time.
+- The `limit` loops of `store` / `insert` and `_regrow` free at once (`spill=False`), so under
+  memory pressure entries are deleted, not written, exactly as without the tier. Count the "not
+  written" log lines against the writes.
 - Disk space: ≤ `QWEN_PROMPT_CACHE_DISK_GB` (32), deleted at the end of each run. 179 GB free on
   2026-10-24.
 

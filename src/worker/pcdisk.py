@@ -60,9 +60,11 @@ GB = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_GB", "32") or "32")
 # keep the files of a previous run whose key (model, numerics flags, code) matches;
 # 0: the directory's cache files are deleted at start
 KEEP = os.environ.get("QWEN_PROMPT_CACHE_DISK_KEEP", "0") == "1"
-# evicted bytes waiting for the writer (their RAM is held until written);
-# past it an evicted entry is not written (one is always taken when idle)
-QUEUE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_QUEUE_GB", "2") or "2")
+# RAM of evicted entries waiting for the writer (held until their files are
+# written, charged in the batch budget beside the cache: held_bytes); an
+# eviction past it is a plain deletion, as without the tier (4: one 50K-token
+# entry of ~2.5 GB fits, two 1 GB AppWorld entries at once)
+QUEUE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_QUEUE_GB", "4") or "4")
 # shorter entries are not worth a file: their hit saves less than a slab or two
 MIN_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_DISK_MIN_TOKENS", "4096") or "0")
 # the head of the queue waits this long for its load before going without it
@@ -145,8 +147,10 @@ def _read_header(f, path):
     return h, start
 
 
-def _read_blob(path, skip=False):
-    """-> (header, [numpy arrays]) (skip: the header only, size checked)."""
+def _read_blob(path, skip=False, each=None):
+    """-> (header, [numpy arrays]) (skip: the header only, size checked;
+    `each`: applied to every array right after it is read, its numpy
+    buffer dropped before the next one: [each(array)])."""
     with open(path, "rb") as f:
         _nocache(f)
         h, start = _read_header(f, path)
@@ -159,7 +163,8 @@ def _read_blob(path, skip=False):
                 f.seek(start + s["off"])
                 if f.readinto(memoryview(a).cast("B")) != a.nbytes:
                     raise ValueError(f"{path}: short read")
-            out.append(a)
+            out.append(each(a) if each is not None else a)
+            del a
         return h, out
 
 
@@ -242,7 +247,7 @@ class Want:
 
 
 class _Load:
-    __slots__ = ("dent", "req", "live", "data", "error", "done", "ms", "nbytes", "taken")
+    __slots__ = ("dent", "req", "live", "data", "error", "done", "ms", "nbytes", "taken", "held")
 
     def __init__(self, dent, req, live):
         self.dent, self.live = dent, live     # live: uid -> object still in RAM (not read)
@@ -253,15 +258,17 @@ class _Load:
         self.ms = 0.0
         self.nbytes = 0
         self.taken = False                    # finished / discarded by the scheduler
+        self.held = 0                         # charged in DiskTier.held until then
 
 
 class _Write:
-    __slots__ = ("dent", "new", "borrowed", "nbytes", "meta", "L", "covers")
+    __slots__ = ("dent", "new", "borrowed", "nbytes", "meta", "L", "covers", "held")
 
-    def __init__(self, dent, new, borrowed, nbytes, meta, covers=()):
+    def __init__(self, dent, new, borrowed, nbytes, meta, covers=(), held=0):
         self.dent, self.new, self.borrowed, self.nbytes, self.meta = dent, new, borrowed, nbytes, meta
         self.L = dent.L
         self.covers = covers                  # disk entries it makes redundant (dropped once written)
+        self.held = held                      # RAM charged for it (DiskTier.held) until written
 
 
 class DiskTier:
@@ -283,7 +290,9 @@ class DiskTier:
         self.blobs: dict[str, _Blob] = {}
         self.version = 0                      # bumped when an entry becomes loadable / goes
         self.used = 0                         # bytes on disk (blobs + entry files)
-        self.pending = 0                      # bytes queued for the writer
+        self.pending = 0                      # file bytes queued for the writer (disk space)
+        self.held = 0                         # RAM held for the scheduler's count (held_bytes)
+        self.closed = False                   # close(): nothing new taken
         self.queued = 0                       # writer + loader jobs not done
         self.offers = []                      # evicted entries, written at flush
         self.on_drained = None                # called by the writer when its queue empties
@@ -300,6 +309,15 @@ class DiskTier:
         self._wq, self._lq = queue.SimpleQueue(), queue.SimpleQueue()
         self._done = []                                   # finished loads (scheduler polls)
         os.makedirs(self.root, exist_ok=True)
+        # one worker per directory: a second one would clear / LRU the first's
+        # files under it (flock, held for the process's life; released at exit)
+        self._lockf = open(os.path.join(self.root, "pcdisk.lock"), "a")
+        try:
+            fcntl.flock(self._lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self._lockf.close()
+            raise RuntimeError(f"{self.root} is in use by another worker (pcdisk.lock); give "
+                               f"each worker its own QWEN_PROMPT_CACHE_DISK") from None
         self._open(keep)
         for name, q, fn in (("pcdisk-writer", self._wq, self._run_write),
                             ("pcdisk-loader", self._lq, self._run_load)):
@@ -381,8 +399,7 @@ class DiskTier:
             if u not in self.blobs:
                 os.remove(os.path.join(self.root, n))
         with self.lock:
-            unlink = self._fit(0)
-        self._unlink(unlink)
+            self._unlink_locked(self._fit(0))
         log.info("prompt cache disk: %d entries (%.2f GiB) kept from the previous run in %s",
                  len(self.entries), self.used / GIB, self.root)
 
@@ -426,35 +443,64 @@ class DiskTier:
         return u
 
     # --- write: eviction -> file (offer, flush: scheduler thread) ----------------
-    def offer(self, e):
-        """An entry the RAM cache just evicted (no MLX, never raises): written
-        at the next flush (the end of the scheduler's tick)."""
-        try:
-            self.offers.append(e)
-        except Exception:  # noqa: BLE001
-            pass
+    def offer(self, e, held=0):
+        """An entry the RAM cache just evicted (no MLX, no I/O) -> True: it
+        is taken (written at the next flush, the end of the scheduler's
+        tick), its `held` bytes (the RAM its eviction would free: the
+        caller's count) charged in held_bytes() until its file is written;
+        False: not taken, the eviction frees its RAM at once as without the
+        tier (too short, the writer QUEUE_GB behind, the tier closed)."""
+        L = len(e.ids)
+        with self.lock:
+            if self.closed:
+                return False
+            if L < self.min_tokens:
+                self.skipped += 1
+                return False
+            if held and self.held + held > self.queue_bytes:
+                self.skipped += 1
+                why = (f"the writer holds {self.held / GIB:.2f} GiB, +{held / GIB:.2f} would pass "
+                       f"QWEN_PROMPT_CACHE_DISK_QUEUE_GB ({self.queue_bytes / GIB:.1f})")
+            else:
+                self.held += held
+                self.offers.append((e, held))
+                return True
+        log.info("prompt cache disk: evicted entry of %d tokens not written: %s", L, why)
+        return False
+
+    def held_bytes(self):
+        """RAM the tier holds outside the RAM cache's count: evicted entries
+        until their files are written, loads from their start until inserted
+        or dropped. The scheduler charges it beside pc.bytes."""
+        with self.lock:
+            return self.held
+
+    def _release(self, n):
+        with self.lock:
+            self.held -= n
 
     def flush(self):
         """Scheduler thread: the offered entries to the writer. Never raises."""
         offers, self.offers = self.offers, []
-        for e in offers:
+        for e, held in offers:
             try:
-                self._offer(e)
+                held = self._offer(e, held)
             except Exception:  # noqa: BLE001 — costs the entry's file only
                 self.errors += 1
                 log.exception("prompt cache disk: entry of %d tokens not written", len(e.ids))
+            finally:
+                if held:                              # not handed to the writer: freed now
+                    self._release(held)
 
-    def _offer(self, e):
+    def _offer(self, e, held):
+        """-> the held bytes it did not hand to a write job (0: handed over)."""
         L = len(e.ids)
-        if L < self.min_tokens:
-            self.skipped += 1
-            return
         old = getattr(e, "disk_uid", None)
         with self.lock:
             d = self.entries.get(old) if old is not None else None
             if d is not None:                         # loaded from here, unchanged since
                 d.used = time.time()
-                return
+                return held
         segs = {}
         for s, lo, hi in e.chain:
             segs.setdefault(id(s), s)
@@ -463,6 +509,8 @@ class DiskTier:
             states.setdefault(id(st), st)
         seg_u = {k: self._seg_id(s) for k, s in segs.items()}
         st_u = {k: self._st_id(st) for k, st in states.items()}
+        need = set(seg_u.values()) | set(st_u.values())
+        why = None
         with self.lock:
             fresh = [("seg", seg_u[k], s) for k, s in segs.items() if seg_u[k] not in self.blobs]
             fresh += [("st", st_u[k], st) for k, st in states.items() if st_u[k] not in self.blobs]
@@ -471,16 +519,15 @@ class DiskTier:
             nbytes = sum(_size([a.nbytes for a in (x.arrays if kind == "seg"
                                                    else self._st_arrays(x))])
                          for kind, _, x in fresh) + _size([4 * L], 64 * len(e.ckpts) + 4096)
-            why = None
+            # what goes for it, decided before anything changes: the LRU
+            # entries whose files (but the blobs this entry shares: it holds
+            # them) make the room; None: no room even with all of them gone
+            drops = self._plan(nbytes, need) if nbytes <= self.limit else None
             if nbytes > self.limit:
                 why = f"over QWEN_PROMPT_CACHE_DISK_GB ({self.limit / GIB:.1f} GiB)"
-            elif self.pending and self.pending + nbytes > self.queue_bytes:
-                why = (f"the writer is {self.pending / GIB:.2f} GiB behind "
-                       f"(QWEN_PROMPT_CACHE_DISK_QUEUE_GB)")
-            unlink = [] if why else self._fit(nbytes)
-            if why is None and self.used + self.pending + nbytes > self.limit:
-                why = "no room on disk (pending / loading entries)"
-            if why is None:
+            elif drops is None:
+                why = "no room on disk (entries being written / read)"
+            else:
                 uid = _new_uid()
                 meta = {
                     "chain": [[seg_u[id(s)], lo, hi] for s, lo, hi in e.chain],
@@ -494,31 +541,43 @@ class DiskTier:
                 d = DiskEntry(uid, os.path.join(self.root, f"ent-{uid}.bin"), meta,
                               np.asarray(e.ids, dtype=np.int32))
                 new, borrowed = [], []
-                for kind, u, _ in fresh:
-                    b = self.blobs[u] = _Blob(u, kind, os.path.join(self.root,
-                                                                    self._blob_name(u, kind)), 0)
-                    new.append(b)
-                for u in d.blob_uids():
-                    b = self.blobs[u]
-                    b.refs += 1
-                    if not any(b is x for x in new):
-                        borrowed.append(b)
-                # older disk entries whose ids are a prefix of this one (the
-                # turn it continued, loaded back and absorbed in RAM): as the
-                # RAM store absorbs them, the new entry stands for them (an
-                # unquantized one stays under a quantized entry: the only
-                # resume point below quantized_kv_start)
-                covers = [x for x in self.entries.values()
-                          if x.L <= L and not (d.quantized and not x.quantized)
-                          and np.array_equal(x.ids, d.ids[:x.L])]
-                self.entries[uid] = d
-                self.pending += nbytes
-                self.queued += 1
-        self._unlink(unlink)
+                try:
+                    # its references first: the drops below can never take a
+                    # blob it shares (review 2026-10-24 #1: an LRU entry was
+                    # the last holder of the shared system segment)
+                    for kind, u, _ in fresh:
+                        b = self.blobs[u] = _Blob(u, kind, os.path.join(
+                            self.root, self._blob_name(u, kind)), 0)
+                        new.append(b)
+                    for u in d.blob_uids():
+                        b = self.blobs[u]
+                        b.refs += 1
+                        if not any(b is x for x in new):
+                            borrowed.append(b)
+                    self.entries[uid] = d
+                    unlink = []
+                    for x in drops:
+                        unlink += self._drop(x)
+                        self.deleted += 1
+                    self._unlink_locked(unlink)
+                    # older disk entries whose ids are a prefix of this one
+                    # (the turn it continued, loaded back and absorbed in
+                    # RAM): as the RAM store absorbs them, the new entry
+                    # stands for them once written (an unquantized one stays
+                    # under a quantized entry: the only resume point below
+                    # quantized_kv_start)
+                    covers = [x for x in self.entries.values() if x is not d
+                              and x.L <= L and not (d.quantized and not x.quantized)
+                              and np.array_equal(x.ids, d.ids[:x.L])]
+                    self.pending += nbytes
+                    self.queued += 1
+                except BaseException:
+                    self._unregister(d, new)
+                    raise
         if why is not None:
             self.skipped += 1
             log.info("prompt cache disk: evicted entry of %d tokens not written: %s", L, why)
-            return
+            return held
         # zero-copy views (this thread: MLX); the writer only does file I/O
         jobs = []
         try:
@@ -538,22 +597,58 @@ class DiskTier:
         except BaseException:
             jobs = None                               # no half-registered entry
             with self.lock:
-                for b in new:
-                    if self.blobs.get(b.uid) is b:
-                        self.blobs.pop(b.uid)
-                self._drop(d)
+                self._unregister(d, new)
                 self.pending -= nbytes
                 self.queued -= 1
             raise
         e.disk_uid = uid
-        self._wq.put(_Write(d, jobs, borrowed, nbytes, meta, covers))
+        self._wq.put(_Write(d, jobs, borrowed, nbytes, meta, covers, held))
+        return 0
 
-    def _fit(self, nbytes):
-        """Under the lock: delete least recently used entries (written, not
-        being read) until `nbytes` more fit -> the files to unlink."""
-        unlink = []
+    def _unregister(self, d, new):
+        """Under the lock: an entry registered but never handed to the writer
+        out again (its own new blobs, never written, out of the index)."""
+        if self.entries.get(d.uid) is d:
+            self._unlink_locked(self._drop(d))
+        for b in new:
+            if self.blobs.get(b.uid) is b and b.state != "ok":
+                self.blobs.pop(b.uid)
+
+    def _plan(self, nbytes, keep=()):
+        """Under the lock: the least recently used entries (written, not
+        being read) whose deletion makes `nbytes` more fit, the blobs in
+        `keep` never counted as freed (the new entry holds them) -> that
+        list (empty: it fits), None: even all of them would not do. Nothing
+        changes here."""
+        over = self.used + self.pending + nbytes - self.limit
+        if over <= 0:
+            return []
+        refs, out, freed = {}, [], 0
         for d in sorted((d for d in self.entries.values() if d.state == "ok" and not d.pins),
                         key=lambda d: d.used):
+            out.append(d)
+            freed += d.meta_bytes
+            for u in d.blob_uids():
+                b = self.blobs.get(u)
+                if b is None or u in keep:
+                    continue
+                refs[u] = refs.get(u, b.refs) - 1
+                if refs[u] == 0 and b.state == "ok":
+                    freed += b.nbytes
+            if freed >= over:
+                return out
+        return None
+
+    def _fit(self, nbytes):
+        """Under the lock: delete least recently used entries until `nbytes`
+        more fit (as many as there are when they cannot all) -> the files to
+        unlink (the caller queues them, under the lock)."""
+        drops = self._plan(nbytes)
+        if drops is None:
+            drops = sorted((d for d in self.entries.values() if d.state == "ok" and not d.pins),
+                           key=lambda d: d.used)
+        unlink = []
+        for d in drops:
             if self.used + self.pending + nbytes <= self.limit:
                 break
             unlink += self._drop(d)
@@ -581,10 +676,13 @@ class DiskTier:
                 out.append(b.path)
         return out
 
-    def _unlink(self, paths):
+    def _unlink_locked(self, paths):
+        """Under the lock: the unlink job queued while the index already says
+        these files are gone, so a write of the same blob registered after it
+        (a re-offer of a live segment) is queued after it (FIFO): a late
+        unlink of the old file can never delete the new one (review #5)."""
         if paths:
-            with self.lock:
-                self.queued += 1
+            self.queued += 1
             self._wq.put(paths)
 
     def _dump_layout(self, layout):
@@ -683,7 +781,7 @@ class DiskTier:
                     if self.entries.get(x.uid) is x and x.state == "ok" and not x.pins:
                         over += self._drop(x)
                 over += self._fit(0)                  # the estimate was short: LRU again
-            self._unlink(over)
+                self._unlink_locked(over)             # under the lock (review #5)
             log.info("prompt cache disk: wrote an entry of %d tokens (%.1f MB new, %d blobs "
                      "shared) in %.2f s; %d entries, %.2f GiB on disk", job.L, (written + n) / 1e6,
                      len(job.borrowed), time.time() - t, len(self.entries), self.used / GIB)
@@ -706,8 +804,11 @@ class DiskTier:
             log.exception("prompt cache disk: writing an entry of %d tokens failed (lost, as "
                           "an eviction without the disk tier)", job.L)
         finally:
+            # the views are gone (job.new): the evicted entry's RAM is free
             with self.lock:
                 self.pending -= job.nbytes
+                self.held -= job.held
+                job.held = 0
 
     def _run_load(self, job):
         t = time.time()
@@ -719,12 +820,14 @@ class DiskTier:
                     b = self.blobs.get(u)
                 if b is None or b.state != "ok":
                     raise RuntimeError(f"blob {u} is not on disk")
-                h, arrs = _read_blob(b.path)
+                # each array to a constant MLX array (allocation + copy, no
+                # graph: as to_mlx) as soon as it is read: the transient is one
+                # array, not the blob (review #3: 2x a 1.6 GB first segment)
+                h, arrs = _read_blob(b.path, each=mx.array)
                 if h.get("uid") != u:
                     raise ValueError(f"{b.path}: holds {h.get('uid')}")
                 job.nbytes += sum(a.nbytes for a in arrs)
-                # constant MLX arrays (allocation + copy, no graph): as to_mlx
-                job.data[u] = (h, [mx.array(a) for a in arrs])
+                job.data[u] = (h, arrs)
                 del arrs
         except Exception as e:  # noqa: BLE001 — a failed load is a miss
             job.error = e
@@ -776,15 +879,23 @@ class DiskTier:
             return sum(b.nbytes for u in d.blob_uids() if u not in live
                        for b in [self.blobs.get(u)] if b is not None)
 
-    def load(self, d, ram_entries, req=None):
+    def load(self, d, ram_entries, req=None, need=None):
         """Start reading `d` (pinned until finish / discard) -> the job, or
-        None: `d` left the index since the peek (the writer's LRU)."""
-        job = _Load(d, req, self._live(d, ram_entries))
+        None: `d` left the index since the peek (the writer's LRU), or the
+        tier is closed. `need` (cost(); computed here when None) is charged
+        in held_bytes() from now until finish / discard: the scheduler's
+        budget checks see the load before its arrays exist (review #2)."""
+        live = self._live(d, ram_entries)
+        if need is None:
+            need = self.cost(d, ram_entries)
+        job = _Load(d, req, live)
         with self.lock:
-            if self.entries.get(d.uid) is not d or d.state != "ok":
+            if self.closed or self.entries.get(d.uid) is not d or d.state != "ok":
                 return None
             d.pins += 1
             d.used = time.time()
+            job.held = need
+            self.held += need
             self.queued += 1
         self._lq.put(job)
         return job
@@ -801,6 +912,8 @@ class DiskTier:
         job.taken = True
         with self.lock:
             job.dent.pins -= 1
+            self.held -= job.held                     # inserted (pc.bytes now) or dropped
+            job.held = 0
 
     def discard(self, job):
         self._unpin(job)
@@ -858,6 +971,22 @@ class DiskTier:
         with self.lock:
             return self.idle.wait_for(lambda: self.queued == 0, timeout)
 
+    def close(self, timeout=10.0):
+        """Shutdown (worker main, after the scheduler stopped): nothing new
+        is taken; wait for the writer and the loader to go idle, so neither
+        is inside a file write over an MLX buffer or an mx.array when the
+        interpreter tears MLX down (their threads are daemons, blocked in
+        their queue's get then) -> False on timeout. The offers not flushed
+        are dropped (the RAM cache is not written at shutdown)."""
+        with self.lock:
+            self.closed = True
+            offers, self.offers = self.offers, []
+            self.held -= sum(h for _, h in offers)
+        ok = self.drain(timeout)
+        if ok:                                        # the directory is free for another one
+            self._lockf.close()
+        return ok
+
     def stats(self):
         with self.lock:
             return {"entries": len(self.entries), "bytes": self.used, "writes": self.writes,
@@ -865,7 +994,7 @@ class DiskTier:
                     "skipped": self.skipped, "errors": self.errors, "deleted": self.deleted,
                     "loads": self.loads, "load_bytes": self.load_bytes, "hits": self.hits,
                     "discards": self.discards, "read_ms": round(self.read_ms, 1),
-                    "pending": self.pending}
+                    "pending": self.pending, "held": self.held}
 
 
 def key_of(**parts):

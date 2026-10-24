@@ -5,6 +5,7 @@ gets it loaded and resumes from it exactly as from RAM (== cold), for fp32,
 fp16 and quantized KV; shared segments / states are blobs written once and
 reused live; the disk limit is LRU; I/O errors never fail a request; off
 changes nothing."""
+import json
 import logging
 import os
 
@@ -28,7 +29,7 @@ def tier(path, limit=1 << 30, key="k", **kw):
 
 
 def files(path):
-    return sorted(n for n in os.listdir(path) if n != "pcdisk.json")
+    return sorted(n for n in os.listdir(path) if n not in ("pcdisk.json", "pcdisk.lock"))
 
 
 def turns(seed=60, system=40):
@@ -342,6 +343,9 @@ def test_keep_across_runs(dense, small, tmp_path, monkeypatch):
     n, nbytes = len(disk.entries), disk.stats()["bytes"]
     assert n == 1
     names = files(tmp_path)
+    with pytest.raises(RuntimeError, match="in use by another worker"):
+        tier(tmp_path, key="K1", keep=True)                 # one worker per directory (flock)
+    assert disk.close() and not disk.offer(pc.entries[0], 1)  # closed: nothing taken
     (tmp_path / "seg-junk.bin.tmp").write_bytes(b"x")       # a torn write of a dead process
     again = tier(tmp_path, key="K1", keep=True)
     assert len(again.entries) == n and again.stats()["bytes"] == nbytes
@@ -353,7 +357,8 @@ def test_keep_across_runs(dense, small, tmp_path, monkeypatch):
     assert run(s2, [x])["a1"] == run(scheduler(dense, max_batch=1), [request(a[1], 6, "a1")])["a1"]
     assert x.reused > 0 and again.stats()["loads"] == 1
     assert check_cold(s2.eng._pcache, Cold(dense))
-    tier(tmp_path, key="K2", keep=True)
+    assert again.close()
+    assert tier(tmp_path, key="K2", keep=True).close()
     assert files(tmp_path) == []
     tier(tmp_path, key="K1", keep=True)
     assert files(tmp_path) == []
@@ -400,9 +405,14 @@ def test_insert_respects_the_headroom(dense, small, monkeypatch):
 
 
 def test_disk_key(tmp_path, monkeypatch):
-    """Engine._disk_key: stable; moved by the weights and by numerics knobs
-    (any QWEN_* but the sizing / prompt-cache ones), not by those."""
-    (tmp_path / "model.safetensors").write_bytes(b"x" * 10)
+    """Engine._disk_key: stable; moved by the weights (a safetensors header
+    of the same size too) and by numerics knobs (any QWEN_* but the sizing /
+    prompt-cache ones; QWEN_PROMPT_CACHE_REPLY moves it: review #4), not by
+    those."""
+    def st(header):
+        raw = json.dumps(header).encode()
+        return len(raw).to_bytes(8, "little") + raw + b"\0" * 64
+    (tmp_path / "model.safetensors").write_bytes(st({"w": {"dtype": "F16", "shape": [4, 8]}}))
     (tmp_path / "config.json").write_text("{}")
     eng = worker.Engine(str(tmp_path))
     eng.max_batch = 16
@@ -415,6 +425,12 @@ def test_disk_key(tmp_path, monkeypatch):
     monkeypatch.setenv("QWEN_KV_BITS", "8")
     assert eng._disk_key() != k
     monkeypatch.delenv("QWEN_KV_BITS")
+    monkeypatch.setattr(worker, "PROMPT_CACHE_REPLY", not worker.PROMPT_CACHE_REPLY)
+    assert eng._disk_key() != k
+    monkeypatch.undo()
+    assert eng._disk_key() == k
+    (tmp_path / "model.safetensors").write_bytes(st({"w": {"dtype": "F16", "shape": [8, 4]}}))
+    assert eng._disk_key() != k                             # same size, another header
     (tmp_path / "model.safetensors").write_bytes(b"x" * 11)
     assert eng._disk_key() != k
 
@@ -498,3 +514,283 @@ def test_wait_bound_and_abandoned_load(dense, small, tmp_path, monkeypatch):
     st = disk.stats()
     assert st["discards"] == 1 and st["loads"] == 0
     assert not any(d.pins for d in disk.entries.values()) and not disk.done()
+
+
+# --- review 2026-10-24 (scratchpad/review_disk/): repros of the findings ------------
+def _kv(n=8, seed=0):
+    mx.random.seed(seed)
+    k, v = mx.random.normal((1, 2, n, 4)), mx.random.normal((1, 2, n, 4))
+    mx.eval(k, v)
+    return k, v
+
+
+def _entry(ids, chain):
+    from mlx_vlm.models.cache import KVCache
+    return worker._Entry(list(ids), chain, {}, None, [("kv", KVCache)], False)
+
+
+def _consistent(t):
+    """Index == files: every blob / entry file there, nothing else, `used` ==
+    their sizes; no pending blob or entry left behind."""
+    names = set(files(t.root))
+    want = {os.path.basename(b.path) for b in t.blobs.values()} | \
+        {os.path.basename(d.path) for d in t.entries.values()}
+    assert names == want, (names, want)
+    assert t.used == sum(os.path.getsize(os.path.join(t.root, n)) for n in names)
+    assert all(b.state == "ok" for b in t.blobs.values())
+    assert all(d.state == "ok" for d in t.entries.values()) and t.pending == 0
+
+
+def test_lru_never_drops_a_blob_the_new_entry_shares(tmp_path):
+    """Review #1: the disk is full and the only LRU entry is the last holder
+    of the segment the new entry shares (a system block): nothing breaks.
+    That entry is not dropped for nothing (its deletion would free only its
+    own small file: no room either way), the new entry is skipped, the index
+    stays consistent, and a later entry sharing both segments is written and
+    loads them bit for bit (the old code: KeyError, the shared segment's file
+    deleted, its blob left pending, every later entry with it lost)."""
+    t = tier(tmp_path)
+    S = worker._Seg(0, 8, [_kv(8, 1)])
+    t.offer(_entry(range(8), [(S, 0, 8)]))
+    t.flush()
+    assert t.drain()
+    t.limit = t.used + 4096
+    T = worker._Seg(8, 16, [_kv(8, 2)])
+    t.offer(_entry(range(100, 116), [(S, 0, 8), (T, 8, 16)]))
+    t.flush()
+    assert t.drain()
+    st = t.stats()
+    assert st["errors"] == 0 and st["deleted"] == 0 and st["entries"] == 1 and st["skipped"] == 1
+    _consistent(t)
+    t.limit = 1 << 30
+    C = _entry(range(200, 216), [(S, 0, 8), (T, 8, 16)])
+    t.offer(C)
+    t.flush()
+    assert t.drain() and t.stats()["errors"] == 0 and len(t.entries) == 2
+    _consistent(t)
+    d = t.entries[C.disk_uid]
+    del C
+    job = t.load(d, [])
+    assert job.done.wait(10) and t.done() == [job]
+    t._segs.clear()                                     # read them: S, T are alive here
+    e = t.finish(job)
+    for (s, _, _), want in zip(e.chain, (S, T)):
+        assert all(mx.array_equal(x, y).item() for x, y in zip(s.arrays, want.arrays))
+    # and when dropping the LRU entry does make room, it goes, the shared blob stays
+    t.limit = t.used + 4096
+    U = worker._Seg(16, 24, [_kv(8, 3)])
+    t.offer(_entry(range(300, 324), [(S, 0, 8), (U, 16, 24)]))
+    t.flush()
+    assert t.drain() and t.stats()["errors"] == 0
+    _consistent(t)
+
+
+def test_late_unlink_never_deletes_a_rewritten_blob(tmp_path):
+    """Review #5: the writer drops an entry (LRU / covered) whose segment is
+    still alive in RAM; the unlink is queued under the lock, so a re-offer of
+    that segment registered right after is written after it: its file stays,
+    and it loads (was: the late unlink deleted the fresh file, the index said
+    "ok", loads failed with FileNotFoundError)."""
+    t = tier(tmp_path)
+    S = worker._Seg(0, 8, [_kv(8, 4)])
+    A = _entry(range(8), [(S, 0, 8)])
+    t.offer(A)
+    t.flush()
+    assert t.drain()
+    dA = t.entries[A.disk_uid]
+    with t.lock:                                        # as _run_write does it
+        t._unlink_locked(t._drop(dA))
+    t.offer(_entry(range(100, 108), [(S, 0, 8)]))
+    t.flush()
+    assert t.drain()
+    _consistent(t)
+    (dB,) = t.entries.values()
+    job = t.load(dB, [])
+    assert job.done.wait(10) and job.error is None
+
+
+def test_eviction_ram_is_charged_until_written(dense, small, tmp_path, monkeypatch):
+    """Review #2: an entry evicted to disk keeps its RAM until its file is
+    written; pc.charged() (what every budget check takes) counts it until
+    then; past QWEN_PROMPT_CACHE_DISK_QUEUE_GB an eviction frees at once
+    (not written), as without the tier."""
+    import threading
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    run(sched, [request([IM_START] + prompts([60], 210)[0] + GEN, 2, "x")])
+    (e,) = pc.entries
+    n = pc.bytes
+    gate = threading.Event()
+    slow = pcdisk._write_blob
+
+    def held_write(*a, **k):
+        gate.wait(10)
+        return slow(*a, **k)
+    monkeypatch.setattr(pcdisk, "_write_blob", held_write)
+    disk = pc.disk = tier(tmp_path)
+    pc.evict()
+    assert pc.bytes == 0 and pc.charged() == n and disk.held_bytes() == n
+    disk.flush()
+    assert pc.charged() == n                            # the writer holds the views
+    gate.set()
+    assert disk.drain() and pc.charged() == 0 and disk.stats()["writes"] == 1
+    # the queue cap: nothing taken past it
+    pc.entries, e.disk_uid = [e], None
+    pc._recount()
+    small_q = pc.disk = tier(tmp_path / "q", queue_bytes=n - 1)
+    pc.evict()
+    assert pc.charged() == 0 and small_q.offers == [] and small_q.stats()["skipped"] == 1
+
+
+def test_headroom_evictions_free_at_once(dense, small, tmp_path, monkeypatch):
+    """Review #2: store / insert evict for the batch's headroom with spill
+    False (freed now: the new segment is copied right after), and spill for
+    the soft cap only while the held RAM fits that headroom."""
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    ps = [[IM_START] + p + GEN for p in prompts([40, 40, 40], 220)]
+    for i, p in enumerate(ps):
+        run(sched, [request(p, 2, f"p{i}")])
+    e0, e1, e2 = pc.entries
+    disk = pc.disk = tier(tmp_path)
+    # insert e2 beside e0, e1 with a headroom for e2 alone: both freed at once
+    pc.entries = [e0, e1]
+    pc._recount()
+    assert pc.insert(e2, limit=e2.nbytes + 1)
+    assert pc.entries == [e2] and disk.offers == [] and pc.charged() == pc.bytes
+    # the soft cap with room: written (held), not freed
+    pc.entries = [e0, e2]
+    pc._recount()
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", TINY)
+    assert pc.insert(e1, limit=1 << 40)
+    assert pc.entries == [e1] and len(disk.offers) == 2 and pc.charged() > pc.bytes
+    disk.flush()
+    assert disk.drain() and pc.charged() == pc.bytes
+    # store: the copy of the new segment comes right after the evictions
+    cache = pc.restore(e1, len(e1.ids))
+    pc.entries = [e0, e2]
+    pc._recount()
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    extra = worker._Seg.estimate(cache, 0, len(e1.ids))
+    new, _ = pc.store(e1.ids, cache, {}, limit=extra + pc.bytes_of([e2]) + 1)
+    assert new is not None and disk.offers == []        # e0 / e2: whatever went, freed now
+    assert not (any(x is e0 for x in pc.entries) and any(x is e2 for x in pc.entries))
+    assert pc.charged() == pc.bytes
+
+
+def test_admission_waits_for_the_writer(dense, small, tmp_path, monkeypatch):
+    """Review #2: _fits evicts to disk what admission needs, then admits
+    only once the writer released their RAM (reserved + need + charged within
+    the budget), never on the count alone; the answers are as without it."""
+    import time
+    a_ids, b_ids = prompts([10, 9], 105)
+    from test_prompt_cache import cold, fill
+    ref = {"a": cold(dense, a_ids, 30, "a"), "b": cold(dense, b_ids, 6, "b")}
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    fill(sched)
+    disk = pc.disk = tier(tmp_path)
+    slow = pcdisk._write_blob
+
+    def write(*a, **k):
+        time.sleep(0.05)
+        return slow(*a, **k)
+    monkeypatch.setattr(pcdisk, "_write_blob", write)
+    a, b = request(a_ids, 30, "a"), request(b_ids, 6, "b")
+    seen = []
+    fits = sched._fits
+
+    def spy(req, rows):
+        ok = fits(req, rows)
+        if req is b and rows:
+            seen.append((ok, sched.reserved + sched._reserve(b) + pc.charged() <= sched.budget,
+                         disk.held_bytes()))
+        return ok
+
+    def squeeze(t, s):
+        if t == 3:
+            s.budget = s.reserved + s._reserve(b) + pc.bytes - 1
+    sched._fits = spy
+    got = run(sched, [a, b], arrive={3: [b]}, on_tick=squeeze)
+    assert got == ref
+    assert any(not ok and held for ok, _, held in seen)    # it waited for the writer
+    assert all(fit for ok, fit, _ in seen if ok)            # admitted only within the budget
+    assert disk.drain() and disk.stats()["writes"] >= 1 and pc.charged() == pc.bytes
+
+
+def test_load_is_charged_until_inserted(dense, small, tmp_path, monkeypatch):
+    """Review #2: a load's bytes are held from its start (before its arrays
+    exist) until it is inserted (then they are pc.bytes) or dropped."""
+    import threading
+    a, b = turns(230)
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    disk = pc.disk = tier(tmp_path)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", TINY)
+    for rid, ids in (("a0", a[0]), ("b", b)):
+        run(sched, [request(ids, 4, rid)])
+        assert disk.drain()
+    gate = threading.Event()
+    slow = pcdisk._read_blob
+
+    def read(*a, **k):
+        gate.wait(10)
+        return slow(*a, **k)
+    monkeypatch.setattr(pcdisk, "_read_blob", read)
+    x = request(a[1], 6, "a1")
+    held = []
+
+    def watch(t, s):
+        held.append(disk.held_bytes())
+        if t == 2:
+            gate.set()
+    out = run(sched, [x], on_tick=watch)["a1"]
+    assert out == run(scheduler(dense, max_batch=1), [request(a[1], 6, "a1")])["a1"]
+    assert x.reused > 0 and disk.stats()["loads"] == 1
+    assert held[1] > 0 and held[-1] == disk.held_bytes() == 0
+
+
+def test_load_reads_one_array_at_a_time(tmp_path):
+    """Review #3: the loader turns each array into an MLX array as it is
+    read: the numpy transient is one array, not the blob."""
+    import gc
+    import tracemalloc
+    t = tier(tmp_path)
+    kv = [(mx.random.normal((1, 2, 4096, 64)), mx.random.normal((1, 2, 4096, 64)))
+          for _ in range(8)]
+    mx.eval(kv)
+    S = worker._Seg(0, 4096, kv)
+    t.offer(_entry(range(4096), [(S, 0, 4096)]))
+    t.flush()
+    assert t.drain()
+    one, blob = kv[0][0].nbytes, S.nbytes
+    del kv, S
+    gc.collect()
+    (d,) = t.entries.values()
+    tracemalloc.start()
+    job = pcdisk._Load(d, None, {})
+    t._run_load(job)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert job.error is None and job.nbytes == blob
+    assert peak < 2 * one < blob / 4
+
+
+def test_insert_failure_drops_the_load(dense, small, tmp_path, monkeypatch):
+    """Review #6: an exception while a loaded entry goes in drops that load
+    (unpinned, hold released: busy() false again); the request goes on as
+    without the tier."""
+    a, b = turns(240)
+    _, ox = play(scheduler(dense), a, b, monkeypatch, TINY)
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    disk = pc.disk = tier(tmp_path)
+
+    def boom(*a, **k):
+        raise MemoryError("no room")
+    monkeypatch.setattr(pc, "insert", boom)
+    got, x = play(sched, a, b, monkeypatch, TINY, disk)
+    assert x.reused == ox.reused
+    assert not disk.busy() and disk.held_bytes() == 0 and disk.stats()["discards"] == 1
