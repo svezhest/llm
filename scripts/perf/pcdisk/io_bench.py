@@ -141,8 +141,7 @@ def main():
             peak = mx.get_peak_memory() / 1e9
             del got
             with disk.lock:
-                paths = disk._drop(d)
-            disk._unlink(paths)
+                disk._unlink_locked(disk._drop(d))
             assert disk.drain(600)
             row = {"round": r, "size_gb": gb, "tokens": tokens, "entry_gb": nbytes / 1e9,
                    "flush_ms": flush_ms, "write_s": write_s, "write_gbps": nbytes / 1e9 / write_s,

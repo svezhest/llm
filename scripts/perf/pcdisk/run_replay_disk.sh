@@ -15,7 +15,7 @@ S=${PERF_OUT:-/tmp/perf}/pcdisk
 R=$WT/docs/perf/2026-10-24/raw/pcdisk
 mkdir -p $S $R
 WLOG=$S/w_$NAME.log
-DDIR=$S/disk_$NAME
+DDIR=${PCDISK_DIR:-$S}/disk_$NAME      # PCDISK_DIR: where the cache files go (default $S)
 pat='\.venv/bin/python3? ([^ ]*/)?(worker|sched_timer)\.py'
 stop_worker() {
   for pid in $(pgrep -f "$pat"); do kill -TERM $pid; done

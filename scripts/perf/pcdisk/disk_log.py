@@ -83,11 +83,19 @@ def main():
     done = P["requests"]
     if not done:
         sys.exit("no finished requests")
+    lost = 0
     for r in done:
-        r["cls"] = "disk" if r["id"] in E["loads"] else ("ram" if r.get("hit") else "miss")
+        # a disk hit = an entry loaded for it AND a resume (cached > 0); loaded but resumed from
+        # nothing (the entry left RAM again before its turn) is a MISS, counted in `lost`
+        loaded = r["id"] in E["loads"]
+        if loaded and r["cached"] > 0:
+            r["cls"] = "disk"
+        else:
+            r["cls"] = "ram" if r.get("hit") and r["cached"] > 0 else "miss"
+            lost += loaded
         r["w_ttft"] = (r["queue"] + r["ttft"]) / 1000
-    out = {"requests": len(done)}
-    print(f"requests {len(done)}")
+    out = {"requests": len(done), "loaded_unused": lost}
+    print(f"requests {len(done)} (loaded for but resumed from nothing, in miss: {lost})")
     for cls in ("miss", "ram", "disk"):
         xs = [r for r in done if r["cls"] == cls]
         if not xs:

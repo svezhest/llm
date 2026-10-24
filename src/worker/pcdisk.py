@@ -84,6 +84,9 @@ KEEP = os.environ.get("QWEN_PROMPT_CACHE_DISK_KEEP", "0") == "1"
 QUEUE_GB = _num("QWEN_PROMPT_CACHE_DISK_QUEUE_GB", "4", "4")
 # shorter entries are not worth a file: their hit saves less than a slab or two
 MIN_TOKENS = _num("QWEN_PROMPT_CACHE_DISK_MIN_TOKENS", "4096", "0", int)
+# loads per waiting request: another one only when the entry it loaded left
+# the RAM cache before its turn (evicted by the stores ahead of it)
+MAX_LOADS = 3
 # the head of the queue waits this long for its load before going without it
 WAIT_S = _num("QWEN_PROMPT_CACHE_DISK_WAIT_S", "10", "0")
 # the RAM the tier holds (held_bytes) is gone within ~1 s per GB written: a
@@ -264,13 +267,16 @@ class DiskEntry:
 
 class Want:
     """A waiting request's view of the disk tier (memoized on _Req.disk)."""
-    __slots__ = ("key", "ids", "dent", "depth", "ram", "job", "t0", "held_since")
+    __slots__ = ("key", "ids", "dent", "depth", "ram", "job", "t0", "held_since", "loads",
+                 "kept")
 
     def __init__(self):
         self.key = None                       # (disk version, RAM cache version) of the peeks
         self.ids = None                       # its lookup ids as int32
         self.dent, self.depth, self.ram = None, 0, 0
-        self.job = None                       # its load (one per request)
+        self.job = None                       # its last load
+        self.loads = 0                        # loads started for it (<= MAX_LOADS)
+        self.kept = False                     # its last load went into the RAM cache
         self.t0 = 0.0
         self.held_since = None                # _fits: first waited for the tier's held RAM
 

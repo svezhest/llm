@@ -5,6 +5,7 @@
 #   3. AppWorld replay, QWEN_PROMPT_CACHE_GB=3, 8 episodes x 10 min: off, on, off, on (interleaved);
 #   4. summary.md: compare.py over the four runs + the disk tier's numbers.
 # usage: run_all.sh [DURATION_MIN=10] [EPISODES=8] [PCACHE_GB=3]   (GPU lease held; ~65 min)
+# PCDISK_DIR (default $PERF_OUT/pcdisk): the directory for the cache files of every step.
 setopt NO_BG_NICE
 DUR=${1:-10}; EP=${2:-8}; PCGB=${3:-3}
 WT=${0:A:h:h:h:h}
@@ -19,7 +20,7 @@ if pgrep -f "$pat" >/dev/null; then       # the bench needs the GPU and the memo
 fi
 echo "=== io_bench $(date)" | tee -a $S/driver.log
 (cd $WT/src/worker && $PY ../../scripts/perf/pcdisk/io_bench.py --sizes-gb 1,2.5 --rounds 3 \
-   --dir $S/io_dir --out $S/io_bench.json) 2>&1 | tee $S/io_bench.txt
+   --dir ${PCDISK_DIR:-$S}/io_dir --out $S/io_bench.json) 2>&1 | tee $S/io_bench.txt
 cp $S/io_bench.json $S/io_bench.txt $R/
 echo "=== exact $(date)" | tee -a $S/driver.log
 $WT/scripts/perf/pcdisk/run_exact.sh 3 || echo "EXACT CHECK FAILED" | tee -a $S/driver.log

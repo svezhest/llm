@@ -1104,11 +1104,23 @@ class _PrefixCache:
         most recently used goes: its next turn is the furthest away. LRU
         there evicts exactly the one whose turn is next, and its re-prefill
         stores a new entry that evicts the next one in line (every turn a
-        miss: the round-robin worst case)."""
+        miss: the round-robin worst case).
+        With the disk tier, the wanted entries go in reverse queue order
+        (`wanted` is in queue order: _Scheduler._wanted): the one whose
+        request comes last first. MRU there evicted the entry loaded back
+        for a waiting request (used = its insert) before that request's turn,
+        and it went cold anyway (GPU gate 2026-10-24: 20 of 57 loads)."""
         now = time.time()
+        order = None
+        if self.disk is not None and wanted:
+            order = {}
+            for i, x in enumerate(wanted):
+                order.setdefault(id(x), i)
 
         def key(e):
             w = any(e is x for x in wanted)
+            if w and order is not None:
+                return (True, -order.get(id(e), 0))   # the furthest back first
             if self.stale(e, now, w):
                 return (w, 0, e.used)                 # stale: LRU
             return (w, 1, -e.used)                    # live: MRU
@@ -3853,9 +3865,16 @@ class _Scheduler:
             with self.cv:
                 reqs = list(itertools.islice(self.waiting, self.max_batch))
             if reqs and not disk.busy():
+                # the RAM entries the requests ahead resume from (the admitted
+                # one whose prefill has not started first): a load must fit
+                # beside them under the soft cap, else the stores before its
+                # turn evict it again (victim: the furthest back first)
+                task = self.task_row
+                ahead = [task.req] if task is not None and not task.started else []
                 for req in reqs:
-                    if self._disk_want(disk, req):
+                    if self._disk_want(disk, req, ahead):
                         break
+                    ahead.append(req)
             if self.task is not None or not reqs:
                 return False
             w = reqs[0].disk
@@ -3869,12 +3888,17 @@ class _Scheduler:
             log.exception("prompt cache disk: load step failed")
             return False
 
-    def _disk_want(self, disk, req):
+    def _disk_want(self, disk, req, ahead=()):
         """Start loading req's deepest disk hit when it beats its RAM hit by
         at least a slab (PREFILL_STEP) and fits: beside the batch (budget +
-        prefill reserve - reserved, as a store) and in memory now (the live
-        check of _fits) -> True: started. The peeks are memoized on req.disk
-        until either cache changes (versions)."""
+        prefill reserve - reserved, as a store), in memory now (the live
+        check of _fits) and, unless req is the first in line, under the soft
+        cap beside the RAM entries the requests `ahead` of it resume from
+        -> True: started. The peeks are memoized on req.disk until either
+        cache changes (versions). A request loads again (at most
+        pcdisk.MAX_LOADS in all) when its loaded entry left the RAM cache
+        before its turn and is on disk again (never after a failed load or
+        one not kept)."""
         if req.images:
             return False
         look = self._lookup_ids(req)
@@ -3883,8 +3907,8 @@ class _Scheduler:
         w = req.disk
         if w is None:
             w = req.disk = pcdisk.Want()
-        if w.job is not None:                   # one load per request
-            return False
+        if w.job is not None and (not w.job.taken or not w.kept or w.loads >= pcdisk.MAX_LOADS):
+            return False                        # loading, failed / not kept, or out of loads
         pc = self.eng._pcache
         key = (disk.version, pc.version)
         if w.key != key:
@@ -3905,12 +3929,23 @@ class _Scheduler:
         if (self.reserved + pc.charged() + need > self.budget
                 or live + need + self.prefill_reserve > self.cap):
             return False
-        w.job, w.t0 = disk.load(w.dent, pc.entries, req, need), time.time()
-        if w.job is None:                       # gone from disk since the peek: peek again
+        if ahead:
+            mine = []
+            for r in ahead:
+                e = None if r.images else self._peek(r)[0]
+                if e is not None and not any(e is x for x in mine):
+                    mine.append(e)
+            if mine and pc.bytes_of(mine) + need > PROMPT_CACHE_GB * GIB:
+                return False                    # would be evicted before its turn
+        job = disk.load(w.dent, pc.entries, req, need)
+        if job is None:                         # gone from disk since the peek: peek again
             w.key = None
             return False
+        w.job, w.t0, w.kept = job, time.time(), False
+        w.loads += 1
         log.info("id=%s prompt cache disk: loading an entry of %d tokens (%.1f MB to read) for a "
-                 "%d-token hit (%d in RAM)", req.id, w.dent.L, need / 1e6, w.depth, w.ram)
+                 "%d-token hit (%d in RAM)%s", req.id, w.dent.L, need / 1e6, w.depth, w.ram,
+                 f", load {w.loads}" if w.loads > 1 else "")
         return True
 
     @staticmethod
@@ -3986,6 +4021,8 @@ class _Scheduler:
         if pc.insert(e, limit=self.budget + self.prefill_reserve - self.reserved,
                      wanted=self._wanted, spare=spare):
             disk.hits += 1
+            if req.disk is not None:
+                req.disk.kept = True            # it may load again if evicted before its turn
             log.info("id=%s prompt cache disk: entry of %d tokens loaded (%.1f MB read in %.0f "
                      "ms; %d entries, %.1f MB total)", req.id, len(e.ids), job.nbytes / 1e6,
                      job.ms, len(pc.entries), pc.bytes / 1e6)

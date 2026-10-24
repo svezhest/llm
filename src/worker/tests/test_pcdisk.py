@@ -1247,3 +1247,103 @@ def test_env_parsed_only_with_the_tier_on(tmp_path):
     on = subprocess.run([sys.executable, "-c", code], env=env, cwd=cwd, capture_output=True,
                         text=True, check=True).stdout
     assert "QWEN_PROMPT_CACHE_DISK_GB='3O'" in on and on.split()[-2:] == ["32.0", "0"]
+
+
+# --- GPU gate 2026-10-24: a loaded entry evicted before its request's turn ---------
+def test_victim_wanted_in_queue_order_with_the_tier(dense, small, tmp_path, monkeypatch):
+    """With the tier, wanted entries go in reverse queue order (the one
+    whose request comes last first), whatever their recency: the entry just
+    loaded for the 3rd in line (MRU: used = its insert) is no longer the
+    first wanted victim. Without the tier the order is as before (MRU)."""
+    import time
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    ps = [[IM_START] + p + GEN for p in prompts([30, 30, 30], 400)]
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    for i, p in enumerate(ps):
+        run(sched, [request(p, 2, f"p{i}")])
+    e0, e1, e2 = pc.entries
+    now = time.time()
+    e0.used, e1.used, e2.used = now - 3, now - 2, now        # e2: just loaded (MRU)
+    wanted = [e0, e2, e1]                                     # queue order of their requests
+    assert pc.victim(pc.entries, wanted) is e2                # no tier: MRU
+    pc.disk = tier(tmp_path)
+    assert pc.victim(pc.entries, wanted) is e1                # the furthest back
+    assert pc.victim([e0, e2], wanted) is e2
+    assert pc.victim(pc.entries, [e0]) in (e1, e2)            # unwanted still go first
+    pc.disk.close()
+
+
+def _two_on_disk(dense, tmp_path, monkeypatch):
+    """Conversations a and c: a[0]'s and c[0]'s entries on disk, an unrelated
+    one in RAM; a[1] and c[1] waiting (not admitted) -> sched, disk, x1, x2."""
+    a = conversation(2, 410, system=40, user=lambda i: 9, answer=lambda i: 10)
+    c = conversation(2, 420, system=40, user=lambda i: 9, answer=lambda i: 10)
+    b = [IM_START] + prompts([50], 430)[0] + GEN
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    disk = pc.disk = tier(tmp_path)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", TINY)
+    for rid, ids in (("a0", a[0]), ("c0", c[0]), ("b", b)):
+        run(sched, [request(ids, 4, rid)])
+        assert disk.drain()
+    assert len(disk.entries) == 2 and len(pc.entries) == 1
+    x1, x2 = request(a[1], 4, "a1"), request(c[1], 4, "c1")
+    sched.waiting.extend([x1, x2])
+    return sched, disk, x1, x2
+
+
+def _load(sched, disk, req, ahead=()):
+    if not sched._disk_want(disk, req, list(ahead)):
+        return False
+    req.disk.job.done.wait(10)
+    assert disk.drain()
+    for job in disk.done():
+        sched._disk_take(disk, job)
+    return True
+
+
+def test_no_load_that_the_requests_ahead_would_evict(dense, small, tmp_path, monkeypatch):
+    """A load for the 2nd in line starts only when it fits under the soft cap
+    beside the entry the 1st resumes from (else the stores before its turn
+    evict it again and it goes cold anyway: 20 of 57 loads in the GPU gate)."""
+    sched, disk, x1, x2 = _two_on_disk(dense, tmp_path, monkeypatch)
+    pc = sched.eng._pcache
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    assert _load(sched, disk, x1)
+    (e1,) = [e for e in pc.entries if e.ids == x1.ids[:len(e.ids)]]
+    d2 = disk.peek(np.asarray(sched._lookup_ids(x2), dtype=np.int32), sched._ends(x2))[0]
+    need = disk.cost(d2, pc.entries)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", (e1.nbytes + need / 2) / worker.GIB)
+    assert not sched._disk_want(disk, x2, [x1])             # would evict a1's entry
+    assert x2.disk.job is None
+    assert _load(sched, disk, x2, [])                        # first in line: always
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    sched.waiting.clear()
+    disk.close()
+
+
+def test_reload_when_the_loaded_entry_left_before_its_turn(dense, small, tmp_path, monkeypatch,
+                                                           caplog):
+    """A request whose loaded entry was evicted again before its turn loads it
+    again (written back first), at most pcdisk.MAX_LOADS times in all; its
+    turn then resumes from it as from RAM."""
+    sched, disk, x1, x2 = _two_on_disk(dense, tmp_path, monkeypatch)
+    pc = sched.eng._pcache
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", BIG)
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    for n in range(1, pcdisk.MAX_LOADS + 1):
+        assert _load(sched, disk, x1), n
+        assert x1.disk.loads == n
+        (e,) = [e for e in pc.entries if e.ids == x1.ids[:len(e.ids)]]
+        assert pc.evict(keep=[x for x in pc.entries if x is not e])
+        disk.flush()
+        assert disk.drain()
+    assert not sched._disk_want(disk, x1, [])                # out of loads
+    assert any("load 2" in m and "id=a1" in m for m in caplog.messages)
+    x2.disk = None
+    sched.waiting.clear()
+    x = request(x1.ids, 4, "a1b")
+    ref = run(scheduler(dense, max_batch=1), [request(x1.ids, 4, "a1b")])["a1b"]
+    assert run(sched, [x])["a1b"] == ref and x.reused > 0  # a fresh request: loads again
+    disk.close()
