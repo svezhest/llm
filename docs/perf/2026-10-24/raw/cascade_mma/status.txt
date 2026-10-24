@@ -1,0 +1,51 @@
+2026-10-24 03:37:58 WARNING: CPU pytest running (noise accepted): 81994 /Users/user/Projects/llm/src/worker/.venv/bin/python -m pytest -q --ignore tests/test_mrqmm.py -p no:cacheprovider 
+2026-10-24 03:37:58 === start (T M), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 4eecc91+dirty
+2026-10-24 03:37:58 state: therm  | load { 3.72 4.15 4.56 } | free 12937 MiB | swap 5490.94M
+2026-10-24 03:37:58 phase T start
+2026-10-24 03:38:13 phase T Metal tests rc=0: 130 passed, 2 warnings in 13.34s
+2026-10-24 03:38:24 phase T CPU tests rc=0: 74 passed, 110 skipped, 2 warnings in 8.82s
+2026-10-24 03:38:24 state: therm  | load { 4.56 4.32 4.61 } | free 16406 MiB | swap 5490.94M
+2026-10-24 03:38:24 phase M start (bench_attn.py)
+2026-10-24 03:39:36 phase M end rc=0: 264 lines
+2026-10-24 03:39:36 state: therm  | load { 5.08 4.60 4.70 } | free 16659 MiB | swap 5482.94M
+2026-10-24 03:39:36 === done (T M)
+2026-10-24 03:48:37 === start (T M S), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 95d3508
+2026-10-24 03:48:37 state: therm  | load { 3.49 4.61 4.76 } | free 17989 MiB | swap 3419.44M
+2026-10-24 03:48:37 phase T start
+2026-10-24 03:48:44 phase T Metal tests rc=0: 130 passed, 2 warnings in 6.10s
+2026-10-24 03:48:52 phase T CPU tests rc=0: 74 passed, 110 skipped, 2 warnings in 6.59s
+2026-10-24 03:48:52 state: therm  | load { 3.45 4.55 4.73 } | free 18082 MiB | swap 3419.44M
+2026-10-24 03:48:52 phase M start (bench_attn.py)
+2026-10-24 03:49:58 phase M end rc=0: 264 lines
+2026-10-24 03:49:58 state: therm  | load { 3.67 4.36 4.64 } | free 17870 MiB | swap 3419.44M
+2026-10-24 03:49:58 phase S start (step_ab.py)
+2026-10-24 03:54:29 phase S end rc=0: 03:50:58 P=7946 B=8: medians ms/step: fp32 40.8, mma 38.7, stub 35.9, attn_fp32 5.3, attn_mma 4.0, control 44.4 03:50:58 P=7946 B=8: fp32 attention in the model 4.9 ms (step 40.8 - rest 35.9) vs isolated 5.3 ms 03:50:58 P=7946 B=8: mma attention in the model 2.7 ms (step 38.7 - rest 35.9) vs isolated 4.0 ms 03:50:58 P=7946 B=8: mma step x1.055 vs fp32 03:51:57 P=7946 B=16: medians ms/step: fp32 53.5, mma 52.8, stub 46.8, attn_fp32 6.2, attn_mma 6.7, control 64.0 03:51:57 P=7946 B=16: fp32 attention in the model 6.8 ms (step 53.5 - rest 46.8) vs isolated 6.2 ms 03:51:57 P=7946 B=16: mma attenti
+2026-10-24 03:54:29 state: therm  | load { 2.97 3.72 4.29 } | free 22992 MiB | swap 3845.44M
+2026-10-24 03:54:29 === done (T M S)
+2026-10-24 03:55:03 === start (A E), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 95d3508+dirty
+2026-10-24 03:55:03 state: therm  | load { 3.14 3.66 4.24 } | free 22645 MiB | swap 3837.44M
+2026-10-24 03:55:03 phase A start (agree_mma.py)
+2026-10-24 04:00:31 phase A end rc=0: P=7975 B= 8 fp32_vs_solo      : top-1 99.80% (1022/1024), KL mean 1.45e-05 p99 1.23e-04 max 7.62e-04 P=7975 B= 8 mma_vs_solo       : top-1 99.80% (1022/1024), KL mean 1.45e-05 p99 1.17e-04 max 4.14e-04 P=7975 B= 8 control_vs_solo   : top-1 99.80% (1022/1024), KL mean 1.39e-05 p99 1.23e-04 max 2.60e-04 P=7975 B= 8 mma_vs_fp32       : top-1 100.00% (1024/1024), KL mean 9.95e-06 p99 7.73e-05 max 3.35e-04 P=7975 B=16 fp32_vs_solo      : top-1 99.71% (2042/2048), KL mean 1.69e-05 p99 1.29e-04 max 3.61e-03 P=7975 B=16 mma_vs_solo       : top-1 99.80% (2044/2048), KL mean 2.07e-05 p99 1.31e-04 max 7.59e-03 P=7975 B=16 control_vs_solo   : top-1 99.76% (2043/2048), KL mean 1.56e-05 p99 1.25e-04 max 2.42e-03 P=7975 B=16 mma_vs_fp32       : top-1 99.80% (2044/2048), KL mean 1.21e-05 p99 9.36e-05 max 1.10e-03 P=31969 B= 8 fp32_vs_solo      : top-1 100.00% (1024/1024), KL mean 1.35e-05 p99 9.86e-05 m
+2026-10-24 04:00:31 state: therm  | load { 2.39 2.79 3.62 } | free 22120 MiB | swap 3813.44M
+2026-10-24 04:00:31 E: worker on1 env: QWEN_CASCADE_KERNEL=1
+2026-10-24 04:00:37 E: worker on1 up: 2026-10-24 04:00:37,022 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-24 04:00:37,023 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens, check; MMA kernel over the fp16 prefix (QWEN_CASCADE_KERNEL) 
+2026-10-24 04:02:17 E: on1_8k rc=0 rep 0 c=16: 16 req, wall 32.5s, agg 126.1 tok/s, ttft mean 16.61s, errors 0, pcache hits 15/16 | rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok | 
+2026-10-24 04:02:17 E: on1_8k worker: 1 formations, 8 joins, 0 refusals, 0 errors; 2026-10-24 04:01:58,534 INFO  qwen.worker cascade: group formed: P=8192, 8 rows (chatcmpl-bench-47058e-r0-c16-1-04b795a98ee5,chatcmpl-bench-47058e-r0-c16-2-a4ba876b3773,chatcmpl-bench-47058e-r0-c16-0-379d00488a9a,chatcmpl-bench-47058e-r0-c16-5-84c50b46c755,cha
+2026-10-24 04:06:28 E: on1_32k rc=0 rep 0 c=16: 16 req, wall 76.6s, agg 26.7 tok/s, ttft mean 65.71s, errors 0, pcache hits 15/16 | rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok | 
+2026-10-24 04:06:28 E: on1_32k worker: 1 formations, 8 joins, 0 refusals, 0 errors; 2026-10-24 04:06:14,035 INFO  qwen.worker cascade: group formed: P=33105, 8 rows (chatcmpl-bench-d1b7aa-r0-c16-4-a13ed6326de9,chatcmpl-bench-d1b7aa-r0-c16-10-49706e7d9f75,chatcmpl-bench-d1b7aa-r0-c16-2-7646ff898a57,chatcmpl-bench-d1b7aa-r0-c16-9-8bf44c2efe5b,c
+2026-10-24 04:06:29 state: therm  | load { 4.03 3.68 3.74 } | free 22191 MiB | swap 3773.44M
+2026-10-24 04:06:29 E: worker off env: QWEN_CASCADE_KERNEL=0
+2026-10-24 04:06:35 E: worker off up: 2026-10-24 04:06:35,418 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-24 04:06:35,418 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens, check 
+2026-10-24 04:08:15 E: off_8k rc=0 rep 0 c=16: 16 req, wall 32.4s, agg 126.3 tok/s, ttft mean 16.59s, errors 0, pcache hits 15/16 | rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok | 
+2026-10-24 04:08:16 E: off_8k worker: 1 formations, 8 joins, 0 refusals, 0 errors; 2026-10-24 04:07:56,722 INFO  qwen.worker cascade: group formed: P=8192, 8 rows (chatcmpl-bench-335259-r0-c16-0-0a21a2486223,chatcmpl-bench-335259-r0-c16-3-d7bcf22f6294,chatcmpl-bench-335259-r0-c16-5-271c27f36847,chatcmpl-bench-335259-r0-c16-2-e9ebf231f881,cha
+2026-10-24 04:12:29 E: off_32k rc=0 rep 0 c=16: 16 req, wall 77.8s, agg 26.3 tok/s, ttft mean 66.67s, errors 0, pcache hits 15/16 | rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok | 
+2026-10-24 04:12:29 E: off_32k worker: 1 formations, 8 joins, 0 refusals, 0 errors; 2026-10-24 04:12:16,624 INFO  qwen.worker cascade: group formed: P=33174, 8 rows (chatcmpl-bench-c56a10-r0-c16-7-c654e6b85c3d,chatcmpl-bench-c56a10-r0-c16-1-6e5796ba1601,chatcmpl-bench-c56a10-r0-c16-2-838120461282,chatcmpl-bench-c56a10-r0-c16-4-875939af3f54,ch
+2026-10-24 04:12:30 state: therm  | load { 2.60 3.26 3.54 } | free 24272 MiB | swap 4118.38M
+2026-10-24 04:12:30 E: worker on2 env: QWEN_CASCADE_KERNEL=1
+2026-10-24 04:12:37 E: worker on2 up: 2026-10-24 04:12:36,706 INFO  qwen.worker batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 4096 new tokens/row, prefill share 2026-10-24 04:12:36,706 INFO  qwen.worker cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens, check; MMA kernel over the fp16 prefix (QWEN_CASCADE_KERNEL) 
+2026-10-24 04:14:17 E: on2_8k rc=0 rep 0 c=16: 16 req, wall 33.7s, agg 121.4 tok/s, ttft mean 17.26s, errors 0, pcache hits 15/16 | rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok | 
+2026-10-24 04:14:17 E: on2_8k worker: 1 formations, 8 joins, 0 refusals, 0 errors; 2026-10-24 04:13:57,872 INFO  qwen.worker cascade: group formed: P=8192, 8 rows (chatcmpl-bench-b27fd3-r0-c16-6-90a1d1d52caf,chatcmpl-bench-b27fd3-r0-c16-2-1a4d900de1de,chatcmpl-bench-b27fd3-r0-c16-3-6b9f34c79c55,chatcmpl-bench-b27fd3-r0-c16-7-af3a9d580401,cha
+2026-10-24 04:18:28 E: on2_32k rc=0 rep 0 c=16: 16 req, wall 76.8s, agg 26.7 tok/s, ttft mean 65.89s, errors 0, pcache hits 15/16 | rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok | 
+2026-10-24 04:18:28 E: on2_32k worker: 1 formations, 8 joins, 0 refusals, 0 errors; 2026-10-24 04:18:16,126 INFO  qwen.worker cascade: group formed: P=33166, 8 rows (chatcmpl-bench-a31139-r0-c16-0-13cdb4d5fb2e,chatcmpl-bench-a31139-r0-c16-7-cb97b51c7370,chatcmpl-bench-a31139-r0-c16-1-83be87782287,chatcmpl-bench-a31139-r0-c16-2-4d57f1fbc956,ch
+2026-10-24 04:18:29 state: therm  | load { 1.87 2.31 2.99 } | free 22993 MiB | swap 4102.38M
+2026-10-24 04:18:29 === done (A E)

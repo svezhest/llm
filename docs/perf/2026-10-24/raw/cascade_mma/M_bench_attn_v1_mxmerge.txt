@@ -1,0 +1,274 @@
+03:38:25 mlx 0.32.3, applegpu_g13s, steps 20, rounds 5, chunks [256, 512, 1024, 2048]
+03:38:25 == P=8192 B=8: suffixes 150..500; prefix per step 8.6 GFLOP (1.1 ms at 8 TF), 0.27 GB fp16 (0.7 ms at 400 GB/s); groups fp32 0.81 GB, kernel 0.55 GB (aliased True); rows 0.42 GB; chunk 256
+03:38:25    numerics (rms rel vs fp32 per-row): flat_mma 2.070e-04, flat_fp32 2.070e-04, flat_rows_fp16 2.930e-04, peaky_mma 2.076e-04, peaky_fp32 2.076e-04, peaky_rows_fp16 2.940e-04
+03:38:26    round 0 fp32            6.01 ms/step  peak +83 MiB
+03:38:26    round 0 mma             5.33 ms/step  peak +42 MiB
+03:38:26    round 0 mma_pre         3.18 ms/step  peak +38 MiB
+03:38:26    round 0 mma_pre@256     3.23 ms/step  peak +34 MiB
+03:38:26    round 0 mma_pre@512     2.79 ms/step  peak +18 MiB
+03:38:26    round 0 mma_pre@1024    3.53 ms/step  peak +10 MiB
+03:38:26    round 0 mma_pre@2048    4.27 ms/step  peak +6 MiB
+03:38:26    round 0 rows            9.99 ms/step  peak +20 MiB
+03:38:26    round 0 rattn           7.73 ms/step  peak +18 MiB
+03:38:27    round 0 fp32_step       6.44 ms/step  peak +597 MiB
+03:38:27    round 0 mma_step        5.94 ms/step  peak +557 MiB
+03:38:27    round 1 mma_step        6.24 ms/step  peak +45 MiB
+03:38:27    round 1 fp32_step       6.54 ms/step  peak +85 MiB
+03:38:27    round 1 rattn           7.67 ms/step  peak +18 MiB
+03:38:27    round 1 rows            9.96 ms/step  peak +20 MiB
+03:38:28    round 1 mma_pre@2048    4.26 ms/step  peak +6 MiB
+03:38:28    round 1 mma_pre@1024    3.47 ms/step  peak +10 MiB
+03:38:28    round 1 mma_pre@512     2.79 ms/step  peak +18 MiB
+03:38:28    round 1 mma_pre@256     3.20 ms/step  peak +34 MiB
+03:38:28    round 1 mma_pre         3.19 ms/step  peak +34 MiB
+03:38:28    round 1 mma             6.02 ms/step  peak +44 MiB
+03:38:28    round 1 fp32            6.68 ms/step  peak +85 MiB
+03:38:28    round 2 fp32            6.71 ms/step  peak +85 MiB
+03:38:28    round 2 mma             6.04 ms/step  peak +44 MiB
+03:38:28    round 2 mma_pre         3.20 ms/step  peak +54 MiB
+03:38:28    round 2 mma_pre@256     3.20 ms/step  peak +34 MiB
+03:38:29    round 2 mma_pre@512     2.77 ms/step  peak +18 MiB
+03:38:29    round 2 mma_pre@1024    3.46 ms/step  peak +10 MiB
+03:38:29    round 2 mma_pre@2048    4.28 ms/step  peak +6 MiB
+03:38:29    round 2 rows            9.85 ms/step  peak +20 MiB
+03:38:29    round 2 rattn           7.63 ms/step  peak +18 MiB
+03:38:29    round 2 fp32_step       6.72 ms/step  peak +85 MiB
+03:38:29    round 2 mma_step        6.16 ms/step  peak +45 MiB
+03:38:30    round 3 mma_step        6.26 ms/step  peak +45 MiB
+03:38:30    round 3 fp32_step       6.68 ms/step  peak +85 MiB
+03:38:30    round 3 rattn           7.61 ms/step  peak +18 MiB
+03:38:30    round 3 rows           10.01 ms/step  peak +20 MiB
+03:38:30    round 3 mma_pre@2048    4.25 ms/step  peak +6 MiB
+03:38:30    round 3 mma_pre@1024    3.46 ms/step  peak +10 MiB
+03:38:30    round 3 mma_pre@512     2.78 ms/step  peak +18 MiB
+03:38:30    round 3 mma_pre@256     3.20 ms/step  peak +34 MiB
+03:38:30    round 3 mma_pre         3.27 ms/step  peak +34 MiB
+03:38:31    round 3 mma             6.04 ms/step  peak +44 MiB
+03:38:31    round 3 fp32            6.69 ms/step  peak +85 MiB
+03:38:31    round 4 fp32            6.69 ms/step  peak +85 MiB
+03:38:31    round 4 mma             6.01 ms/step  peak +44 MiB
+03:38:31    round 4 mma_pre         3.19 ms/step  peak +34 MiB
+03:38:31    round 4 mma_pre@256     3.21 ms/step  peak +34 MiB
+03:38:31    round 4 mma_pre@512     2.75 ms/step  peak +18 MiB
+03:38:31    round 4 mma_pre@1024    3.47 ms/step  peak +10 MiB
+03:38:31    round 4 mma_pre@2048    4.20 ms/step  peak +6 MiB
+03:38:32    round 4 rows            9.93 ms/step  peak +20 MiB
+03:38:32    round 4 rattn           7.52 ms/step  peak +18 MiB
+03:38:32    round 4 fp32_step       6.69 ms/step  peak +85 MiB
+03:38:32    round 4 mma_step        6.22 ms/step  peak +45 MiB
+03:38:32    P=8192 B=8 fp32            6.69 ms/step x1.49 vs rows  peak +85 MiB
+03:38:32    P=8192 B=8 mma             6.02 ms/step x1.11 vs fp32 x1.66 vs rows  peak +44 MiB
+03:38:32    P=8192 B=8 mma_pre         3.19 ms/step (2.69 TFLOPS) x2.10 vs fp32 x3.12 vs rows  peak +54 MiB
+03:38:32    P=8192 B=8 mma_pre@256     3.20 ms/step (2.68 TFLOPS) x2.09 vs fp32 x3.11 vs rows  peak +34 MiB
+03:38:32    P=8192 B=8 mma_pre@512     2.78 ms/step (3.09 TFLOPS) x2.40 vs fp32 x3.58 vs rows  peak +18 MiB
+03:38:32    P=8192 B=8 mma_pre@1024    3.47 ms/step (2.48 TFLOPS) x1.93 vs fp32 x2.88 vs rows  peak +10 MiB
+03:38:32    P=8192 B=8 mma_pre@2048    4.26 ms/step (2.02 TFLOPS) x1.57 vs fp32 x2.34 vs rows  peak +6 MiB
+03:38:32    P=8192 B=8 rows            9.96 ms/step x0.67 vs fp32  peak +20 MiB
+03:38:32    P=8192 B=8 rattn           7.63 ms/step x0.88 vs fp32 x1.31 vs rows  peak +18 MiB
+03:38:32    P=8192 B=8 fp32_step       6.68 ms/step x1.00 vs fp32 x1.49 vs rows  peak +597 MiB
+03:38:32    P=8192 B=8 mma_step        6.22 ms/step x1.07 vs fp32 x1.60 vs rows  peak +557 MiB
+03:38:32 == P=8192 B=16: suffixes 150..500; prefix per step 17.2 GFLOP (2.1 ms at 8 TF), 0.27 GB fp16 (0.7 ms at 400 GB/s); groups fp32 1.07 GB, kernel 0.82 GB (aliased True); rows 0.83 GB; chunk 256
+03:38:32    numerics (rms rel vs fp32 per-row): flat_mma 2.055e-04, flat_fp32 2.055e-04, flat_rows_fp16 2.908e-04, peaky_mma 2.071e-04, peaky_fp32 2.071e-04, peaky_rows_fp16 2.922e-04
+03:38:32    round 0 fp32            7.15 ms/step  peak +165 MiB
+03:38:33    round 0 mma             8.75 ms/step  peak +85 MiB
+03:38:33    round 0 mma_pre         5.29 ms/step  peak +68 MiB
+03:38:33    round 0 mma_pre@256     5.41 ms/step  peak +68 MiB
+03:38:33    round 0 mma_pre@512     5.54 ms/step  peak +44 MiB
+03:38:33    round 0 mma_pre@1024    4.79 ms/step  peak +19 MiB
+03:38:33    round 0 mma_pre@2048    6.42 ms/step  peak +11 MiB
+03:38:34    round 0 rows           20.15 ms/step  peak +21 MiB
+03:38:34    round 0 rattn          15.31 ms/step  peak +36 MiB
+03:38:34    round 0 fp32_step       8.10 ms/step  peak +1178 MiB
+03:38:34    round 0 mma_step        9.99 ms/step  peak +1109 MiB
+03:38:35    round 1 mma_step       10.38 ms/step  peak +90 MiB
+03:38:35    round 1 fp32_step       8.89 ms/step  peak +170 MiB
+03:38:35    round 1 rattn          15.12 ms/step  peak +36 MiB
+03:38:36    round 1 rows           19.33 ms/step  peak +21 MiB
+03:38:36    round 1 mma_pre@2048    6.33 ms/step  peak +11 MiB
+03:38:36    round 1 mma_pre@1024    4.74 ms/step  peak +19 MiB
+03:38:36    round 1 mma_pre@512     5.41 ms/step  peak +44 MiB
+03:38:36    round 1 mma_pre@256     5.28 ms/step  peak +68 MiB
+03:38:36    round 1 mma_pre         5.34 ms/step  peak +68 MiB
+03:38:37    round 1 mma             9.91 ms/step  peak +89 MiB
+03:38:37    round 1 fp32            8.31 ms/step  peak +169 MiB
+03:38:37    round 2 fp32            8.37 ms/step  peak +169 MiB
+03:38:37    round 2 mma             9.87 ms/step  peak +89 MiB
+03:38:37    round 2 mma_pre         5.26 ms/step  peak +68 MiB
+03:38:37    round 2 mma_pre@256     5.28 ms/step  peak +68 MiB
+03:38:37    round 2 mma_pre@512     5.39 ms/step  peak +48 MiB
+03:38:38    round 2 mma_pre@1024    4.73 ms/step  peak +19 MiB
+03:38:38    round 2 mma_pre@2048    6.32 ms/step  peak +11 MiB
+03:38:38    round 2 rows           19.29 ms/step  peak +21 MiB
+03:38:38    round 2 rattn          14.86 ms/step  peak +36 MiB
+03:38:39    round 2 fp32_step       8.78 ms/step  peak +170 MiB
+03:38:39    round 2 mma_step       10.16 ms/step  peak +90 MiB
+03:38:39    round 3 mma_step       10.14 ms/step  peak +90 MiB
+03:38:39    round 3 fp32_step       8.85 ms/step  peak +170 MiB
+03:38:40    round 3 rattn          14.84 ms/step  peak +36 MiB
+03:38:40    round 3 rows           19.32 ms/step  peak +21 MiB
+03:38:40    round 3 mma_pre@2048    6.35 ms/step  peak +11 MiB
+03:38:40    round 3 mma_pre@1024    4.78 ms/step  peak +19 MiB
+03:38:40    round 3 mma_pre@512     5.45 ms/step  peak +35 MiB
+03:38:41    round 3 mma_pre@256     5.31 ms/step  peak +68 MiB
+03:38:41    round 3 mma_pre         5.31 ms/step  peak +68 MiB
+03:38:41    round 3 mma             9.99 ms/step  peak +89 MiB
+03:38:41    round 3 fp32            8.33 ms/step  peak +169 MiB
+03:38:41    round 4 fp32            8.37 ms/step  peak +169 MiB
+03:38:41    round 4 mma             9.89 ms/step  peak +89 MiB
+03:38:42    round 4 mma_pre         5.24 ms/step  peak +68 MiB
+03:38:42    round 4 mma_pre@256     5.29 ms/step  peak +68 MiB
+03:38:42    round 4 mma_pre@512     5.39 ms/step  peak +43 MiB
+03:38:42    round 4 mma_pre@1024    4.75 ms/step  peak +19 MiB
+03:38:42    round 4 mma_pre@2048    6.33 ms/step  peak +11 MiB
+03:38:43    round 4 rows           19.29 ms/step  peak +21 MiB
+03:38:43    round 4 rattn          14.80 ms/step  peak +36 MiB
+03:38:43    round 4 fp32_step       8.75 ms/step  peak +170 MiB
+03:38:43    round 4 mma_step       10.14 ms/step  peak +90 MiB
+03:38:43    P=8192 B=16 fp32            8.33 ms/step x2.32 vs rows  peak +169 MiB
+03:38:43    P=8192 B=16 mma             9.89 ms/step x0.84 vs fp32 x1.95 vs rows  peak +89 MiB
+03:38:43    P=8192 B=16 mma_pre         5.29 ms/step (3.25 TFLOPS) x1.58 vs fp32 x3.65 vs rows  peak +68 MiB
+03:38:43    P=8192 B=16 mma_pre@256     5.29 ms/step (3.25 TFLOPS) x1.58 vs fp32 x3.66 vs rows  peak +68 MiB
+03:38:43    P=8192 B=16 mma_pre@512     5.41 ms/step (3.18 TFLOPS) x1.54 vs fp32 x3.57 vs rows  peak +48 MiB
+03:38:43    P=8192 B=16 mma_pre@1024    4.75 ms/step (3.62 TFLOPS) x1.75 vs fp32 x4.07 vs rows  peak +19 MiB
+03:38:43    P=8192 B=16 mma_pre@2048    6.33 ms/step (2.71 TFLOPS) x1.31 vs fp32 x3.05 vs rows  peak +11 MiB
+03:38:43    P=8192 B=16 rows           19.32 ms/step x0.43 vs fp32  peak +21 MiB
+03:38:43    P=8192 B=16 rattn          14.86 ms/step x0.56 vs fp32 x1.30 vs rows  peak +36 MiB
+03:38:43    P=8192 B=16 fp32_step       8.78 ms/step x0.95 vs fp32 x2.20 vs rows  peak +1178 MiB
+03:38:43    P=8192 B=16 mma_step       10.14 ms/step x0.82 vs fp32 x1.90 vs rows  peak +1109 MiB
+03:38:44 == P=32768 B=8: suffixes 150..500; prefix per step 34.4 GFLOP (4.3 ms at 8 TF), 1.07 GB fp16 (2.7 ms at 400 GB/s); groups fp32 2.42 GB, kernel 1.36 GB (aliased True); rows 1.22 GB; chunk 512
+03:38:44    numerics (rms rel vs fp32 per-row): flat_mma 2.069e-04, flat_fp32 2.069e-04, flat_rows_fp16 2.979e-04, peaky_mma 2.067e-04, peaky_fp32 2.067e-04, peaky_rows_fp16 2.948e-04
+03:38:44    round 0 fp32           14.44 ms/step  peak +299 MiB
+03:38:44    round 0 mma            11.63 ms/step  peak +75 MiB
+03:38:45    round 0 mma_pre         9.68 ms/step  peak +66 MiB
+03:38:45    round 0 mma_pre@256    10.46 ms/step  peak +131 MiB
+03:38:45    round 0 mma_pre@512     9.60 ms/step  peak +66 MiB
+03:38:45    round 0 mma_pre@1024    9.75 ms/step  peak +34 MiB
+03:38:45    round 0 mma_pre@2048    9.06 ms/step  peak +18 MiB
+03:38:46    round 0 rows           29.12 ms/step  peak +6 MiB
+03:38:47    round 0 rattn          26.48 ms/step  peak +66 MiB
+03:38:47    round 0 fp32_step      14.90 ms/step  peak +790 MiB
+03:38:47    round 0 mma_step       12.31 ms/step  peak +589 MiB
+03:38:48    round 1 mma_step       12.61 ms/step  peak +77 MiB
+03:38:48    round 1 fp32_step      15.33 ms/step  peak +290 MiB
+03:38:49    round 1 rattn          26.71 ms/step  peak +66 MiB
+03:38:49    round 1 rows           29.44 ms/step  peak +6 MiB
+03:38:49    round 1 mma_pre@2048    9.09 ms/step  peak +18 MiB
+03:38:50    round 1 mma_pre@1024    9.79 ms/step  peak +34 MiB
+03:38:50    round 1 mma_pre@512     9.65 ms/step  peak +66 MiB
+03:38:50    round 1 mma_pre@256    10.57 ms/step  peak +131 MiB
+03:38:50    round 1 mma_pre         9.54 ms/step  peak +66 MiB
+03:38:51    round 1 mma            12.30 ms/step  peak +77 MiB
+03:38:51    round 1 fp32           15.03 ms/step  peak +294 MiB
+03:38:51    round 2 fp32           15.03 ms/step  peak +294 MiB
+03:38:52    round 2 mma            12.21 ms/step  peak +77 MiB
+03:38:52    round 2 mma_pre         9.36 ms/step  peak +66 MiB
+03:38:52    round 2 mma_pre@256    10.24 ms/step  peak +147 MiB
+03:38:52    round 2 mma_pre@512     9.37 ms/step  peak +66 MiB
+03:38:52    round 2 mma_pre@1024    9.51 ms/step  peak +34 MiB
+03:38:53    round 2 mma_pre@2048    8.78 ms/step  peak +20 MiB
+03:38:53    round 2 rows           27.89 ms/step  peak +6 MiB
+03:38:54    round 2 rattn          25.83 ms/step  peak +66 MiB
+03:38:54    round 2 fp32_step      15.06 ms/step  peak +290 MiB
+03:38:54    round 2 mma_step       12.19 ms/step  peak +77 MiB
+03:38:55    round 3 mma_step       12.15 ms/step  peak +77 MiB
+03:38:55    round 3 fp32_step      15.10 ms/step  peak +290 MiB
+03:38:56    round 3 rattn          25.80 ms/step  peak +66 MiB
+03:38:56    round 3 rows           27.94 ms/step  peak +6 MiB
+03:38:56    round 3 mma_pre@2048    8.82 ms/step  peak +18 MiB
+03:38:57    round 3 mma_pre@1024    9.53 ms/step  peak +34 MiB
+03:38:57    round 3 mma_pre@512     9.37 ms/step  peak +66 MiB
+03:38:57    round 3 mma_pre@256    10.28 ms/step  peak +131 MiB
+03:38:57    round 3 mma_pre         9.33 ms/step  peak +66 MiB
+03:38:58    round 3 mma            11.99 ms/step  peak +77 MiB
+03:38:58    round 3 fp32           14.82 ms/step  peak +294 MiB
+03:38:58    round 4 fp32           14.86 ms/step  peak +294 MiB
+03:38:58    round 4 mma            11.99 ms/step  peak +77 MiB
+03:38:59    round 4 mma_pre         9.35 ms/step  peak +66 MiB
+03:38:59    round 4 mma_pre@256    10.23 ms/step  peak +131 MiB
+03:38:59    round 4 mma_pre@512     9.37 ms/step  peak +66 MiB
+03:38:59    round 4 mma_pre@1024    9.48 ms/step  peak +34 MiB
+03:39:00    round 4 mma_pre@2048    8.86 ms/step  peak +18 MiB
+03:39:00    round 4 rows           27.92 ms/step  peak +6 MiB
+03:39:01    round 4 rattn          25.82 ms/step  peak +66 MiB
+03:39:01    round 4 fp32_step      15.10 ms/step  peak +290 MiB
+03:39:01    round 4 mma_step       12.27 ms/step  peak +77 MiB
+03:39:01    P=32768 B=8 fp32           14.86 ms/step x1.88 vs rows  peak +299 MiB
+03:39:01    P=32768 B=8 mma            11.99 ms/step x1.24 vs fp32 x2.33 vs rows  peak +77 MiB
+03:39:01    P=32768 B=8 mma_pre         9.36 ms/step (3.67 TFLOPS) x1.59 vs fp32 x2.99 vs rows  peak +66 MiB
+03:39:01    P=32768 B=8 mma_pre@256    10.28 ms/step (3.34 TFLOPS) x1.45 vs fp32 x2.72 vs rows  peak +147 MiB
+03:39:01    P=32768 B=8 mma_pre@512     9.37 ms/step (3.67 TFLOPS) x1.59 vs fp32 x2.98 vs rows  peak +66 MiB
+03:39:01    P=32768 B=8 mma_pre@1024    9.53 ms/step (3.61 TFLOPS) x1.56 vs fp32 x2.93 vs rows  peak +34 MiB
+03:39:01    P=32768 B=8 mma_pre@2048    8.86 ms/step (3.88 TFLOPS) x1.68 vs fp32 x3.15 vs rows  peak +20 MiB
+03:39:01    P=32768 B=8 rows           27.94 ms/step x0.53 vs fp32  peak +6 MiB
+03:39:01    P=32768 B=8 rattn          25.83 ms/step x0.58 vs fp32 x1.08 vs rows  peak +66 MiB
+03:39:01    P=32768 B=8 fp32_step      15.10 ms/step x0.98 vs fp32 x1.85 vs rows  peak +790 MiB
+03:39:01    P=32768 B=8 mma_step       12.27 ms/step x1.21 vs fp32 x2.28 vs rows  peak +589 MiB
+03:39:02 == P=32768 B=16: suffixes 150..500; prefix per step 68.7 GFLOP (8.6 ms at 8 TF), 1.07 GB fp16 (2.7 ms at 400 GB/s); groups fp32 2.68 GB, kernel 1.63 GB (aliased True); rows 2.44 GB; chunk 1024
+03:39:02    numerics (rms rel vs fp32 per-row): flat_mma 2.075e-04, flat_fp32 2.075e-04, flat_rows_fp16 2.930e-04, peaky_mma 2.077e-04, peaky_fp32 2.077e-04, peaky_rows_fp16 2.916e-04
+03:39:02    round 0 fp32           15.72 ms/step  peak +567 MiB
+03:39:03    round 0 mma            21.61 ms/step  peak +85 MiB
+03:39:03    round 0 mma_pre        17.25 ms/step  peak +68 MiB
+03:39:04    round 0 mma_pre@256    19.50 ms/step  peak +261 MiB
+03:39:04    round 0 mma_pre@512    18.18 ms/step  peak +132 MiB
+03:39:04    round 0 mma_pre@1024   17.18 ms/step  peak +68 MiB
+03:39:05    round 0 mma_pre@2048   17.85 ms/step  peak +35 MiB
+03:39:06    round 0 rows           55.64 ms/step  peak +7 MiB
+03:39:07    round 0 rattn          51.38 ms/step  peak +133 MiB
+03:39:08    round 0 fp32_step      16.47 ms/step  peak +1217 MiB
+03:39:08    round 0 mma_step       22.05 ms/step  peak +1093 MiB
+03:39:09    round 1 mma_step       22.94 ms/step  peak +90 MiB
+03:39:09    round 1 fp32_step      17.07 ms/step  peak +482 MiB
+03:39:10    round 1 rattn          51.44 ms/step  peak +133 MiB
+03:39:11    round 1 rows           55.66 ms/step  peak +7 MiB
+03:39:12    round 1 mma_pre@2048   17.84 ms/step  peak +35 MiB
+03:39:12    round 1 mma_pre@1024   17.19 ms/step  peak +68 MiB
+03:39:13    round 1 mma_pre@512    18.17 ms/step  peak +132 MiB
+03:39:13    round 1 mma_pre@256    19.55 ms/step  peak +261 MiB
+03:39:13    round 1 mma_pre        17.25 ms/step  peak +68 MiB
+03:39:14    round 1 mma            22.03 ms/step  peak +89 MiB
+03:39:14    round 1 fp32           16.85 ms/step  peak +547 MiB
+03:39:15    round 2 fp32           16.85 ms/step  peak +547 MiB
+03:39:15    round 2 mma            22.00 ms/step  peak +89 MiB
+03:39:16    round 2 mma_pre        17.23 ms/step  peak +68 MiB
+03:39:16    round 2 mma_pre@256    19.59 ms/step  peak +261 MiB
+03:39:16    round 2 mma_pre@512    18.20 ms/step  peak +132 MiB
+03:39:17    round 2 mma_pre@1024   17.27 ms/step  peak +68 MiB
+03:39:17    round 2 mma_pre@2048   17.87 ms/step  peak +35 MiB
+03:39:18    round 2 rows           55.69 ms/step  peak +7 MiB
+03:39:20    round 2 rattn          51.69 ms/step  peak +133 MiB
+03:39:20    round 2 fp32_step      17.16 ms/step  peak +482 MiB
+03:39:20    round 2 mma_step       22.93 ms/step  peak +90 MiB
+03:39:21    round 3 mma_step       22.78 ms/step  peak +90 MiB
+03:39:21    round 3 fp32_step      17.06 ms/step  peak +482 MiB
+03:39:23    round 3 rattn          51.80 ms/step  peak +133 MiB
+03:39:24    round 3 rows           58.90 ms/step  peak +7 MiB
+03:39:24    round 3 mma_pre@2048   17.97 ms/step  peak +35 MiB
+03:39:25    round 3 mma_pre@1024   17.28 ms/step  peak +68 MiB
+03:39:25    round 3 mma_pre@512    18.23 ms/step  peak +132 MiB
+03:39:25    round 3 mma_pre@256    20.12 ms/step  peak +261 MiB
+03:39:26    round 3 mma_pre        17.34 ms/step  peak +68 MiB
+03:39:26    round 3 mma            22.84 ms/step  peak +89 MiB
+03:39:28    round 3 fp32           16.93 ms/step  peak +547 MiB
+03:39:28    round 4 fp32           17.05 ms/step  peak +547 MiB
+03:39:29    round 4 mma            22.27 ms/step  peak +89 MiB
+03:39:29    round 4 mma_pre        17.44 ms/step  peak +68 MiB
+03:39:30    round 4 mma_pre@256    19.60 ms/step  peak +261 MiB
+03:39:30    round 4 mma_pre@512    18.30 ms/step  peak +132 MiB
+03:39:30    round 4 mma_pre@1024   17.43 ms/step  peak +68 MiB
+03:39:31    round 4 mma_pre@2048   17.93 ms/step  peak +35 MiB
+03:39:33    round 4 rows           56.76 ms/step  peak +7 MiB
+03:39:34    round 4 rattn          52.51 ms/step  peak +133 MiB
+03:39:34    round 4 fp32_step      17.28 ms/step  peak +482 MiB
+03:39:35    round 4 mma_step       22.81 ms/step  peak +90 MiB
+03:39:35    P=32768 B=16 fp32           16.85 ms/step x3.30 vs rows  peak +567 MiB
+03:39:35    P=32768 B=16 mma            22.03 ms/step x0.77 vs fp32 x2.53 vs rows  peak +89 MiB
+03:39:35    P=32768 B=16 mma_pre        17.25 ms/step (3.98 TFLOPS) x0.98 vs fp32 x3.23 vs rows  peak +68 MiB
+03:39:35    P=32768 B=16 mma_pre@256    19.59 ms/step (3.51 TFLOPS) x0.86 vs fp32 x2.84 vs rows  peak +261 MiB
+03:39:35    P=32768 B=16 mma_pre@512    18.20 ms/step (3.78 TFLOPS) x0.93 vs fp32 x3.06 vs rows  peak +132 MiB
+03:39:35    P=32768 B=16 mma_pre@1024   17.27 ms/step (3.98 TFLOPS) x0.98 vs fp32 x3.22 vs rows  peak +68 MiB
+03:39:35    P=32768 B=16 mma_pre@2048   17.87 ms/step (3.85 TFLOPS) x0.94 vs fp32 x3.12 vs rows  peak +35 MiB
+03:39:35    P=32768 B=16 rows           55.69 ms/step x0.30 vs fp32  peak +7 MiB
+03:39:35    P=32768 B=16 rattn          51.69 ms/step x0.33 vs fp32 x1.08 vs rows  peak +133 MiB
+03:39:35    P=32768 B=16 fp32_step      17.07 ms/step x0.99 vs fp32 x3.26 vs rows  peak +1217 MiB
+03:39:35    P=32768 B=16 mma_step       22.81 ms/step x0.74 vs fp32 x2.44 vs rows  peak +1093 MiB
+03:39:35 wrote /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc/docs/perf/2026-10-24/raw/cascade_mma/cascade_mma_bench.json

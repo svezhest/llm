@@ -1,0 +1,10 @@
+model=ornith15-9b-mlx-8bit calibration: 9292 prompt tokens for 24000 filler chars -> 2.62 chars/token, filler 20611 chars
+cooldown 30s before c=16
+probe before c=16: decode 37.1 tok/s, ttft 15.31s
+rep 0 c=16: 16 req, wall 33.7s, agg 121.4 tok/s, ttft mean 17.26s, errors 0, pcache hits 15/16
+
+wrote /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc/docs/perf/2026-10-24/raw/cascade_mma/E_on2_8k.json
+
+| rep | conc | reqs | prompt tok | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | probe tok/s | peak GB | pcache hit rate / mean reused tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 16 | 16 | 8310 | 33.7 | 121.4 | 17.26 | 20.27 | 32.73 | 33.60 | 16.7 | 37.1 | 14.53 | 0.94 / 7680 |

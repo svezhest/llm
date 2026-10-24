@@ -200,6 +200,24 @@ Pitfalls (handled here, keep them when changing this file):
     is slower than the per-row kernel over the same tokens: group only when the
     prefix dominates (plan: >= 8 rows, P >= 4096, leave when S_j > P // 2).
 
+Kernel mode (`build(..., kernel=True)`, the worker's QWEN_CASCADE_KERNEL;
+docs/perf/2026-10-24/design/cascade_mma.md): the prefix stays fp16 and its
+attention is cascade_mma's Metal kernel (simdgroup MMA, fp32 accumulation,
+online softmax, split over the prefix + a merge pass) returning (o_p, lse_p);
+the suffix part and the merge are `merge` (the same ops as `cascade`, under
+mx.compile). kc[i] / vc[i] are then the source row's own (1, Hkv, cap, D)
+KVCache buffers, aliased when cap - P <= `slack` (ALIAS_SLACK: no formation
+copy, no transient; the group pins the buffer, its [P, cap) unused), else a
+fresh (1, Hkv, P + 1, D) copy -- per buffer; c = 0, Ppad = P, pmask None. Only the stacks,
+lens, masks and the step protocol are shared with the fp32 mode, so append /
+take / grow / release behave the same; `release` and `prefix_kv` hand out the
+fp16 prefix as is (exact). Memory per token of prefix: 32 KiB on the 9B
+instead of 64, and no (Hkv, c, B_g*rep, Pc) fp32 scores (the kernel's
+partials are (items, Hkv, B_g*rep, D + 2) fp32 per layer instead). fp16 KV
+only (bf16 / fp32 raise at build). On a CPU default device cascade_mma falls
+back to mx ops (`cascade_mma.reference`): the CPU tests run this mode's
+bookkeeping; the kernel itself is tests/test_cascade_mma.py.
+
 Env knobs the worker reserves (plan B.1; this module takes explicit
 parameters and reads no environment): QWEN_CASCADE (switch),
 QWEN_CASCADE_MIN_ROWS (8), QWEN_CASCADE_MIN_PREFIX (4096), QWEN_CASCADE_CHECK;
@@ -215,9 +233,12 @@ from collections import OrderedDict
 import mlx.core as mx
 from mlx_vlm.models.cache import KVCache
 
+import cascade_mma
+
 F32 = mx.float32
 CHUNK = 1024          # prefix chunk (flash-decoding split); P.V unchunked is ~1.7x slower at 32K
 STEP = 256            # suffix stack growth, as KVCache.step
+ALIAS_SLACK = 1024    # kernel mode: a donor buffer with <= this many slots past P is aliased, else copied
 MAX_TRACES = 64       # compiled wrappers kept (one per shape key)
 
 _NEG = -math.inf
@@ -265,6 +286,30 @@ def cascade(q, kc, vc, pmask, sk, sv, smask, scale):
     return out.reshape(B, Hq, L, D).astype(q.dtype)
 
 
+def merge(q, op, lse, sk, sv, smask, scale):
+    """QWEN_CASCADE_KERNEL's half of `cascade` (uncompiled; `attention` runs
+    it under mx.compile): the prefix part comes from cascade_mma as o_p
+    (Hkv, B_g*rep, D) fp32 + lse_p (Hkv, B_g*rep) fp32; the suffix part and
+    the merge are `cascade`'s own ops, line for line."""
+    B, Hq, L, D = q.shape
+    Hkv = sk.shape[1]
+    rep = Hq // Hkv
+    qg = (q.astype(F32) * scale).reshape(B, Hkv, rep, D)
+    o_p = op.reshape(Hkv, 1, B * rep, D)
+    lse_p = lse.reshape(Hkv, 1, B * rep, 1)
+    ss = qg @ sk.swapaxes(-1, -2) + smask                                # (B, Hkv, rep, cap)
+    lse_s = mx.logsumexp(ss, axis=-1, keepdims=True)
+    o_s = mx.softmax(ss, axis=-1, precise=True) @ sv                     # (B, Hkv, rep, D)
+    o_s = mx.where(lse_s == _NEG, 0.0, o_s)                              # empty suffix: NaN -> 0
+    o_s = o_s.transpose(1, 0, 2, 3).reshape(Hkv, 1, B * rep, D)
+    lse_s = lse_s.transpose(1, 0, 2, 3).reshape(Hkv, 1, B * rep, 1)
+    m = mx.maximum(lse_p, lse_s)
+    wp, ws = mx.exp(lse_p - m), mx.exp(lse_s - m)
+    out = (wp * o_p + ws * o_s) / (wp + ws)                              # (Hkv, 1, B*rep, D)
+    out = out.reshape(Hkv, B, rep, D).transpose(1, 0, 2, 3)
+    return out.reshape(B, Hq, L, D).astype(q.dtype)
+
+
 _FNS: OrderedDict = OrderedDict()
 _LOCK = threading.Lock()
 
@@ -287,6 +332,21 @@ def compiled(scale, q, kc, pmask, sk):
             fn = mx.compile(lambda q, kc, vc, sk, sv, sm: cascade(q, kc, vc, None, sk, sv, sm, scale))
         else:
             fn = mx.compile(lambda q, kc, vc, pm, sk, sv, sm: cascade(q, kc, vc, pm, sk, sv, sm, scale))
+        _FNS[key] = fn
+        while len(_FNS) > MAX_TRACES:
+            _FNS.popitem(last=False)
+        return fn
+
+
+def compiled_merge(scale, q, sk):
+    """The mx.compile'd `merge` for these shapes (same LRU as `compiled`)."""
+    key = ("merge", float(scale), str(mx.default_device()), tuple(q.shape), q.dtype, tuple(sk.shape))
+    with _LOCK:
+        fn = _FNS.get(key)
+        if fn is not None:
+            _FNS.move_to_end(key)
+            return fn
+        fn = mx.compile(lambda q, op, lse, sk, sv, sm: merge(q, op, lse, sk, sv, sm, scale))
         _FNS[key] = fn
         while len(_FNS) > MAX_TRACES:
             _FNS.popitem(last=False)
@@ -316,7 +376,12 @@ def attention(queries, group: "PrefixGroup", layer, scale):
     if group._pending and layer not in group._appended:
         raise RuntimeError(f"cascade: attention() on layer {layer!r} before its append() in this step")
     kc, vc, sk, sv = group.kc[layer], group.vc[layer], group.sk[layer], group.sv[layer]
-    smask = group.smask()
+    smask = None if group.kernel and cascade_mma.use_kernel() else group.smask()
+    if group.kernel:
+        if cascade_mma.use_kernel():    # prefix + suffix + merge on Metal, fp16 out
+            return cascade_mma.group_attention(queries, kc, vc, group.P, sk, sv, group.slens(), scale)
+        op, lse = cascade_mma.prefix_attention(queries, kc, vc, group.P, scale)
+        return compiled_merge(scale, queries, sk)(queries, op, lse, sk, sv, smask)
     fn = compiled(scale, queries, kc, group.pmask, sk)
     if group.pmask is None:
         return fn(queries, kc, vc, sk, sv, smask)
@@ -347,7 +412,8 @@ class PrefixGroup:
 
     Attributes: P, chunk (Pc), c, Ppad, step, layers (FA layer keys), Hkv, D,
     kv_dtype (the rows' KV dtype), kc / vc / sk / sv (dict layer -> array),
-    pmask, lens (read-only tuple: suffix lengths in member order), cap, n."""
+    pmask, lens (read-only tuple: suffix lengths in member order), cap, n,
+    kernel / aliased (kernel mode, module docstring)."""
 
     def __init__(self):            # use PrefixGroup.build
         self.P = self.chunk = self.c = self.Ppad = self.step = 0
@@ -359,6 +425,9 @@ class PrefixGroup:
         self.sk: dict = {}
         self.sv: dict = {}
         self.pmask = None
+        self.kernel = False             # QWEN_CASCADE_KERNEL: fp16 prefix, cascade_mma
+        self.aliased = False            # kernel mode: every kc / vc is the donor row's own buffer
+        self._slack = 0
         self._lens: list[int] = []
         self.cap = 0
         self._pending = False
@@ -366,12 +435,14 @@ class PrefixGroup:
         self._failed = False            # abort_step's eval failed: the group is unusable
         self._upos = None
         self._smask = None
+        self._slens = None
 
     # ---- construction
 
     @classmethod
     def build(cls, source, members, P: int, layers=None, chunk: int = CHUNK,
-              step: int = STEP, evaluate: bool = True) -> "PrefixGroup":
+              step: int = STEP, evaluate: bool = True, kernel: bool = False,
+              slack: int = ALIAS_SLACK) -> "PrefixGroup":
         """A group over `members` (each a row's cache list, indexable by the
         layer keys) with the prefix [0, P) taken from `source` (one row's
         cache list, typically members[0]; the other members' [0, P) are NOT
@@ -379,7 +450,16 @@ class PrefixGroup:
         the FA layer keys (default: every index of `source`). Nothing past a
         cache's offset (nor past P in `source`) is read. Evaluates by default:
         there is no old stack to keep alive, and the rows' caches can only be
-        released once the copies exist (formation transient, plan B.10)."""
+        released once the copies exist (formation transient, plan B.10).
+
+        `kernel` (QWEN_CASCADE_KERNEL; fp16 KV only): the prefix stays fp16
+        and is attended by cascade_mma. kc[i] / vc[i] are then `source`'s own
+        (1, Hkv, cap, D) buffers, aliased (no copy: nothing is allocated and
+        no formation transient) when at most `slack` slots lie past P,
+        else a fresh (1, Hkv, P + 1, D) copy of [0, P) (+ one zero slot) --
+        decided per buffer; `aliased` is True when every layer's K and V are
+        aliased. Either way the kernel reads only [0, P). `chunk` and
+        `pmask` are unused (c = 0, Ppad = P)."""
         if P <= 0:
             raise ValueError("cascade: empty prefix")
         if not members:
@@ -391,8 +471,15 @@ class PrefixGroup:
         k0, _, _ = _fa(source[layers[0]], P)
         g.P, g.chunk, g.step, g.layers = P, chunk, step, layers
         g.Hkv, g.D, g.kv_dtype = k0.shape[1], k0.shape[3], k0.dtype
-        g.c = -(-P // chunk)
-        g.Ppad = g.c * chunk
+        g.kernel = bool(kernel)
+        if g.kernel:
+            if g.kv_dtype != mx.float16:
+                raise ValueError(f"cascade: the MMA kernel takes an fp16 KV, not {g.kv_dtype}")
+            g.chunk, g.c, g.Ppad = 0, 0, P
+            g._slack = slack
+        else:
+            g.c = -(-P // chunk)
+            g.Ppad = g.c * chunk
         lens = []
         for mem in members:
             offs = {_fa(mem[i], P)[2] for i in layers}
@@ -404,12 +491,15 @@ class PrefixGroup:
         for i in layers:
             ks, vs, _ = _fa(source[i], P)
             g._check_shape(ks, vs)
-            kc[i] = g._prefix32(ks)
-            vc[i] = g._prefix32(vs)
+            kc[i] = g._prefix16(ks) if g.kernel else g._prefix32(ks)
+            vc[i] = g._prefix16(vs) if g.kernel else g._prefix32(vs)
             sk[i] = g._stack([_fa(m[i], P) for m in members], lens, cap, keys=True)
             sv[i] = g._stack([_fa(m[i], P) for m in members], lens, cap, keys=False)
+        if g.kernel:
+            g.aliased = all(source[i].keys.shape[2] - P <= slack
+                            and source[i].values.shape[2] - P <= slack for i in layers)
         pmask = None
-        if g.Ppad != P:
+        if not g.kernel and g.Ppad != P:
             pmask = mx.where(mx.arange(g.Ppad) < P, 0.0, _NEG).astype(F32).reshape(1, g.c, 1, chunk)
         if evaluate:
             mx.eval(kc, vc, sk, sv, pmask)
@@ -432,6 +522,21 @@ class PrefixGroup:
         pad = mx.zeros((1, self.Hkv, self.Ppad - self.P, self.D), x.dtype)
         x = mx.concatenate([x, pad], axis=2)
         return x.astype(F32).reshape(self.Hkv, self.c, self.chunk, self.D)
+
+    def _prefix16(self, x):
+        """Kernel mode: [0, P) of a (1, Hkv, cap, D) fp16 buffer for
+        cascade_mma. The buffer itself when cap - P <= slack (mx.contiguous of
+        a row-contiguous array shares its buffer: a KVCache buffer is one),
+        so the group pins the donor row's buffer instead of copying it; else
+        a (1, Hkv, P + 1, D) copy (a concatenate always writes a fresh
+        buffer; the extra slot is a zero) so that a long donor suffix is not
+        kept alive. Decided per buffer (layers of one KVCache list normally
+        share a cap, but nothing here relies on it). Bits unchanged either
+        way."""
+        if x.shape[2] - self.P <= self._slack:
+            return mx.contiguous(x)
+        z = mx.zeros((1, self.Hkv, 1, self.D), x.dtype)
+        return mx.concatenate([x[..., :self.P, :], z], axis=2)
 
     def _stack(self, fas, lens, cap, keys):
         """Members' [P, offset) of one layer -> fp32 (n, Hkv, cap, D), zeros
@@ -473,7 +578,7 @@ class PrefixGroup:
             raise RuntimeError(f"cascade: {what} inside a decode step")
 
     def _changed(self):
-        self._upos = self._smask = None
+        self._upos = self._smask = self._slens = None
 
     # ---- membership
 
@@ -567,7 +672,10 @@ class PrefixGroup:
 
     def prefix_kv(self, layer):
         """The prefix [0, P) of one layer as (1, Hkv, P, D) in the rows' dtype
-        (exact: the fp32 copy was widened from these values)."""
+        (exact: the fp32 copy was widened from these values; kernel mode: a
+        view of the fp16 buffer)."""
+        if self.kernel:
+            return self.kc[layer][..., :self.P, :], self.vc[layer][..., :self.P, :]
         k = self.kc[layer].reshape(1, self.Hkv, self.Ppad, self.D)[..., :self.P, :]
         v = self.vc[layer].reshape(1, self.Hkv, self.Ppad, self.D)[..., :self.P, :]
         return k.astype(self.kv_dtype), v.astype(self.kv_dtype)
@@ -633,7 +741,7 @@ class PrefixGroup:
         self._upos = mx.broadcast_to(lens[:, None, None, None], (self.n, self.Hkv, 1, self.D))
         self._appended = set()
         self._pending = True
-        self._smask = None
+        self._smask = self._slens = None
 
     def append(self, layer, keys, values):
         """Write this step's token (keys/values (n, Hkv, 1, D) in member order
@@ -691,6 +799,14 @@ class PrefixGroup:
         except Exception as e:
             self._failed = True
             raise RuntimeError("cascade: abort_step could not restore the stacks; drop the group") from e
+
+    def slens(self):
+        """(n,) int32: the suffix slots attended per row -- S_j, + 1 inside a
+        step (kernel mode's suffix pass; the counterpart of `smask`). Cached
+        until the lengths / cap change."""
+        if self._slens is None:
+            self._slens = mx.array([s + (1 if self._pending else 0) for s in self._lens], dtype=mx.int32)
+        return self._slens
 
     def smask(self):
         """(n, 1, 1, cap) fp32 additive suffix mask: 0 for slots < S_j (+1

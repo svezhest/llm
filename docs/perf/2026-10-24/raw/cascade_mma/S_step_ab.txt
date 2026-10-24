@@ -1,0 +1,116 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+03:50:04 loaded; FA layers [3, 7, 11, 15, 19, 23, 27, 31]; base active 9.51 GB
+03:50:20 target 8000: P 7946, prompts 7985..8001; prefix prefilled in 15 s
+03:50:25 P=7946 B=8: built ['control', 'fp32', 'mma', 'stub']; group GB {'fp32': 0.671121408, 'mma': 0.402980864, 'stub': 0.402980864}; active 15.11 GB
+03:50:27   round 0 P=7946 B=8 fp32        40.09 ms  peak+ 157 MiB
+03:50:29   round 0 P=7946 B=8 mma         38.36 ms  peak+ 146 MiB
+03:50:31   round 0 P=7946 B=8 stub        35.34 ms  peak+ 184 MiB
+03:50:31   round 0 P=7946 B=8 attn_fp32    5.35 ms  peak+ 81 MiB
+03:50:31   round 0 P=7946 B=8 attn_mma     3.87 ms  peak+ 34 MiB
+03:50:33   round 0 P=7946 B=8 control     44.36 ms  peak+ 102 MiB
+03:50:35   round 1 P=7946 B=8 control     44.06 ms  peak+ 102 MiB
+03:50:36   round 1 P=7946 B=8 attn_mma     3.89 ms  peak+ 34 MiB
+03:50:36   round 1 P=7946 B=8 attn_fp32    5.31 ms  peak+ 81 MiB
+03:50:38   round 1 P=7946 B=8 stub        36.21 ms  peak+ 184 MiB
+03:50:39   round 1 P=7946 B=8 mma         38.71 ms  peak+ 146 MiB
+03:50:41   round 1 P=7946 B=8 fp32        41.28 ms  peak+ 157 MiB
+03:50:43   round 2 P=7946 B=8 fp32        41.18 ms  peak+ 157 MiB
+03:50:45   round 2 P=7946 B=8 mma         39.34 ms  peak+ 146 MiB
+03:50:47   round 2 P=7946 B=8 stub        36.08 ms  peak+ 184 MiB
+03:50:47   round 2 P=7946 B=8 attn_fp32    5.35 ms  peak+ 81 MiB
+03:50:47   round 2 P=7946 B=8 attn_mma     4.04 ms  peak+ 34 MiB
+03:50:50   round 2 P=7946 B=8 control     44.54 ms  peak+ 102 MiB
+03:50:52   round 3 P=7946 B=8 control     44.51 ms  peak+ 102 MiB
+03:50:52   round 3 P=7946 B=8 attn_mma     4.04 ms  peak+ 34 MiB
+03:50:52   round 3 P=7946 B=8 attn_fp32    5.31 ms  peak+ 81 MiB
+03:50:54   round 3 P=7946 B=8 stub        35.76 ms  peak+ 184 MiB
+03:50:56   round 3 P=7946 B=8 mma         38.61 ms  peak+ 146 MiB
+03:50:58   round 3 P=7946 B=8 fp32        40.41 ms  peak+ 157 MiB
+03:50:58 P=7946 B=8: medians ms/step: fp32 40.8, mma 38.7, stub 35.9, attn_fp32 5.3, attn_mma 4.0, control 44.4
+03:50:58 P=7946 B=8: fp32 attention in the model 4.9 ms (step 40.8 - rest 35.9) vs isolated 5.3 ms
+03:50:58 P=7946 B=8: mma attention in the model 2.7 ms (step 38.7 - rest 35.9) vs isolated 4.0 ms
+03:50:58 P=7946 B=8: mma step x1.055 vs fp32
+03:51:08 P=7946 B=16: built ['control', 'fp32', 'mma', 'stub']; group GB {'fp32': 0.805339136, 'mma': 0.537198592, 'stub': 0.537198592}; active 20.40 GB
+03:51:11   round 0 P=7946 B=16 fp32        53.88 ms  peak+ 314 MiB
+03:51:13   round 0 P=7946 B=16 mma         52.61 ms  peak+ 291 MiB
+03:51:16   round 0 P=7946 B=16 stub        46.60 ms  peak+ 368 MiB
+03:51:16   round 0 P=7946 B=16 attn_fp32    6.15 ms  peak+ 161 MiB
+03:51:16   round 0 P=7946 B=16 attn_mma     6.66 ms  peak+ 69 MiB
+03:51:21   round 0 P=7946 B=16 control     63.90 ms  peak+ 127 MiB
+03:51:24   round 1 P=7946 B=16 control     63.95 ms  peak+ 127 MiB
+03:51:25   round 1 P=7946 B=16 attn_mma     6.70 ms  peak+ 69 MiB
+03:51:25   round 1 P=7946 B=16 attn_fp32    6.27 ms  peak+ 161 MiB
+03:51:28   round 1 P=7946 B=16 stub        46.90 ms  peak+ 374 MiB
+03:51:31   round 1 P=7946 B=16 mma         52.74 ms  peak+ 291 MiB
+03:51:33   round 1 P=7946 B=16 fp32        53.17 ms  peak+ 314 MiB
+03:51:36   round 2 P=7946 B=16 fp32        54.08 ms  peak+ 314 MiB
+03:51:39   round 2 P=7946 B=16 mma         55.75 ms  peak+ 291 MiB
+03:51:41   round 2 P=7946 B=16 stub        46.88 ms  peak+ 368 MiB
+03:51:41   round 2 P=7946 B=16 attn_fp32    6.09 ms  peak+ 161 MiB
+03:51:42   round 2 P=7946 B=16 attn_mma     6.69 ms  peak+ 69 MiB
+03:51:46   round 2 P=7946 B=16 control     63.97 ms  peak+ 127 MiB
+03:51:49   round 3 P=7946 B=16 control     64.01 ms  peak+ 127 MiB
+03:51:49   round 3 P=7946 B=16 attn_mma     7.13 ms  peak+ 69 MiB
+03:51:49   round 3 P=7946 B=16 attn_fp32    6.24 ms  peak+ 161 MiB
+03:51:52   round 3 P=7946 B=16 stub        46.63 ms  peak+ 368 MiB
+03:51:54   round 3 P=7946 B=16 mma         52.92 ms  peak+ 291 MiB
+03:51:57   round 3 P=7946 B=16 fp32        53.11 ms  peak+ 314 MiB
+03:51:57 P=7946 B=16: medians ms/step: fp32 53.5, mma 52.8, stub 46.8, attn_fp32 6.2, attn_mma 6.7, control 64.0
+03:51:57 P=7946 B=16: fp32 attention in the model 6.8 ms (step 53.5 - rest 46.8) vs isolated 6.2 ms
+03:51:57 P=7946 B=16: mma attention in the model 6.1 ms (step 52.8 - rest 46.8) vs isolated 6.7 ms
+03:51:57 P=7946 B=16: mma step x1.013 vs fp32
+03:53:01 target 32000: P 31947, prompts 31986..32002; prefix prefilled in 63 s
+03:53:06 P=31947 B=8: control skipped (8.5 GB of per-row KV > SA_CONTROL_MAX_GB)
+03:53:06 P=31947 B=8: built ['fp32', 'mma', 'stub']; group GB {'fp32': 2.281832448, 'mma': 1.189445632, 'stub': 1.189445632}; active 18.15 GB
+03:53:08   round 0 P=31947 B=8 fp32        45.52 ms  peak+ 192 MiB
+03:53:10   round 0 P=31947 B=8 mma         41.88 ms  peak+ 170 MiB
+03:53:12   round 0 P=31947 B=8 stub        31.22 ms  peak+ 184 MiB
+03:53:12   round 0 P=31947 B=8 attn_fp32   15.04 ms  peak+ 297 MiB
+03:53:13   round 0 P=31947 B=8 attn_mma    11.44 ms  peak+ 128 MiB
+03:53:14   round 1 P=31947 B=8 attn_mma    11.12 ms  peak+ 128 MiB
+03:53:14   round 1 P=31947 B=8 attn_fp32   14.29 ms  peak+ 297 MiB
+03:53:16   round 1 P=31947 B=8 stub        31.51 ms  peak+ 184 MiB
+03:53:18   round 1 P=31947 B=8 mma         41.94 ms  peak+ 170 MiB
+03:53:20   round 1 P=31947 B=8 fp32        46.56 ms  peak+ 192 MiB
+03:53:23   round 2 P=31947 B=8 fp32        50.16 ms  peak+ 192 MiB
+03:53:25   round 2 P=31947 B=8 mma         44.17 ms  peak+ 170 MiB
+03:53:26   round 2 P=31947 B=8 stub        31.74 ms  peak+ 184 MiB
+03:53:27   round 2 P=31947 B=8 attn_fp32   15.15 ms  peak+ 297 MiB
+03:53:28   round 2 P=31947 B=8 attn_mma    11.45 ms  peak+ 128 MiB
+03:53:28   round 3 P=31947 B=8 attn_mma    11.30 ms  peak+ 128 MiB
+03:53:29   round 3 P=31947 B=8 attn_fp32   14.27 ms  peak+ 297 MiB
+03:53:31   round 3 P=31947 B=8 stub        31.60 ms  peak+ 184 MiB
+03:53:33   round 3 P=31947 B=8 mma         42.04 ms  peak+ 170 MiB
+03:53:35   round 3 P=31947 B=8 fp32        45.50 ms  peak+ 192 MiB
+03:53:35 P=31947 B=8: medians ms/step: fp32 46.0, mma 42.0, stub 31.6, attn_fp32 14.7, attn_mma 11.4
+03:53:35 P=31947 B=8: fp32 attention in the model 14.5 ms (step 46.0 - rest 31.6) vs isolated 14.7 ms
+03:53:35 P=31947 B=8: mma attention in the model 10.4 ms (step 42.0 - rest 31.6) vs isolated 11.4 ms
+03:53:35 P=31947 B=8: mma step x1.096 vs fp32
+03:53:45 P=31947 B=16: control skipped (17.0 GB of per-row KV > SA_CONTROL_MAX_GB)
+03:53:45 P=31947 B=16: built ['fp32', 'mma', 'stub']; group GB {'fp32': 2.416050176, 'mma': 1.32366336, 'stub': 1.32366336}; active 20.85 GB
+03:53:50   round 0 P=31947 B=16 fp32        62.48 ms  peak+ 383 MiB
+03:53:53   round 0 P=31947 B=16 mma         64.41 ms  peak+ 291 MiB
+03:53:56   round 0 P=31947 B=16 stub        46.54 ms  peak+ 368 MiB
+03:53:56   round 0 P=31947 B=16 attn_fp32   15.91 ms  peak+ 548 MiB
+03:53:57   round 0 P=31947 B=16 attn_mma    18.80 ms  peak+ 69 MiB
+03:53:58   round 1 P=31947 B=16 attn_mma    19.97 ms  peak+ 119 MiB
+03:53:59   round 1 P=31947 B=16 attn_fp32   15.76 ms  peak+ 548 MiB
+03:54:01   round 1 P=31947 B=16 stub        46.95 ms  peak+ 368 MiB
+03:54:05   round 1 P=31947 B=16 mma         64.53 ms  peak+ 291 MiB
+03:54:08   round 1 P=31947 B=16 fp32        62.47 ms  peak+ 383 MiB
+03:54:11   round 2 P=31947 B=16 fp32        62.52 ms  peak+ 383 MiB
+03:54:14   round 2 P=31947 B=16 mma         64.64 ms  peak+ 291 MiB
+03:54:16   round 2 P=31947 B=16 stub        46.65 ms  peak+ 368 MiB
+03:54:17   round 2 P=31947 B=16 attn_fp32   16.15 ms  peak+ 548 MiB
+03:54:18   round 2 P=31947 B=16 attn_mma    19.32 ms  peak+ 119 MiB
+03:54:19   round 3 P=31947 B=16 attn_mma    19.82 ms  peak+ 136 MiB
+03:54:20   round 3 P=31947 B=16 attn_fp32   15.73 ms  peak+ 548 MiB
+03:54:22   round 3 P=31947 B=16 stub        46.90 ms  peak+ 368 MiB
+03:54:25   round 3 P=31947 B=16 mma         64.73 ms  peak+ 291 MiB
+03:54:28   round 3 P=31947 B=16 fp32        62.51 ms  peak+ 383 MiB
+03:54:28 P=31947 B=16: medians ms/step: fp32 62.5, mma 64.6, stub 46.8, attn_fp32 15.8, attn_mma 19.6
+03:54:28 P=31947 B=16: fp32 attention in the model 15.7 ms (step 62.5 - rest 46.8) vs isolated 15.8 ms
+03:54:28 P=31947 B=16: mma attention in the model 17.8 ms (step 64.6 - rest 46.8) vs isolated 19.6 ms
+03:54:28 P=31947 B=16: mma step x0.968 vs fp32
+03:54:29 wrote /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc/docs/perf/2026-10-24/raw/cascade_mma/cascade_mma_step_ab.json
