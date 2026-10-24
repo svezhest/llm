@@ -1,0 +1,50 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+03:55:08 loaded; FA layers [3, 7, 11, 15, 19, 23, 27, 31], base active 9.51 GB
+03:55:09 prefix target 8000: prompts 8014..8030 tokens, LCP 7980, group P 7975 (common slab ends [2048, 4096, 6144, 7975]), suffixes 38..54
+03:55:22 shared prefix prefilled in 13.5 s (7975 tokens)
+03:55:36 resumed copy == cold prefill (FA keys, all layers): True
+03:56:41 solo streams: 16 rows x 128 steps in 64.9 s; row 0 starts '# Hash Map Collision Resolution: Open Addressing vs. Separate Chaining\n\n## The Core Problem\n\nWhen a hash function'
+03:56:42 P=7975 B=8 fp32: group built: n=8 lens 40..54 cap 256 kernel=False aliased=False, 0.67 GB; active 10.92 GB
+03:56:43 P=7975 B=8 mma: group built: n=8 lens 40..54 cap 256 kernel=True aliased=True, 0.40 GB; active 11.74 GB
+03:57:01 P=7975 B= 8 fp32_vs_solo      : top-1 99.80% (1022/1024), KL mean 1.45e-05 p99 1.23e-04 max 7.62e-04
+03:57:01 P=7975 B= 8 mma_vs_solo       : top-1 99.80% (1022/1024), KL mean 1.45e-05 p99 1.17e-04 max 4.14e-04
+03:57:01 P=7975 B= 8 control_vs_solo   : top-1 99.80% (1022/1024), KL mean 1.39e-05 p99 1.23e-04 max 2.60e-04
+03:57:01 P=7975 B= 8 mma_vs_fp32       : top-1 100.00% (1024/1024), KL mean 9.95e-06 p99 7.73e-05 max 3.35e-04
+03:57:01 P=7975 B= 8 control_vs_fp32   : top-1 99.61% (1020/1024), KL mean 1.02e-05 p99 8.11e-05 max 7.20e-04
+03:57:01 P=7975 B= 8 control_vs_mma    : top-1 99.61% (1020/1024), KL mean 1.11e-05 p99 8.59e-05 max 9.90e-04
+03:57:01 P=7975 B= 8 fp32: per-layer attention rms rel vs fp32 at step 64: mean 2.05e-04 max 2.78e-04; per-row fp16 mean 2.28e-04 max 3.12e-04; <= per-row in 64/64 (row, layer) pairs
+03:57:01 P=7975 B= 8 mma: per-layer attention rms rel vs fp32 at step 64: mean 2.09e-04 max 2.97e-04; per-row fp16 mean 2.31e-04 max 3.01e-04; <= per-row in 64/64 (row, layer) pairs
+03:57:01 P=7975 B= 8: ms/step (sync, incl. KL) fp32 42, mma 40, control 44; peak 14.72 GB
+03:57:04 P=7975 B=16 fp32: group built: n=16 lens 38..54 cap 256 kernel=False aliased=False, 0.81 GB; active 11.47 GB
+03:57:07 P=7975 B=16 mma: group built: n=16 lens 38..54 cap 256 kernel=True aliased=True, 0.54 GB; active 12.83 GB
+03:57:34 P=7975 B=16 fp32_vs_solo      : top-1 99.71% (2042/2048), KL mean 1.69e-05 p99 1.29e-04 max 3.61e-03
+03:57:34 P=7975 B=16 mma_vs_solo       : top-1 99.80% (2044/2048), KL mean 2.07e-05 p99 1.31e-04 max 7.59e-03
+03:57:34 P=7975 B=16 control_vs_solo   : top-1 99.76% (2043/2048), KL mean 1.56e-05 p99 1.25e-04 max 2.42e-03
+03:57:34 P=7975 B=16 mma_vs_fp32       : top-1 99.80% (2044/2048), KL mean 1.21e-05 p99 9.36e-05 max 1.10e-03
+03:57:34 P=7975 B=16 control_vs_fp32   : top-1 99.85% (2045/2048), KL mean 1.14e-05 p99 1.08e-04 max 2.62e-04
+03:57:34 P=7975 B=16 control_vs_mma    : top-1 99.76% (2043/2048), KL mean 1.33e-05 p99 9.78e-05 max 2.19e-03
+03:57:34 P=7975 B=16 fp32: per-layer attention rms rel vs fp32 at step 64: mean 2.08e-04 max 2.96e-04; per-row fp16 mean 2.30e-04 max 3.22e-04; <= per-row in 128/128 (row, layer) pairs
+03:57:34 P=7975 B=16 mma: per-layer attention rms rel vs fp32 at step 64: mean 2.05e-04 max 2.96e-04; per-row fp16 mean 2.27e-04 max 3.00e-04; <= per-row in 128/128 (row, layer) pairs
+03:57:34 P=7975 B=16: ms/step (sync, incl. KL) fp32 61, mma 60, control 70; peak 18.73 GB
+03:57:35 prefix target 32000: prompts 32008..32024 tokens, LCP 31974, group P 31969 (common slab ends [26624, 28672, 30720, 31969]), suffixes 38..54
+03:58:36 shared prefix prefilled in 60.6 s (31969 tokens)
+03:59:47 solo streams: 16 rows x 128 steps in 71.2 s; row 0 starts '# Hash Map Collision Resolution: Open Addressing vs. Separate Chaining\n\n## The Core Problem\n\nWhen you insert a'
+03:59:49 P=31969 B=8 fp32: group built: n=8 lens 40..54 cap 256 kernel=False aliased=False, 2.28 GB; active 13.31 GB
+03:59:51 P=31969 B=8 mma: group built: n=8 lens 40..54 cap 256 kernel=True aliased=True, 1.19 GB; active 14.92 GB
+03:59:51 control batch skipped: 8.4 GB of per-row KV > AGM_CONTROL_MAX_GB
+04:00:04 P=31969 B= 8 fp32_vs_solo      : top-1 100.00% (1024/1024), KL mean 1.35e-05 p99 9.86e-05 max 6.69e-04
+04:00:04 P=31969 B= 8 mma_vs_solo       : top-1 100.00% (1024/1024), KL mean 1.13e-05 p99 8.13e-05 max 1.44e-04
+04:00:04 P=31969 B= 8 mma_vs_fp32       : top-1 100.00% (1024/1024), KL mean 1.13e-05 p99 9.16e-05 max 6.75e-04
+04:00:04 P=31969 B= 8 fp32: per-layer attention rms rel vs fp32 at step 64: mean 2.07e-04 max 2.77e-04; per-row fp16 mean 2.32e-04 max 3.23e-04; <= per-row in 64/64 (row, layer) pairs
+04:00:04 P=31969 B= 8 mma: per-layer attention rms rel vs fp32 at step 64: mean 2.08e-04 max 2.59e-04; per-row fp16 mean 2.32e-04 max 2.81e-04; <= per-row in 64/64 (row, layer) pairs
+04:00:04 P=31969 B= 8: ms/step (sync, incl. KL) fp32 52, mma 48; peak 16.88 GB
+04:00:07 P=31969 B=16 fp32: group built: n=16 lens 38..54 cap 256 kernel=False aliased=False, 2.42 GB; active 13.86 GB
+04:00:11 P=31969 B=16 mma: group built: n=16 lens 38..54 cap 256 kernel=True aliased=True, 1.32 GB; active 16.01 GB
+04:00:11 control batch skipped: 16.9 GB of per-row KV > AGM_CONTROL_MAX_GB
+04:00:30 P=31969 B=16 fp32_vs_solo      : top-1 99.85% (2045/2048), KL mean 1.36e-05 p99 9.75e-05 max 4.37e-03
+04:00:30 P=31969 B=16 mma_vs_solo       : top-1 99.85% (2045/2048), KL mean 1.25e-05 p99 9.70e-05 max 7.61e-04
+04:00:30 P=31969 B=16 mma_vs_fp32       : top-1 99.85% (2045/2048), KL mean 1.17e-05 p99 8.69e-05 max 3.07e-03
+04:00:30 P=31969 B=16 fp32: per-layer attention rms rel vs fp32 at step 64: mean 2.10e-04 max 2.93e-04; per-row fp16 mean 2.35e-04 max 3.45e-04; <= per-row in 128/128 (row, layer) pairs
+04:00:30 P=31969 B=16 mma: per-layer attention rms rel vs fp32 at step 64: mean 2.11e-04 max 3.21e-04; per-row fp16 mean 2.34e-04 max 3.46e-04; <= per-row in 128/128 (row, layer) pairs
+04:00:30 P=31969 B=16: ms/step (sync, incl. KL) fp32 73, mma 75; peak 17.35 GB

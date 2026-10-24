@@ -5,11 +5,147 @@ Code: `src/worker/cascade_mma.py` (new), `src/worker/cascade.py` (kernel mode of
 `PrefixGroup`), `src/worker/worker.py` (knob, charge, formation). Tests:
 `src/worker/tests/test_cascade_mma.py`. GPU plan: `scripts/perf/cascade_mma/`.
 
-**Status.** The code and the CPU tests are done. The Metal correctness tests pass on M1 Max:
-the kernel against an fp32 reference, and the grouped attention against per-row fp32 SDPA.
-**Nothing has been measured for speed yet**: one-off timings were taken on a GPU shared with
-another agent's worker, so they do not count. The GPU plan below still has to run under the
-lease. The default (`QWEN_CASCADE_KERNEL` unset or `0`) is today's fp32 path, bit for bit.
+**Status (after the GPU lease, 2026-10-24 03:37–04:18).** Done and measured; see
+"Results" right below. Verdict: **keep `QWEN_CASCADE_KERNEL=0` as the default.**
+
+- **Memory: the kernel wins.** 16 × 32K end to end: worker peak 20.9 against 23.3 GB, and
+  active 1.1 GiB lower.
+- **Exactness: same class as today.** top-1 ≥ 99.80 % in every cell.
+- **Speed: no gain at the shapes that matter.** The 16-row step is equal at 8K and 3–6 %
+  slower at 32K. The kernel's prefix part is capped at ~4 TFLOPS on M1, while MLX's fp32
+  GEMM path reaches ~5.5. The kernel wins only for groups of ≤ 8 rows: ×1.36–1.40 on the
+  attention, ×1.05–1.10 on the step.
+
+The knob stays as the memory option. The default is today's fp32 path, bit for bit.
+
+## Results (GPU lease, 2026-10-24)
+
+**Conditions.**
+
+- **Load.** M1 Max, no other model on the GPU. Other agents' CPU pytest ran at times:
+  the ±20 % noise was accepted, and every A/B is interleaved in one process.
+- **Memory.** Free memory was 13–23 GB and swap 3.4–5.5 GB; nothing was reduced.
+- **Raw data.** `docs/perf/2026-10-24/raw/cascade_mma/`: `status.txt`; `M_bench_attn.txt`
+  (final); `M_bench_attn_v1_mxmerge.txt` (first version, with the mx suffix merge);
+  `M2_tile_sweep.txt`; `S_step_ab.txt`; `A_agree.txt`; `E_*.txt` / `E_*.json`;
+  `E_worker_*.log`; plus the JSONs.
+
+| phase | verdict | key numbers |
+|---|---|---|
+| T | **PASS** | Metal 130 passed; CPU 74 passed |
+| M | **partial** | ≤ 8 rows the kernel wins (×1.36–1.40), 8K × 16 equal (×1.04), **32K × 16 slower (×0.84)**; prefix half 17.2 ms / 4.0 TF vs the 12 ms target; numerics = fp32 cascade to 4 digits |
+| S | **partial** | step ×1.055 / ×1.013 / ×1.096 / **×0.968** at 8K×8 / 8K×16 / 32K×8 / 32K×16; the "92 vs 62" question answered (below) |
+| A | **PASS** (one marginal KL cell) | top-1 ≥ 99.80 % in every cell; mma vs fp32 KL ≤ fp32 vs solo in 4/4; 8K × 16 KL mean 2.07e-5 vs a 1.86e-5 bar (one token at KL 7.6e-3; p99 equal) |
+| E | **PASS** except speed | 0 errors, 0 refusals, `prefix fp16 aliased` in every ON formation, all 16 rows grouped; 32K peak **20.94 / 20.95 vs 23.26 GB**; decode tok/s/req equal (13.1 vs 13.2) |
+
+### M: attention only (synthetic 9B, 8 FA layers per step, ms per step)
+
+Columns: `fp32` is today's group, `mma` is the kernel group (prefix + suffix + merge on
+Metal), `mma_pre` is the prefix half alone, `rows` is per-row MLX SDPA, `rattn` is
+`rattn.py`.
+
+| P × B | fp32 | mma | mma_pre (TFLOPS) | rows | rattn | mma vs fp32 |
+|---|---|---|---|---|---|---|
+| 8K × 8 | 6.52 | **4.65** | 3.13 (2.75) | 9.52 | 7.28 | ×1.40 |
+| 8K × 16 | 8.18 | 7.88 | 5.18 (3.32) | 18.74 | 14.25 | ×1.04 |
+| 32K × 8 | 14.85 | **10.92** | 9.33 (3.68) | 27.81 | 25.51 | ×1.36 |
+| 32K × 16 | **16.84** | 19.94 | 17.16 (4.00) | 55.07 | 51.40 | **×0.84** |
+
+- **Against per-row.** Both cascades beat per-row attention ×1.5–3.3, which was known
+  from B4.
+- **Peak memory per step.** The kernel's is lower: +73 vs +567 MiB at 32K × 16, since
+  there are no score transients.
+- **Numerics.** rms rel against per-row fp32 is identical for `mma` and `fp32`
+  (2.055–2.077e-4); the per-row fp16 kernel is at 2.9e-4.
+
+**What limits the kernel.** At 16 rows, M0 = 64 query rows are two 32-row query blocks.
+Cost scales exactly with q-blocks × keys: 32K × 8 takes 9.3 ms and 32K × 16 takes 17.2 ms.
+So the kernel is compute / issue bound at ~4 TF per block, not bandwidth bound (126 GB/s).
+MLX's fp32 batched GEMM in today's path takes 64-row tiles at ~5.5 TF, which beats it once
+there are 64 rows.
+
+**Variants tried** (`M2_tile_sweep.txt`, all with the same error):
+
+| variant | result |
+|---|---|
+| BK 32 with Q in registers (`32x32q`) | equal |
+| 64-row tiles, TQ 2 (`64x16q` / `64x32q`) | 1.0–2.5 TF: register spills; 8 × 2 simdgroups = 512 threads exceed the 448 the pipeline allows |
+| software-pipelined K/V (next block read into registers during the MMAs) | equal |
+| P·V with fp16 P | equal speed, error ×100 |
+| chunk 256–2048 | ±5 %; `pick_chunk` kept |
+
+The first version merged the suffixes with a compiled mx graph, which cost 2.8–4.8 ms per
+step (`v1_mxmerge`: 32K × 16 was ×0.77). A Metal suffix pass plus one merge launch
+(`group_attention`) replaced it; that is the version measured above.
+
+### S: in-model step (real 9B, step-ahead, medians of 4 × 48 steps)
+
+`stub` is the step with `cascade.attention` stubbed out (the rest of the step);
+`attn_fp32` / `attn_mma` are the attention alone, isolated. All in ms.
+
+| P × B | fp32 step | mma step | stub (rest) | fp32 attn in model / isolated | mma attn in model / isolated | control (per-row) |
+|---|---|---|---|---|---|---|
+| 8K × 8 | 40.8 | 38.7 | 35.9 | 4.9 / 5.3 | 2.7 / 4.0 | 44.4 |
+| 8K × 16 | 53.5 | 52.8 | 46.8 | 6.8 / 6.2 | 6.1 / 6.7 | 64.0 |
+| 32K × 8 | 46.0 | 42.0 | 31.6 | 14.5 / 14.7 | 10.4 / 11.4 | (8.5 GB: skipped) |
+| 32K × 16 | **62.5** | 64.6 | 46.8 | 15.7 / 15.8 | 17.8 / 19.6 | (17 GB: skipped) |
+
+**"92 vs ~62 ms" (cascade_gpu.md's open item) is not reproduced on today's code.**
+
+- **The step now measures what was projected.** The fp32 grouped step at 32K × 16 is
+  62.5 ms in-process, and 57.7 ms in the worker at mean_rows ≈ 12 (E).
+- **The rest of the step is context-independent.** The stub is 46.8 ms at 8K × 16 and at
+  32K × 16.
+- **No contention.** The attention costs the same inside the model as alone (15.7 vs
+  15.8 ms).
+- **The 2026-10-12 figure** of 92 ms (88.5 → 98.4 as the suffix grew to 560) therefore
+  came from that run, not from the attention. That evening the GPU had slowed ~18 % (the
+  doc notes 65 → 77 ms at 8K × 16 in G1), and the code has changed since. Without a bisect
+  it cannot be pinned to one change.
+
+### A: exactness (teacher-forced 128 steps, solo greedy = teacher)
+
+| cell | fp32 vs solo top-1 / KL | mma vs solo top-1 / KL | control vs solo | mma vs fp32 KL |
+|---|---|---|---|---|
+| 8K × 8 | 99.80 % / 1.45e-5 | 99.80 % / 1.45e-5 | 99.80 % / 1.39e-5 | 9.95e-6 |
+| 8K × 16 | 99.71 % / 1.69e-5 | **99.80 % / 2.07e-5** | 99.76 % / 1.56e-5 | 1.21e-5 |
+| 32K × 8 | 100 % / 1.35e-5 | 100 % / 1.13e-5 | — | 1.13e-5 |
+| 32K × 16 | 99.85 % / 1.36e-5 | 99.85 % / 1.25e-5 | — | 1.17e-5 |
+
+- **Per-layer attention rms vs fp32 at step 64.** mma mean 2.05–2.11e-4, fp32 2.05–2.10e-4;
+  both are ≤ the per-row fp16 kernel in 100 % of (row, layer) pairs.
+- **The 8K × 16 KL miss.** The KL mean is higher there because of one token at KL 7.6e-3
+  (p99 1.31e-4 vs fp32's 1.29e-4). Same class.
+
+### E: end to end (16 × 8K / 256 tokens and 16 × 32K / 128 tokens, ON / OFF / ON, fresh workers)
+
+| run | 8K wall / agg tok/s / decode tok/s/req / peak GB | 32K wall / agg / decode / peak GB | 32K formation charge |
+|---|---|---|---|
+| ON 1 | 32.5 / 126.1 / 17.2 / 14.42 | 76.6 / 26.7 / 13.1 / **20.94** | 3.31 GiB (reserved 9.36 → 4.14) |
+| OFF | 32.4 / 126.3 / 17.2 / 14.99 | 77.8 / 26.3 / 13.2 / **23.26** | 4.34 GiB (9.38 → 5.17) |
+| ON 2 | 33.7 / 121.4 / 16.7 / 14.53 | 76.8 / 26.7 / 13.1 / **20.95** | 3.32 GiB |
+
+- **Steady 16-row step** (the worker's `batch:` lines):
+  - 8K: 53.1 / 53.4 ms (ON) vs 52.7 ms (OFF);
+  - 32K: 61.3 / 61.6 ms (ON) vs 57.7 ms (OFF), with ~12–13 mean rows in that window.
+  - Active memory at 32K: 13.55 GiB (ON) vs 14.66 GiB (OFF).
+- **What the kernel buys end to end.** −2.3 GB of peak (the formation transient is gone)
+  and −1.0 GiB of charge per 32K group; in a memory-bound load that means more rows
+  admitted.
+- **What it costs.** No speed gain at 16 rows: 32K decode is 1 % slower per request, and
+  the step 3–6 % slower.
+
+### Recommendation
+
+- **Default.** Keep `QWEN_CASCADE_KERNEL=0`.
+- **When to set it to 1.** Where admission is memory-bound with long shared prefixes
+  (16 × 32K+, or 27B-class weights next to the 9B). Groups of ≤ 8 rows (after members
+  leave) also get faster attention.
+- **What would flip the default.** A prefix kernel faster than ~5.5 TF at 64 query rows,
+  so that 16-row groups win too. That needs a 64-row block per kv head without spilling,
+  e.g. a D-split into 4 simdgroups (WN = 4) at ≤ 448 threads, which is not tried yet.
+  Alternatively a hybrid that keeps the fp16 storage and picks the GEMM path for 16-row
+  groups, which would need an fp16 × fp16 → fp32 GEMM from MLX, not available today.
 
 ## Today (fp32 cascade, `cascade.cascade`)
 
@@ -78,19 +214,24 @@ array.
 - **Names and head dims.** The kernel name carries the exact scale (`float.hex`), because
   MLX caches libraries by name. Only the tested head dims 64 / 128 / 256 are accepted.
 
-### Suffixes and the merge
+### Suffixes and the merge (`cascade_mma.group_attention`)
 
-These keep today's mx ops. `cascade.merge` is `cascade`'s suffix + merge code line for
-line, under `mx.compile` in the same trace LRU. It takes (o_p, lse_p) from the kernel.
+On Metal the whole grouped attention is three launches per layer:
 
-Why the suffixes are not in the kernel (yet):
+1. **Prefix pass 1** (above).
+2. **Suffix pass.** One threadgroup of 4 simdgroups per (row, 256-slot piece, kv head),
+   over the members' **fp32 stack as it is**. It is `rattn.py`'s pass 1 on an fp32
+   buffer: each simdgroup takes a run of slots and computes all rep query heads of its kv
+   head in fp32. It reads only the `slens` (S_j, + 1 inside a step) slots of each row.
+3. **One merge.** The prefix chunks' and the row's suffix pieces' (o, m, l) are merged
+   straight into the fp16 (B, Hq, 1, D) output. An empty piece weighs 0.
 
-- they are short: ≤ P/2 by the leave rule, ~150 tokens at formation;
-- their GEMMs cost little next to an 8K–32K prefix;
-- moving them in would turn the fp32 stack into fp16 with per-row item tables, which means
-  reworking append, take, grow, release, the masks and the bit-exact release.
+**Why not the mx graph.** The stack, append, take, grow and the bit-exact release are
+untouched. The first version merged with a compiled mx graph (`cascade.merge`, the same
+ops as `cascade`), and that cost 2.8–4.8 ms per 8-layer step.
 
-This is a second step, once the prefix part is measured: see "Next" below.
+**The CPU path.** `cascade_mma.reference` + `cascade.merge` (the CPU tests) still use the
+mx graph.
 
 ### The prefix buffer: alias, not copy (`PrefixGroup.build(kernel=True)`)
 
@@ -369,18 +510,17 @@ Then a second confirm run on the defaults, as B4's C1/C5.
 
 ## Risks and open points
 
-- **Speed is unmeasured.** It is the whole point. If the kernel is not clearly faster at
-  ≥ 8 rows after the chunk sweep, the memory gain still stands (alias, −1 GiB per 32K
-  group, no +2.2 GB formation peak), and a follow-up tunes the tile (BQ 64 /
-  Q in registers).
+- **Speed (measured, see Results).** The kernel is not faster at 16 rows: a ~4 TF ceiling
+  per 32-row block. BQ 64 spilled, Q in registers / BK 32 / pipelining were equal. The
+  memory gain stands: the alias, −1 GiB per 32K group, and −2.3 GB of peak.
 - **Occupancy at small groups.** M0 = 3 × 4 = 12 rows fills one 32-row query block, so
   ⅝ of the MMA work is padding. Groups form at 8 rows by default (32 query rows = one full
   block), so that is only after members leave.
 - **Pinned donor buffer.** The alias pins the donor's whole buffer, up to `ALIAS_SLACK`
   (1024) unused slots, 32 MiB on the 9B. It is charged.
-- **Per-step host work.** Each layer runs one more launch pair (pass 1 + pass 2) plus the
-  compiled merge, against one compiled graph today. Host time per layer is ~µs
-  (`meta` is cached, the pipelines are prebuilt). Phase M's `mma` − `mma_pre` shows it.
+- **Per-step host work.** Each layer runs 3 launches (prefix pass 1, suffix pass, merge)
+  against one compiled graph today. `meta`, `smeta` and `slens` are cached per step. At
+  8 rows the step still wins, so the host time is not the issue.
 - **Future MLX bumps.** A bump may change `steel/attn` (loaders, `MMATile`). The kernel
   inlines the wheel's headers, so a header change breaks the compile at the first group,
   or at `warm` at load, not silently. When bumping mlx, diff `cmma_p1` against
@@ -388,8 +528,9 @@ Then a second confirm run on the defaults, as B4's C1/C5.
 
 ## Next (not done)
 
-- Suffixes in the same kernel (fp16 stack, per-row item tables) or through `rattn`, so
-  that `merge` becomes one launch.
-- BQ 64 for 16-row groups (each K/V tile read once per kv head instead of twice).
+- A 64-query-row block per kv head without spilling, e.g. WN = 4 (a D-split in 4) at
+  ≤ 448 threads. It is the one thing that could make 16-row groups faster than MLX's fp32
+  GEMM path.
+- An fp16 suffix stack: the suffix pass reads fp32, 2.6 ms of 7.9 at 8K × 16.
 - Reading the prefix straight from a prompt-cache segment instead of the donor row: no
   pinned donor tail, and groups could form before any row is prefilled.
