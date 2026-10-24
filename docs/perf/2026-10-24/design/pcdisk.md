@@ -319,7 +319,7 @@ mean a gateway change as well; that is left to the integrator.
 The test file takes ~25 s.
 
 Full suite (`pytest -q --ignore tests/test_mrqmm.py`, 2026-10-24): 359 passed, 49 skipped,
-9.5 min (before the review fixes; after them see the commit). A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
+9.5 min before the review fixes; after them (ed3b242) 367 passed, 49 skipped, 7 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
 device, came back bit-exact (zero-copy views and loader-thread `mx.array` on Metal); it was not
 a speed measurement.
 
