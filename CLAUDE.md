@@ -316,6 +316,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   Special-token strings in message text become control tokens (as in vLLM: a tool
   output with `<|im_end|>\n<|im_start|>system` forges a turn; `split_special_tokens`
   does not help — `<tool_call>`, `<think>` are special=False): `QWEN_SPLIT_SPECIAL_TOKENS`.
+  Disk tier of the prompt cache (`QWEN_PROMPT_CACHE_DISK`, `design/pcdisk.md`): the biggest
+  AppWorld lever of the day (×2.3 req/min at a 3 GB RAM cache: evictions become 0.3 s loads
+  instead of 50–200 s re-prefills); off by default only because it needs a directory.
 
 ## Implementation notes worth keeping
 
@@ -781,6 +784,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_JSON_MAX_WS` | worker | `0` (off) — whitespace-run cap in response_format answers |
 | `GATEWAY_OPENAI_DEFAULTS` / `GATEWAY_THINKING` / `GATEWAY_SERVED_MODEL_NAMES` / `GATEWAY_DEFAULT_MAX_TOKENS` | gateway | unset / unset (`on`/`off` forces) / unset / `0` (= rest of context) — see README |
 | `QWEN_PROMPT_CACHE` / `_GB` / `_STRIDE` / `_CKPTS` | worker | `0` / `3` (soft cap: evicted at store; counted live in the batch budget, evicted on demand; order: wanted by the queue last, stale LRU first, else MRU) / `2048` / `12` (system-block end + last 3 message starts never thinned) |
+| `QWEN_PROMPT_CACHE_DISK` (+ `_GB` / `_KEEP` / `_QUEUE_GB` / `_MIN_TOKENS` / `_WAIT_S` / `_HELD_WAIT_S` / `_TIMEOUT_S` / `_NOCACHE`) | worker | unset = off / `32` / `0` / `4` / `4096` / `10` / `5` / `30` / `1` — SSD tier of the prompt cache (`pcdisk.py`): evicted entries (≥ MIN_TOKENS) are written by a background thread (zero-copy views, one file per segment / GDN state, deduplicated, LRU under `_GB`), a waiting request whose disk hit is ≥ a slab deeper than its RAM hit gets the entry loaded (reader thread → constant mx.arrays, inserted on the scheduler under the usual budget); RAM held by pending writes / loads counts in every budget check (`pc.charged()`); disk hit == RAM hit == cold bit for bit; directory cleared at start unless `_KEEP=1` with the same validity key. AppWorld replay at `QWEN_PROMPT_CACHE_GB=3`: 10.3 → 23.4 req/min (×2.3), MISS 35 → 7 %, load p50 0.32 s; peak +3 GB (longer rows, not the tier) |
 | `QWEN_PROMPT_CACHE_STALE_S` | worker | `300` — unused this long and wanted by no waiting request = stale (evicted first, LRU) even within the round; `0` = off |
 | `QWEN_PROMPT_CACHE_CHAIN_MARKS` / `_CHAIN_TAIL` | worker | `3` / `4096` — an entry that absorbed the previous turn keeps only the system-block end, the last N message starts, strides in the last N tokens and in the first user message + its end state; `-1` marks = off |
 | `QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS` | worker | `16384` — fresh entries this long take the chain policy (+ the divergence point); shorter: the cap policy; `0` = never |
