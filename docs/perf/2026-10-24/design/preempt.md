@@ -203,3 +203,42 @@ PERF_OUT=/tmp/perf PYTHONPATH=. \
   of `scripts/perf/agentic/replay.py --own-replies --episodes 6 --duration-min 5` with `QWEN_PREEMPT=2`.
   Expect `preempted at` lines in the worker log, no `ended at … tokens` lines, and every reply's
   completion_tokens equal to its max_tokens (ignore_eos on).
+
+## GPU results (2026-10-24, 9B 8-bit, M1 Max; raw: `../raw/preempt/`)
+
+`preempt_check.py`, one process. Phase 0 (the sync guard) passed; see `no_sync_guard.md`.
+
+**Phase 1, exactness at max_batch 2: PASS, greedy and seeded (T 0.7, top-p 0.95, seed 5).**
+
+- A (1 676-token prompt, 2 500 tokens, logprobs top 3) was preempted twice: at 1 024 and 2 048 generated
+  tokens. Each time its KV was kept (`_Seg.adopt`), and it resumed with a full HIT (2699/2700, then
+  3723/3724, prefilling 1).
+- Against the run without preemption, A and B (2 600 tokens) are token-identical, text-identical and
+  **bitwise identical in their logprobs** (top 3 included).
+- Both finish `length` at max_tokens, and Usage (prompt_tokens, cached_tokens) is equal.
+- Peak 11.48 GB.
+
+**Phase 2, informational.** Four 2 000-token rows at max_batch 4, real budget.
+
+- First run: the budget was cut to the rows' reservations **plus the cache's bytes** + 16 MB. Evicting
+  the four prompt entries (~0.9 GB) paid for every row's growth, so there were **0 preemptions** and the
+  phase tested nothing. All four streams were token-identical to the reference.
+- Script fixed: at the cut the cache is emptied and the budget is set to reserved + 16 MB. Rerun
+  (`PRE_PHASES=2`, `preempt_check_p2.*`):
+  - **1 preemption** (Q0 at 1 024 tokens; its KV was kept, 126 MB without a copy).
+  - The other rows' growth then evicted that entry (the cache gives way first, and wanted entries go
+    last but do go), so Q0 resumed by recompute: a MISS and a cold 2 282-token prefill (3.9 s) after
+    the other rows ended.
+  - **Complete**: all 4 rows reached 2 000 tokens with `length`, and nothing was cut.
+  - Q1–Q3 were token-identical to the reference. Q0 diverged at token 1 291: prefill bits from the
+    recompute and the B ≥ 3 class, as expected.
+- An open point, not a bug: the preempted row's own entry (126 MB) was evicted so that a neighbour could
+  grow by 32 MB. The recompute cost 3.9 s here. A rule to keep a preempted entry, unless evicting it is
+  the only way, would turn this into a hit.
+
+**Recommendation.** `QWEN_PREEMPT=2` as the default.
+
+- It changes behaviour only where a row would otherwise be cut with `length` (a broken answer).
+- At B ≤ 2 the result is bit-exact to an unconstrained run.
+- At B ≥ 3, and with a recompute, it is in the batched-decode numerics class already accepted.
+- The optional gateway replay (`replay.py --own-replies` with a small `QWEN_BATCH_MEM_GB`) was not run.

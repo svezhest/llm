@@ -1,0 +1,114 @@
+{
+ "phase0": {
+  "errors": [],
+  "sync_logs": [],
+  "PASS": true
+ },
+ "phase1": {
+  "greedy": {
+   "preemptions": [
+    "id=A preempted at 1024 tokens (1 of 2 preemptions): the batch's KV would pass its memory headroom (0.22 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (2700 tokens, 1476 left to generate)",
+    "id=A preempted at 2048 tokens (2 of 2 preemptions): the batch's KV would pass its memory headroom (0.26 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (3724 tokens, 452 left to generate)"
+   ],
+   "compare": {
+    "A": {
+     "tokens_equal": true,
+     "text_equal": true,
+     "lps_equal": true,
+     "n": 2500,
+     "finish": "length",
+     "usage_equal": true,
+     "error": null,
+     "first_diff": null
+    },
+    "B": {
+     "tokens_equal": true,
+     "text_equal": true,
+     "lps_equal": true,
+     "n": 2600,
+     "finish": "length",
+     "usage_equal": true,
+     "error": null,
+     "first_diff": null
+    }
+   },
+   "PASS": true
+  },
+  "seeded": {
+   "preemptions": [
+    "id=A preempted at 1024 tokens (1 of 2 preemptions): the batch's KV would pass its memory headroom (0.22 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (2700 tokens, 1476 left to generate)",
+    "id=A preempted at 2048 tokens (2 of 2 preemptions): the batch's KV would pass its memory headroom (0.26 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (3724 tokens, 452 left to generate)"
+   ],
+   "compare": {
+    "A": {
+     "tokens_equal": true,
+     "text_equal": true,
+     "lps_equal": true,
+     "n": 2500,
+     "finish": "length",
+     "usage_equal": true,
+     "error": null,
+     "first_diff": null
+    },
+    "B": {
+     "tokens_equal": true,
+     "text_equal": true,
+     "lps_equal": true,
+     "n": 2600,
+     "finish": "length",
+     "usage_equal": true,
+     "error": null,
+     "first_diff": null
+    }
+   },
+   "PASS": true
+  }
+ },
+ "phase2": {
+  "preemptions": [],
+  "compare": {
+   "Q0": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   },
+   "Q1": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   },
+   "Q2": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   },
+   "Q3": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   }
+  },
+  "complete": true
+ },
+ "PASS": true
+}

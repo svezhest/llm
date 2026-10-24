@@ -63,3 +63,15 @@ paths (mrqmm, the Metal SDPA / RoPE kernels) are checked in phase 0 of `scripts/
 
 It could be turned on for the whole CI (`conftest`: `worker.DEBUG_NO_SYNC = True`) once the cascade spy
 copies its logits after the step. Not done here: other branches add code to `_step` in parallel.
+
+## GPU results (2026-10-24, 9B 8-bit, M1 Max; raw: `../raw/preempt/preempt_check.*`)
+
+Phase 0 of `scripts/perf/preempt/preempt_check.py` ran with `worker.DEBUG_NO_SYNC = True`:
+
+- 8 rows of 64 tokens (greedy, seeded top-p/top-k, penalties, logprobs top 5). The batch reached B = 8,
+  and the log shows mean rows 4–6, which covers mrqmm, the GDN fuse and grouped sampling.
+- Then 1 row alone with logprobs.
+
+Result: **PASS**. No `SyncInStep` and no errors. The Metal paths of `_step` hold no host wait, and the
+allowlisted mlx-vlm one-time evals did not fire outside the allowlist. The knob stays a debug switch
+(default off).

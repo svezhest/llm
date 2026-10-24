@@ -1,0 +1,80 @@
+no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+04:24:32 warm-up: 6 conversations
+04:24:42   warm-0: prompt 4628 ttft 8.259 s finish length
+04:24:51   warm-1: prompt 6344 ttft 8.504 s finish length
+04:25:03   warm-2: prompt 7626 ttft 10.675 s finish length
+04:25:19   warm-3: prompt 9359 ttft 14.255 s finish length
+04:25:37   warm-4: prompt 10634 ttft 17.366 s finish length
+04:25:59   warm-5: prompt 12341 ttft 21.181 s finish length
+04:26:01 long prompt: 40296 tokens; rounds ['on', 'off', 'off', 'on', 'on', 'off']
+04:27:36 round 0 lane=on: long ttft 91.976 s wall 92.915 s; short ttft p50 6.45 max 10.03 s; cached [4676, 6337, 7674, 9407, 10627, 12389] of [5128, 6841, 8126, 9861, 11135, 12843]; entry 0383ed83e3432bc4; errors []
+04:29:09 round 1 lane=off: long ttft 81.373 s wall 89.57 s; short ttft p50 72.05 max 77.71 s; cached [4676, 6337, 7674, 9407, 10627, 12389] of [5128, 6841, 8126, 9861, 11135, 12843]; entry 0383ed83e3432bc4; errors []
+04:30:42 round 2 lane=off: long ttft 81.355 s wall 89.541 s; short ttft p50 71.61 max 77.70 s; cached [4676, 6337, 7674, 9407, 10627, 12389] of [5128, 6841, 8126, 9861, 11135, 12843]; entry 0383ed83e3432bc4; errors []
+04:32:17 round 3 lane=on: long ttft 91.939 s wall 92.877 s; short ttft p50 6.42 max 10.00 s; cached [4676, 6337, 7674, 9407, 10627, 12389] of [5128, 6841, 8126, 9861, 11135, 12843]; entry 0383ed83e3432bc4; errors []
+04:33:52 round 4 lane=on: long ttft 92.124 s wall 93.065 s; short ttft p50 6.58 max 10.18 s; cached [4676, 6337, 7674, 9407, 10627, 12389] of [5128, 6841, 8126, 9861, 11135, 12843]; entry 0383ed83e3432bc4; errors []
+04:35:25 round 5 lane=off: long ttft 81.252 s wall 89.434 s; short ttft p50 71.50 max 77.58 s; cached [4676, 6337, 7674, 9407, 10627, 12389] of [5128, 6841, 8126, 9861, 11135, 12843]; entry 0383ed83e3432bc4; errors []
+04:35:25 {
+ "short_ttft_on": [
+  4.951,
+  4.978,
+  5.094,
+  5.369,
+  5.379,
+  5.502,
+  6.231,
+  6.282,
+  6.411,
+  6.609,
+  6.621,
+  6.69,
+  6.711,
+  6.756,
+  6.833,
+  10.0,
+  10.029,
+  10.177
+ ],
+ "short_ttft_off": [
+  64.764,
+  64.836,
+  64.874,
+  68.47,
+  68.531,
+  68.584,
+  70.731,
+  70.841,
+  71.696,
+  72.26,
+  72.371,
+  72.395,
+  74.898,
+  75.007,
+  75.043,
+  77.579,
+  77.699,
+  77.707
+ ],
+ "long_ttft_on": [
+  91.976,
+  91.939,
+  92.124
+ ],
+ "long_ttft_off": [
+  81.373,
+  81.355,
+  81.252
+ ],
+ "long_ttft_ratio_on_off": 1.131,
+ "short_text_equal_pairs": "54/54",
+ "checks": {
+  "entry_identical": true,
+  "short_on_p50<=4s": false,
+  "short_on_max<=15s": true,
+  "short_off_p50>=20s": true,
+  "long_on/off<=1.35": true,
+  "no_errors": true
+ },
+ "PASS": false
+}
+04:35:25 RESULT: FAIL -> /tmp/perf/gate1024/lane_ab.json

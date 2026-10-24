@@ -42,6 +42,7 @@ import worker_pb2 as pb
 
 OUT = os.environ.get("PERF_OUT", "/tmp/perf")
 SLACK = int(float(os.environ.get("PRE_SLACK_MB", "16")) * (1 << 20))
+PHASES = set(os.environ.get("PRE_PHASES", "0,1,2").split(","))   # e.g. PRE_PHASES=2 to rerun one
 OFF = json.dumps({"enable_thinking": False})
 WORDS = ("name id status amount date user playlist song album artist email phone count total "
          "created updated access token page limit offset title description value price").split()
@@ -107,16 +108,22 @@ def batch(eng, reqs):
 
 
 def squeeze(sched, rows):
-    """Once `rows` rows run, cut the budget to what they hold + SLACK (on the
-    scheduler thread, in _join); prefill reserve 0 (the prompts are short)."""
+    """Once `rows` rows run, empty the prompt cache and cut the budget to
+    what the rows hold + SLACK (on the scheduler thread, in _join); prefill
+    reserve 0 (the prompts are short). (GPU gate 2026-10-24: with the cache's
+    bytes left inside the budget, evicting the four prompt entries covered
+    every row's growth and nothing was preempted.)"""
     orig = sched._join
     saved = (sched.budget, sched.prefill_reserve)
 
     def join(row):
         orig(row)
         if len(sched.rows) == rows:
+            pc = sched.eng._pcache
+            pc.entries = []
+            pc._recount(added=False)
             sched.prefill_reserve = 0
-            sched.budget = sched.reserved + sched.eng._pcache.bytes + SLACK
+            sched.budget = sched.reserved + SLACK
             log(f"  budget cut to {sched.budget / 2**30:.3f} GiB ({len(sched.rows)} rows)")
     sched._join = join
 
@@ -174,80 +181,86 @@ def main():
     res = {}
 
     # --- phase 0: the guard on Metal --------------------------------------------
-    worker.DEBUG_NO_SYNC = True
-    kinds = [dict(), dict(temperature=0.7, top_p=0.9, top_k=20, seed=3),
-             dict(presence_penalty=0.5, frequency_penalty=0.2, repetition_penalty=1.1),
-             dict(logprobs=True, top_logprobs=5)]
-    rs = [req(f"g{i}", filler(10 + i, 600, tok), 64, **kinds[i % 4]) for i in range(8)]
-    o8 = batch(eng, rs)
-    o1 = batch(eng, [req("g-solo", filler(20, 600, tok), 64, logprobs=True)])
-    worker.DEBUG_NO_SYNC = False
-    errs = [o.get("error") for o in list(o8.values()) + list(o1.values()) if o.get("error")]
-    res["phase0"] = {"errors": errs, "sync_logs": cnt.sync[:5], "PASS": not errs and not cnt.sync}
-    log("phase 0 (guard):", res["phase0"])
+    if "0" in PHASES:
+        worker.DEBUG_NO_SYNC = True
+        kinds = [dict(), dict(temperature=0.7, top_p=0.9, top_k=20, seed=3),
+                 dict(presence_penalty=0.5, frequency_penalty=0.2, repetition_penalty=1.1),
+                 dict(logprobs=True, top_logprobs=5)]
+        rs = [req(f"g{i}", filler(10 + i, 600, tok), 64, **kinds[i % 4]) for i in range(8)]
+        o8 = batch(eng, rs)
+        o1 = batch(eng, [req("g-solo", filler(20, 600, tok), 64, logprobs=True)])
+        worker.DEBUG_NO_SYNC = False
+        errs = [o.get("error") for o in list(o8.values()) + list(o1.values()) if o.get("error")]
+        res["phase0"] = {"errors": errs, "sync_logs": cnt.sync[:5], "PASS": not errs and not cnt.sync}
+        log("phase 0 (guard):", res["phase0"])
 
     # --- phase 1: exactness at max_batch 2 ---------------------------------------
-    sched.max_batch = 2
-    res["phase1"] = {}
-    for name, kw in (("greedy", {}), ("seeded", dict(temperature=0.7, top_p=0.95, seed=5))):
-        def make():
-            return [req("A", "Continue this log:\n" + filler(31, 1500, tok), 2500, ignore_eos=True,
-                        logprobs=True, top_logprobs=3, **kw),
-                    req("B", "Continue this log:\n" + filler(32, 2500, tok), 2600, ignore_eos=True,
-                        logprobs=True, **kw)]
+    if "1" in PHASES:
+        sched.max_batch = 2
+        res["phase1"] = {}
+        for name, kw in (("greedy", {}), ("seeded", dict(temperature=0.7, top_p=0.95, seed=5))):
+            def make():
+                return [req("A", "Continue this log:\n" + filler(31, 1500, tok), 2500, ignore_eos=True,
+                            logprobs=True, top_logprobs=3, **kw),
+                        req("B", "Continue this log:\n" + filler(32, 2500, tok), 2600, ignore_eos=True,
+                            logprobs=True, **kw)]
+            pc.entries = []
+            pc._recount()
+            worker.PREEMPT = 0
+            ref = batch(eng, make())
+            pc.entries = []
+            pc._recount()
+            worker.PREEMPT = 2
+            n0 = len(cnt.preempted)
+            undo = force(sched, "A", times=2)          # twice: A resumes beside B, then alone
+            try:
+                got = batch(eng, make())
+            finally:
+                undo()
+            cmp = compare(ref, got)
+            pre = cnt.preempted[n0:]
+            ok = (len(pre) == 2 and all(c["tokens_equal"] and c["text_equal"] and c["lps_equal"] and c["usage_equal"]
+                                    and c["finish"] == "length" and not c["error"] for c in cmp.values())
+                  and cmp["A"]["n"] == 2500 and cmp["B"]["n"] == 2600)
+            res["phase1"][name] = {"preemptions": pre, "compare": cmp, "PASS": ok}
+            log(f"phase 1 {name}: {len(pre)} preemptions;",
+                {k: (c["tokens_equal"], c["lps_equal"], c["n"], c["finish"]) for k, c in cmp.items()},
+                "PASS" if ok else "FAIL")
+
+    # --- phase 2: informational, max_batch 4 -------------------------------------
+    if "2" in PHASES:
+        sched.max_batch = 4
+
+        def make4():
+            return [req(f"Q{i}", "Continue this log:\n" + filler(40 + i, 1200 + 400 * i, tok), 2000,
+                        ignore_eos=True, logprobs=True) for i in range(4)]     # (logprobs: the token ids)
         pc.entries = []
         pc._recount()
         worker.PREEMPT = 0
-        ref = batch(eng, make())
+        ref = batch(eng, make4())
         pc.entries = []
         pc._recount()
         worker.PREEMPT = 2
         n0 = len(cnt.preempted)
-        undo = force(sched, "A", times=2)          # twice: A resumes beside B, then alone
+        undo = squeeze(sched, 4)
         try:
-            got = batch(eng, make())
+            got = batch(eng, make4())
         finally:
             undo()
         cmp = compare(ref, got)
-        pre = cnt.preempted[n0:]
-        ok = (len(pre) == 2 and all(c["tokens_equal"] and c["text_equal"] and c["lps_equal"] and c["usage_equal"]
-                                and c["finish"] == "length" and not c["error"] for c in cmp.values())
-              and cmp["A"]["n"] == 2500 and cmp["B"]["n"] == 2600)
-        res["phase1"][name] = {"preemptions": pre, "compare": cmp, "PASS": ok}
-        log(f"phase 1 {name}: {len(pre)} preemptions;",
-            {k: (c["tokens_equal"], c["lps_equal"], c["n"], c["finish"]) for k, c in cmp.items()},
-            "PASS" if ok else "FAIL")
+        res["phase2"] = {"preemptions": cnt.preempted[n0:], "compare": cmp,
+                         "complete": all(c["n"] == 2000 and c["finish"] == "length" for c in cmp.values())}
+        log("phase 2:", len(cnt.preempted) - n0, "preemptions;",
+            {k: (c["tokens_equal"], c["first_diff"], c["n"]) for k, c in cmp.items()})
 
-    # --- phase 2: informational, max_batch 4 -------------------------------------
-    sched.max_batch = 4
-
-    def make4():
-        return [req(f"Q{i}", "Continue this log:\n" + filler(40 + i, 1200 + 400 * i, tok), 2000,
-                    ignore_eos=True, logprobs=True) for i in range(4)]     # (logprobs: the token ids)
-    pc.entries = []
-    pc._recount()
-    worker.PREEMPT = 0
-    ref = batch(eng, make4())
-    pc.entries = []
-    pc._recount()
-    worker.PREEMPT = 2
-    n0 = len(cnt.preempted)
-    undo = squeeze(sched, 4)
-    try:
-        got = batch(eng, make4())
-    finally:
-        undo()
-    cmp = compare(ref, got)
-    res["phase2"] = {"preemptions": cnt.preempted[n0:], "compare": cmp,
-                     "complete": all(c["n"] == 2000 and c["finish"] == "length" for c in cmp.values())}
-    log("phase 2:", len(cnt.preempted) - n0, "preemptions;",
-        {k: (c["tokens_equal"], c["first_diff"], c["n"]) for k, c in cmp.items()})
-
-    res["PASS"] = res["phase0"]["PASS"] and all(v["PASS"] for v in res["phase1"].values()) \
-        and res["phase2"]["complete"]
-    with open(os.path.join(OUT, "preempt_check.json"), "w") as f:
+    res["PASS"] = (res.get("phase0", {}).get("PASS", True)
+                   and all(v["PASS"] for v in res.get("phase1", {}).values())
+                   and res.get("phase2", {}).get("complete", True))
+    name = "preempt_check.json" if PHASES == {"0", "1", "2"} else \
+        f"preempt_check_p{''.join(sorted(PHASES))}.json"
+    with open(os.path.join(OUT, name), "w") as f:
         json.dump(res, f, indent=1, default=str)
-    log("RESULT:", "PASS" if res["PASS"] else "FAIL", "->", os.path.join(OUT, "preempt_check.json"))
+    log("RESULT:", "PASS" if res["PASS"] else "FAIL", "->", os.path.join(OUT, name))
     os._exit(0)          # the scheduler thread never returns (see _Scheduler._run)
 
 

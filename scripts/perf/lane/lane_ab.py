@@ -85,8 +85,12 @@ def call(eng, r, out):
             first = first or time.perf_counter()
             text.append(ev.token.text)
         elif k == "done":
-            out.update(finish=ev.done.finish, cached=ev.done.usage.cached_tokens,
-                       prompt=ev.done.usage.prompt_tokens, queue_ms=ev.done.usage.queue_ms)
+            u = ev.done.usage
+            # worker-side TTFT: arrival -> its first token (any token; the
+            # client's first Token event waits for the first text the
+            # detokenizer flushes: a token starting with a space)
+            out.update(finish=ev.done.finish, cached=u.cached_tokens, prompt=u.prompt_tokens,
+                       queue_ms=u.queue_ms, w_ttft_s=round((u.queue_ms + u.ttft_ms) / 1e3, 3))
         elif k == "error":
             out.update(error=f"{ev.error.kind}: {ev.error.msg}")
     t1 = time.perf_counter()
@@ -170,7 +174,7 @@ def main():
         sh = [outs[i] for i in range(NSHORT)]
         row = {"round": k, "mode": mode, "long_ttft": outs["long"]["ttft_s"],
                "long_wall": outs["long"]["wall_s"], "short_ttft": [o["ttft_s"] for o in sh],
-               "short_wall": [o["wall_s"] for o in sh], "short_cached": [o.get("cached") for o in sh],
+               "short_wall": [o["wall_s"] for o in sh], "short_w_ttft": [o.get("w_ttft_s") for o in sh], "short_cached": [o.get("cached") for o in sh],
                "short_prompt": [o.get("prompt") for o in sh],
                "errors": [o.get("error") for o in [outs["long"]] + sh if o.get("error")],
                "finish": [o.get("finish") for o in [outs["long"]] + sh], "entry": sk,
@@ -192,7 +196,12 @@ def main():
         and all(f in ("stop", "length") for r in results for f in r["finish"]),
     }
     same = sum(a == b for r1 in on for r2 in off for a, b in zip(r1["texts"], r2["texts"]))
+    w_on = [x for r in on for x in r["short_w_ttft"]]
+    w_off = [x for r in off for x in r["short_w_ttft"]]
     summary = {"short_ttft_on": sorted(s_on), "short_ttft_off": sorted(s_off),
+               # informational: worker-side (arrival -> first token, text or not)
+               "short_w_ttft_on_p50": st.median(w_on), "short_w_ttft_on_max": max(w_on),
+               "short_w_ttft_off_p50": st.median(w_off),
                "long_ttft_on": [r["long_ttft"] for r in on], "long_ttft_off": [r["long_ttft"] for r in off],
                "long_ttft_ratio_on_off": round(ratio, 3),
                "short_text_equal_pairs": f"{same}/{len(on) * len(off) * NSHORT}",

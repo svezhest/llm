@@ -1,0 +1,51 @@
+{
+ "phase2": {
+  "preemptions": [
+   "id=Q0 preempted at 1024 tokens (1 of 2 preemptions): the batch's KV would pass its memory headroom (0.61 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (2282 tokens, 976 left to generate)"
+  ],
+  "compare": {
+   "Q0": {
+    "tokens_equal": false,
+    "text_equal": false,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": 1291
+   },
+   "Q1": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   },
+   "Q2": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   },
+   "Q3": {
+    "tokens_equal": true,
+    "text_equal": true,
+    "lps_equal": false,
+    "n": 2000,
+    "finish": "length",
+    "usage_equal": true,
+    "error": null,
+    "first_diff": null
+   }
+  },
+  "complete": true
+ },
+ "PASS": true
+}

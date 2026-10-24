@@ -175,3 +175,53 @@ it or 0 per round.
 - Optional, after a PASS: one AppWorld replay (`scripts/perf/agentic/run_replay_batch.sh` with
   `QWEN_PREFILL_LANE=2048` added to its env), compared to the 10-17 replay numbers (different runs,
   informational only).
+
+## GPU results (2026-10-24, 9B 8-bit, M1 Max; raw: `../raw/lane/`)
+
+One process, rounds `on,off,off,on,on,off`, long cold prompt 40 296 tokens, 6 short next turns
+(hit after the reply, 451–507 new tokens each, so 1 lane request = 1–2 slabs). The machine was quiet:
+rounds of the same mode agree within 0.3 s.
+
+| criterion | result | |
+|---|---|---|
+| the long prompt's cache checksum | `0383ed83e3432bc4` in all 6 rounds (both runs) | **PASS** |
+| short TTFT lane on, client (first Token event) | p50 **6.50 s**, max 10.25 s | **FAIL** (p50 > 4 s); max PASS |
+| short TTFT lane on, worker (`queue_ms + ttft_ms`, first token) | p50 **3.05 s**, max 4.84 s | (informational) |
+| short TTFT lane off | client p50 72.1 s (worker 70.4 s) | PASS (setup sane) |
+| long TTFT on / off (medians) | 92.10 / 81.58 s = **1.129** | PASS (≤ 1.35) |
+| errors / finishes | none / all `length` (48 tokens) | PASS |
+
+- Short answers: identical in all 54 on/off pairs.
+- Short wall time (arrival to the last token, 48 tokens): lane on median 19.3 s (17.6–26.9) against
+  75.8 s (66.2–85.7) off.
+- Long wall: 92.8–93.2 s on, 89.5–89.9 s off.
+- Peak 19.35 GB (MLX peak, the 40K prefill + 6 rows + 3.4–5.4 GB of cache). The plan assumed 16–18.
+
+**Why the client's TTFT misses 4 s.** The lane does what it should: a short request is admitted at the
+end of the running main slab (about 2 s of wait on average), its prefill takes 1.1–1.5 s, and its first
+token comes about 3 s after arrival. The client's first Token event comes another 3.5–5.4 s later, for
+two reasons that have nothing to do with the lane:
+
+1. `_BPEDetokenizer` flushes text only on a token that starts with a space. The answers start with JSON
+   and newlines, so the first text comes several tokens in. With the lane off, the same gap is 0.04–2.7 s
+   at full decode speed.
+2. While the main prefill runs, decode gets `1 − s = 0.5·B/16` of the time: about 4 decode steps per main
+   slab (4 s at a 30–40K offset) at B = 1–4. Each token before the first space-led one therefore costs
+   about a main slab.
+
+Lowering the client TTFT further is a decode-share policy question (a floor for decode while a long
+prefill runs) or a detokenizer one (also flushing on newline-led tokens). Both are outside this item.
+
+**Fix made at the gate** (`_lane_first`, commit 2644022). After a lane row
+joins, decode runs until that row has read its first token, and only then does the main prefill take its
+next slab. Its first token needs two decode steps (step-ahead), and at a ~3 % decode share the next main
+slab used to fit between them. The cost is 2 decode steps per lane request, and the main slabs are
+unchanged (same checksum). Effect on the client TTFT here: none to −0.4 s (the first text needs more
+tokens anyway). The worker-side TTFT is now bounded by "rest of the main slab + own prefill + 2 steps".
+New CPU test: `test_lane_row_reads_its_first_token_before_the_next_main_slab` (share 1.0 and 0.5; fails
+without the fix).
+
+**Recommendation.** The lane's own goal is met: short requests finish in 19 s instead of 76 s (×4) at a
+cost of +13 % on the long TTFT, with the long prefill bit-identical and the answers identical. The 4 s
+client-TTFT criterion assumed that the first token's text follows the lane prefill directly. I recommend
+`QWEN_PREFILL_LANE=2048` as the default. The AppWorld replay (optional) was not run.
