@@ -1,0 +1,221 @@
+2026-10-24 04:56:42,573 INFO qwen.worker: loading model: /Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit
+2026-10-24 04:56:42,573 WARNING qwen.worker: no vision_config: text-only checkpoint (no vision tower; image requests will be refused)
+2026-10-24 04:56:42,637 WARNING root: Checkpoint has no weights for module(s): vision_tower. Disabling them.
+2026-10-24 04:56:45,004 INFO qwen.worker: language model cast to float16 (QWEN_FP16=1)
+2026-10-24 04:56:45,004 INFO qwen.worker: eos token ids: [248044, 248046]
+2026-10-24 04:56:46,347 INFO qwen.worker: buffer pool limit 3.0 GB, clear after request: True, prompt cache: True
+2026-10-24 04:56:46,362 INFO qwen.worker: prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-10-24 04:56:46,362 INFO qwen.worker: prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-10-24 04:56:46,975 INFO worker.pfqmm: pfqmm 8-bit g64: tested, 249 modules on (lm_head K=4096 N=248320 M=256/264/288/296)
+2026-10-24 04:56:46,976 INFO worker.pfqmm: pfqmm: 249 modules on the 64-row prefill qmm, >= 64 rows (8-bit g64 tested)
+2026-10-24 04:56:46,978 INFO worker.mrqmm: mrqmm: 201 modules on the multi-row kernel for 3..16 decode rows (linear_attn.in_proj_qkv x24, linear_attn.in_proj_z x24, linear_attn.out_proj x24, lm_head x1, mlp.down_proj x32, mlp.gate_proj x32, mlp.up_proj x32, self_attn.k_proj x8, self_attn.o_proj x8, self_attn.q_proj x8, self_attn.v_proj x8); left on quantized_matmul: 8-bit g64 N < 512 x48
+2026-10-24 04:56:47,065 INFO qwen.worker: GDN decode in-projections fused (QWEN_GDN_FUSE): 24 layers
+2026-10-24 04:56:47,066 INFO qwen.worker: batching: max_batch 16, KV budget 15.75 GiB (cap 28.0 GiB, prefill reserve 2.4 GiB), KV 32768 B/token, recurrent state 49.1 MiB/row, reserve <= 1024 new tokens/row, prefill share 0.50, prompt cache 0.00 GiB live inside the budget (soft cap 6.0 GiB, evicted on demand)
+2026-10-24 04:56:47,066 INFO qwen.worker: cascade attention (QWEN_CASCADE): on: >= 8 rows sharing >= 4096 prompt tokens
+2026-10-24 04:56:47,067 INFO qwen.worker: model loaded in 3773 ms
+2026-10-24 04:56:47,103 INFO qwen.worker: id=g0 prompt_tokens=635 (images=0)
+2026-10-24 04:56:47,167 INFO qwen.worker: id=g0 prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 04:56:47,298 INFO qwen.worker: id=g1 prompt_tokens=632 (images=0)
+2026-10-24 04:56:47,509 INFO qwen.worker: id=g2 prompt_tokens=634 (images=0)
+2026-10-24 04:56:47,719 INFO qwen.worker: id=g3 prompt_tokens=638 (images=0)
+2026-10-24 04:56:47,928 INFO qwen.worker: id=g4 prompt_tokens=639 (images=0)
+2026-10-24 04:56:48,141 INFO qwen.worker: id=g5 prompt_tokens=637 (images=0)
+2026-10-24 04:56:48,341 INFO qwen.worker: id=g6 prompt_tokens=631 (images=0)
+2026-10-24 04:56:48,341 INFO qwen.worker: id=g0 prompt cache store: 634 tokens, 1 checkpoints, 123.8 MB (1 entries, 123.8 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:48,373 INFO qwen.worker: id=g1 prompt cache MISS (common prefix 6, 1 entries)
+2026-10-24 04:56:48,550 INFO qwen.worker: id=g7 prompt_tokens=637 (images=0)
+2026-10-24 04:56:49,585 INFO qwen.worker: id=g1 prompt cache store: 631 tokens, 1 checkpoints, 123.7 MB (2 entries, 247.5 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:49,623 INFO qwen.worker: id=g2 prompt cache MISS (common prefix 6, 2 entries)
+2026-10-24 04:56:50,886 INFO qwen.worker: id=g2 prompt cache store: 633 tokens, 1 checkpoints, 123.8 MB (3 entries, 371.3 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:50,915 INFO qwen.worker: id=g3 prompt cache MISS (common prefix 6, 3 entries)
+2026-10-24 04:56:52,208 INFO qwen.worker: id=g3 prompt cache store: 637 tokens, 1 checkpoints, 123.9 MB (4 entries, 495.2 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:52,242 INFO qwen.worker: id=g4 prompt cache MISS (common prefix 6, 4 entries)
+2026-10-24 04:56:53,563 INFO qwen.worker: id=g4 prompt cache store: 638 tokens, 1 checkpoints, 123.9 MB (5 entries, 619.1 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:53,602 INFO qwen.worker: id=g5 prompt cache MISS (common prefix 6, 5 entries)
+2026-10-24 04:56:54,986 INFO qwen.worker: id=g5 prompt cache store: 636 tokens, 1 checkpoints, 123.9 MB (6 entries, 742.9 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:55,032 INFO qwen.worker: id=g6 prompt cache MISS (common prefix 6, 6 entries)
+2026-10-24 04:56:56,451 INFO qwen.worker: id=g6 prompt cache store: 630 tokens, 1 checkpoints, 123.7 MB (7 entries, 866.6 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:56,495 INFO qwen.worker: id=g7 prompt cache MISS (common prefix 6, 7 entries)
+2026-10-24 04:56:57,575 INFO qwen.worker: batch: rows=7 waiting=0 prefilling=g7 steps/s=3.2 mean_rows=4.12 step_ms=35.2 gbps=254 decode_s=1.2 prefill_s=9.2 reserved=1.01/15.75GiB pcache=0.81GiB active=10.38GiB groups=0 grouped=0
+2026-10-24 04:56:57,962 INFO qwen.worker: id=g7 prompt cache store: 636 tokens, 1 checkpoints, 123.9 MB (8 entries, 990.5 MB total) reused=0 gap=6 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:56:58,890 INFO qwen.worker: id=g0 prompt cache reply kept: 699 tokens (+64 generated), 1 checkpoints, 125.9 MB (8 entries, 992.6 MB total) absorbed=1 pieces=2
+2026-10-24 04:56:58,890 INFO qwen.worker: id=g0 finish=length gen_tokens=64 ttft_ms=2308 tps=6.8 cached=0 peak=11.84GB active=11.13GB pool=0.60GB queue_ms=86 batch=5.85
+2026-10-24 04:56:59,013 INFO qwen.worker: id=g1 prompt cache reply kept: 696 tokens (+64 generated), 1 checkpoints, 125.8 MB (8 entries, 994.7 MB total) absorbed=1 pieces=2
+2026-10-24 04:56:59,013 INFO qwen.worker: id=g1 finish=length gen_tokens=64 ttft_ms=2364 tps=7.7 cached=0 peak=11.84GB active=11.06GB pool=0.86GB queue_ms=1075 batch=6.12
+2026-10-24 04:56:59,166 INFO qwen.worker: id=g2 prompt cache reply kept: 698 tokens (+64 generated), 1 checkpoints, 125.9 MB (8 entries, 996.9 MB total) absorbed=1 pieces=2
+2026-10-24 04:56:59,167 INFO qwen.worker: id=g2 finish=length gen_tokens=64 ttft_ms=2417 tps=9.0 cached=0 peak=11.84GB active=10.98GB pool=1.36GB queue_ms=2115 batch=6.37
+2026-10-24 04:56:59,353 INFO qwen.worker: id=g3 prompt cache reply kept: 702 tokens (+64 generated), 1 checkpoints, 126.0 MB (8 entries, 999.0 MB total) absorbed=1 pieces=2
+2026-10-24 04:56:59,353 INFO qwen.worker: id=g3 finish=length gen_tokens=64 ttft_ms=2437 tps=10.7 cached=0 peak=11.84GB active=10.91GB pool=1.78GB queue_ms=3196 batch=6.52
+2026-10-24 04:56:59,564 INFO qwen.worker: id=g4 prompt cache reply kept: 703 tokens (+64 generated), 1 checkpoints, 126.1 MB (8 entries, 1001.1 MB total) absorbed=1 pieces=2
+2026-10-24 04:56:59,564 INFO qwen.worker: id=g4 finish=length gen_tokens=64 ttft_ms=2485 tps=13.2 cached=0 peak=11.84GB active=10.83GB pool=2.14GB queue_ms=4314 batch=6.52
+2026-10-24 04:56:59,803 INFO qwen.worker: id=g5 prompt cache reply kept: 701 tokens (+64 generated), 1 checkpoints, 126.0 MB (8 entries, 1003.3 MB total) absorbed=1 pieces=2
+2026-10-24 04:56:59,803 INFO qwen.worker: id=g5 finish=length gen_tokens=64 ttft_ms=2557 tps=17.6 cached=0 peak=11.84GB active=10.76GB pool=2.43GB queue_ms=5463 batch=6.31
+2026-10-24 04:57:00,080 INFO qwen.worker: id=g6 prompt cache reply kept: 695 tokens (+64 generated), 1 checkpoints, 125.8 MB (8 entries, 1005.4 MB total) absorbed=1 pieces=2
+2026-10-24 04:57:00,080 INFO qwen.worker: id=g6 finish=length gen_tokens=64 ttft_ms=2585 tps=26.0 cached=0 peak=11.84GB active=10.68GB pool=2.65GB queue_ms=6692 batch=5.82
+2026-10-24 04:57:00,353 INFO qwen.worker: id=g7 prompt cache reply kept: 701 tokens (+64 generated), 1 checkpoints, 126.0 MB (8 entries, 1007.5 MB total) absorbed=1 pieces=2
+2026-10-24 04:57:00,353 INFO qwen.worker: id=g7 finish=length gen_tokens=64 ttft_ms=1556 tps=27.8 cached=0 peak=11.84GB active=10.60GB pool=2.74GB queue_ms=7946 batch=4.98
+2026-10-24 04:57:00,356 INFO qwen.worker: id=g-solo prompt_tokens=638 (images=0)
+2026-10-24 04:57:00,371 INFO qwen.worker: id=g-solo prompt cache MISS (common prefix 5, 8 entries)
+2026-10-24 04:57:01,520 INFO qwen.worker: id=g-solo prompt cache store: 637 tokens, 1 checkpoints, 123.9 MB (9 entries, 1131.4 MB total) reused=0 gap=5 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:57:03,268 INFO qwen.worker: id=g-solo prompt cache reply kept: 702 tokens (+64 generated), 1 checkpoints, 126.0 MB (9 entries, 1133.5 MB total) absorbed=1 pieces=2
+2026-10-24 04:57:03,268 INFO qwen.worker: id=g-solo finish=length gen_tokens=64 ttft_ms=1200 tps=37.7 cached=0 peak=11.44GB active=10.75GB pool=0.02GB queue_ms=16 batch=1.00
+04:57:03 phase 0 (guard): {'errors': [], 'sync_logs': [], 'PASS': True}
+2026-10-24 04:57:03,307 INFO qwen.worker: id=A prompt_tokens=1676 (images=0)
+2026-10-24 04:57:03,308 INFO qwen.worker: id=A prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 04:57:03,519 INFO qwen.worker: id=B prompt_tokens=2696 (images=0)
+2026-10-24 04:57:06,161 INFO qwen.worker: id=A prompt cache store: 1675 tokens, 1 checkpoints, 157.9 MB (1 entries, 157.9 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:57:06,224 INFO qwen.worker: id=B prompt cache MISS (common prefix 11, 1 entries)
+2026-10-24 04:57:09,536 INFO qwen.worker: batch: rows=1 waiting=0 prefilling=B steps/s=11.7 mean_rows=3.19 step_ms=32.2 gbps=275 decode_s=4.5 prefill_s=7.4 reserved=0.41/15.75GiB pcache=0.15GiB active=9.26GiB groups=0 grouped=0
+2026-10-24 04:57:12,295 INFO qwen.worker: id=B prompt cache store: 2695 tokens, 2 checkpoints, 242.8 MB (2 entries, 400.8 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=154.5 MB
+2026-10-24 04:57:19,571 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=25.1 mean_rows=1.81 step_ms=34.9 gbps=251 decode_s=8.8 prefill_s=1.2 reserved=0.41/15.75GiB pcache=0.37GiB active=9.49GiB groups=0 grouped=0
+2026-10-24 04:57:29,589 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.8 mean_rows=2.00 step_ms=35.9 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.51GiB groups=0 grouped=0
+2026-10-24 04:57:39,609 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.7 mean_rows=2.00 step_ms=36.0 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.52GiB groups=0 grouped=0
+2026-10-24 04:57:49,615 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.7 mean_rows=2.00 step_ms=36.1 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.54GiB groups=0 grouped=0
+2026-10-24 04:57:59,627 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.7 mean_rows=2.00 step_ms=36.1 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.55GiB groups=0 grouped=0
+2026-10-24 04:58:09,627 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.7 mean_rows=2.00 step_ms=36.1 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.57GiB groups=0 grouped=0
+2026-10-24 04:58:19,663 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.6 mean_rows=2.00 step_ms=36.2 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.59GiB groups=0 grouped=0
+2026-10-24 04:58:29,691 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.5 mean_rows=2.00 step_ms=36.3 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.37GiB active=9.61GiB groups=0 grouped=0
+2026-10-24 04:58:39,691 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.5 mean_rows=2.00 step_ms=36.3 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.37GiB active=9.62GiB groups=0 grouped=0
+2026-10-24 04:58:40,822 INFO qwen.worker: id=A prompt cache reply kept: 4176 tokens (+2500 generated), 1 checkpoints, 239.9 MB (2 entries, 482.7 MB total) absorbed=1 pieces=2
+2026-10-24 04:58:40,822 INFO qwen.worker: id=A finish=length gen_tokens=2500 ttft_ms=2916 tps=26.4 cached=0 peak=11.48GB active=10.34GB pool=0.37GB queue_ms=2 batch=1.98
+2026-10-24 04:58:44,991 INFO qwen.worker: id=B prompt cache reply kept: 5296 tokens (+2600 generated), 2 checkpoints, 328.1 MB (2 entries, 567.9 MB total) absorbed=1 pieces=2
+2026-10-24 04:58:44,992 INFO qwen.worker: id=B finish=length gen_tokens=2600 ttft_ms=6148 tps=28.1 cached=0 peak=11.48GB active=10.25GB pool=0.01GB queue_ms=2707 batch=1.94
+2026-10-24 04:58:45,023 INFO qwen.worker: id=A prompt_tokens=1676 (images=0)
+2026-10-24 04:58:45,025 INFO qwen.worker: id=A prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 04:58:45,233 INFO qwen.worker: id=B prompt_tokens=2696 (images=0)
+2026-10-24 04:58:48,103 INFO qwen.worker: id=A prompt cache store: 1675 tokens, 1 checkpoints, 157.9 MB (1 entries, 157.9 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 04:58:48,167 INFO qwen.worker: id=B prompt cache MISS (common prefix 11, 1 entries)
+2026-10-24 04:58:51,837 INFO qwen.worker: batch: rows=1 waiting=0 prefilling=B steps/s=15.1 mean_rows=1.17 step_ms=29.1 gbps=301 decode_s=5.4 prefill_s=6.8 reserved=0.41/15.75GiB pcache=0.15GiB active=10.05GiB groups=0 grouped=0
+2026-10-24 04:58:54,755 INFO qwen.worker: id=B prompt cache store: 2695 tokens, 2 checkpoints, 242.8 MB (2 entries, 400.8 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=154.5 MB
+2026-10-24 04:59:01,854 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=25.2 mean_rows=1.79 step_ms=34.7 gbps=252 decode_s=8.7 prefill_s=1.3 reserved=0.41/15.75GiB pcache=0.37GiB active=9.49GiB groups=0 grouped=0
+2026-10-24 04:59:11,870 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.9 mean_rows=2.00 step_ms=35.9 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.51GiB groups=0 grouped=0
+2026-10-24 04:59:21,902 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.8 mean_rows=2.00 step_ms=35.9 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.52GiB groups=0 grouped=0
+2026-10-24 04:59:29,543 INFO qwen.worker: id=A preempt: stored 2699 tokens (the row's own buffers), 191.5 MB (2 entries, 434.3 MB total) absorbed=1
+2026-10-24 04:59:29,543 WARNING qwen.worker: id=A preempted at 1024 tokens (1 of 2 preemptions): the batch's KV would pass its memory headroom (0.22 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (2700 tokens, 1476 left to generate)
+2026-10-24 04:59:29,574 INFO qwen.worker: id=A prompt cache HIT: 2699/2700 tokens reused (common prefix 2699), prefilling 1
+2026-10-24 04:59:29,575 INFO qwen.worker: id=A prompt cache store: 2699 tokens, 1 checkpoints, 191.5 MB (2 entries, 434.3 MB total) reused=2699 gap=0 absorbed=1 pieces=1 states=103.0 MB
+2026-10-24 04:59:31,913 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.8 mean_rows=2.00 step_ms=35.9 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.58GiB groups=0 grouped=0
+2026-10-24 04:59:41,924 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.7 mean_rows=2.00 step_ms=36.1 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.59GiB groups=0 grouped=0
+2026-10-24 04:59:51,945 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.6 mean_rows=2.00 step_ms=36.2 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.61GiB groups=0 grouped=0
+2026-10-24 05:00:01,961 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.6 mean_rows=2.00 step_ms=36.3 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.62GiB groups=0 grouped=0
+2026-10-24 05:00:06,643 INFO qwen.worker: id=A preempt: stored 3723 tokens (the row's own buffers), 225.0 MB (2 entries, 467.9 MB total) absorbed=1
+2026-10-24 05:00:06,643 WARNING qwen.worker: id=A preempted at 2048 tokens (2 of 2 preemptions): the batch's KV would pass its memory headroom (0.26 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (3724 tokens, 452 left to generate)
+2026-10-24 05:00:06,677 INFO qwen.worker: id=A prompt cache HIT: 3723/3724 tokens reused (common prefix 3723), prefilling 1
+2026-10-24 05:00:06,677 INFO qwen.worker: id=A prompt cache store: 3723 tokens, 1 checkpoints, 225.0 MB (2 entries, 467.9 MB total) reused=3723 gap=0 absorbed=1 pieces=1 states=103.0 MB
+2026-10-24 05:00:11,974 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.6 mean_rows=2.00 step_ms=36.2 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.44GiB active=9.67GiB groups=0 grouped=0
+2026-10-24 05:00:21,989 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.5 mean_rows=2.00 step_ms=36.4 gbps=245 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.44GiB active=9.68GiB groups=0 grouped=0
+2026-10-24 05:00:23,150 INFO qwen.worker: id=A prompt cache reply kept: 4176 tokens (+452 generated), 1 checkpoints, 239.9 MB (2 entries, 482.7 MB total) absorbed=1 pieces=2
+2026-10-24 05:00:23,150 INFO qwen.worker: id=A finish=length gen_tokens=2500 ttft_ms=3142 tps=26.3 cached=0 peak=11.48GB active=10.41GB pool=0.36GB queue_ms=2 batch=1.98
+2026-10-24 05:00:27,354 INFO qwen.worker: id=B prompt cache reply kept: 5296 tokens (+2600 generated), 2 checkpoints, 328.1 MB (2 entries, 567.9 MB total) absorbed=1 pieces=2
+2026-10-24 05:00:27,354 INFO qwen.worker: id=B finish=length gen_tokens=2600 ttft_ms=6665 tps=28.1 cached=0 peak=11.48GB active=10.25GB pool=0.01GB queue_ms=2934 batch=1.94
+05:00:27 phase 1 greedy: 2 preemptions; {'A': (True, True, 2500, 'length'), 'B': (True, True, 2600, 'length')} PASS
+2026-10-24 05:00:27,382 INFO qwen.worker: id=A prompt_tokens=1676 (images=0)
+2026-10-24 05:00:27,384 INFO qwen.worker: id=A prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 05:00:27,593 INFO qwen.worker: id=B prompt_tokens=2696 (images=0)
+2026-10-24 05:00:30,230 INFO qwen.worker: id=A prompt cache store: 1675 tokens, 1 checkpoints, 157.9 MB (1 entries, 157.9 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:00:30,292 INFO qwen.worker: id=B prompt cache MISS (common prefix 11, 1 entries)
+2026-10-24 05:00:33,626 INFO qwen.worker: batch: rows=1 waiting=0 prefilling=B steps/s=16.1 mean_rows=1.17 step_ms=29.0 gbps=302 decode_s=5.4 prefill_s=6.2 reserved=0.41/15.75GiB pcache=0.15GiB active=10.05GiB groups=0 grouped=0
+2026-10-24 05:00:36,383 INFO qwen.worker: id=B prompt cache store: 2695 tokens, 2 checkpoints, 242.8 MB (2 entries, 400.8 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=154.5 MB
+2026-10-24 05:00:43,631 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=24.4 mean_rows=1.80 step_ms=35.9 gbps=244 decode_s=8.8 prefill_s=1.2 reserved=0.41/15.75GiB pcache=0.37GiB active=9.49GiB groups=0 grouped=0
+2026-10-24 05:00:53,641 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.0 mean_rows=2.00 step_ms=37.1 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.51GiB groups=0 grouped=0
+2026-10-24 05:01:03,642 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.0 mean_rows=2.00 step_ms=37.0 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.52GiB groups=0 grouped=0
+2026-10-24 05:01:13,677 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.9 mean_rows=2.00 step_ms=37.1 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.45/15.75GiB pcache=0.37GiB active=9.54GiB groups=0 grouped=0
+2026-10-24 05:01:23,704 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.8 mean_rows=2.00 step_ms=37.3 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.55GiB groups=0 grouped=0
+2026-10-24 05:01:33,722 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.9 mean_rows=2.00 step_ms=37.2 gbps=239 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.57GiB groups=0 grouped=0
+2026-10-24 05:01:43,739 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.8 mean_rows=2.00 step_ms=37.4 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.37GiB active=9.58GiB groups=0 grouped=0
+2026-10-24 05:01:53,764 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.7 mean_rows=2.00 step_ms=37.4 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.37GiB active=9.60GiB groups=0 grouped=0
+2026-10-24 05:02:03,772 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.7 mean_rows=2.00 step_ms=37.5 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.37GiB active=9.62GiB groups=0 grouped=0
+2026-10-24 05:02:07,673 INFO qwen.worker: id=A prompt cache reply kept: 4176 tokens (+2500 generated), 1 checkpoints, 239.9 MB (2 entries, 482.7 MB total) absorbed=1 pieces=2
+2026-10-24 05:02:07,674 INFO qwen.worker: id=A finish=length gen_tokens=2500 ttft_ms=2908 tps=25.7 cached=0 peak=11.48GB active=10.34GB pool=0.26GB queue_ms=2 batch=1.98
+2026-10-24 05:02:11,892 INFO qwen.worker: id=B prompt cache reply kept: 5296 tokens (+2600 generated), 2 checkpoints, 328.1 MB (2 entries, 567.9 MB total) absorbed=1 pieces=2
+2026-10-24 05:02:11,892 INFO qwen.worker: id=B finish=length gen_tokens=2600 ttft_ms=6169 tps=27.2 cached=0 peak=11.48GB active=10.26GB pool=0.50GB queue_ms=2701 batch=1.94
+2026-10-24 05:02:11,927 INFO qwen.worker: id=A prompt_tokens=1676 (images=0)
+2026-10-24 05:02:11,929 INFO qwen.worker: id=A prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 05:02:12,136 INFO qwen.worker: id=B prompt_tokens=2696 (images=0)
+2026-10-24 05:02:14,696 INFO qwen.worker: batch: rows=0 waiting=1 prefilling=A steps/s=23.3 mean_rows=1.41 step_ms=31.9 gbps=276 decode_s=8.1 prefill_s=2.8 reserved=0.19/15.75GiB pcache=0.00GiB active=9.64GiB groups=0 grouped=0
+2026-10-24 05:02:14,775 INFO qwen.worker: id=A prompt cache store: 1675 tokens, 1 checkpoints, 157.9 MB (1 entries, 157.9 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:02:14,836 INFO qwen.worker: id=B prompt cache MISS (common prefix 11, 1 entries)
+2026-10-24 05:02:20,882 INFO qwen.worker: id=B prompt cache store: 2695 tokens, 2 checkpoints, 242.8 MB (2 entries, 400.8 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=154.5 MB
+2026-10-24 05:02:24,727 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=15.4 mean_rows=1.68 step_ms=35.1 gbps=249 decode_s=5.4 prefill_s=4.6 reserved=0.41/15.75GiB pcache=0.37GiB active=9.48GiB groups=0 grouped=0
+2026-10-24 05:02:34,743 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.0 mean_rows=2.00 step_ms=37.1 gbps=237 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.50GiB groups=0 grouped=0
+2026-10-24 05:02:44,755 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.0 mean_rows=2.00 step_ms=37.1 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.52GiB groups=0 grouped=0
+2026-10-24 05:02:54,767 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.9 mean_rows=2.00 step_ms=37.2 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.41/15.75GiB pcache=0.37GiB active=9.54GiB groups=0 grouped=0
+2026-10-24 05:02:57,020 INFO qwen.worker: id=A preempt: stored 2699 tokens (the row's own buffers), 191.5 MB (2 entries, 434.3 MB total) absorbed=1
+2026-10-24 05:02:57,020 WARNING qwen.worker: id=A preempted at 1024 tokens (1 of 2 preemptions): the batch's KV would pass its memory headroom (0.22 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (2700 tokens, 1476 left to generate)
+2026-10-24 05:02:57,051 INFO qwen.worker: id=A prompt cache HIT: 2699/2700 tokens reused (common prefix 2699), prefilling 1
+2026-10-24 05:02:57,052 INFO qwen.worker: id=A prompt cache store: 2699 tokens, 1 checkpoints, 191.5 MB (2 entries, 434.3 MB total) reused=2699 gap=0 absorbed=1 pieces=1 states=103.0 MB
+2026-10-24 05:03:04,768 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=27.0 mean_rows=2.00 step_ms=37.0 gbps=239 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.58GiB groups=0 grouped=0
+2026-10-24 05:03:14,787 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.9 mean_rows=2.00 step_ms=37.2 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.60GiB groups=0 grouped=0
+2026-10-24 05:03:24,788 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.8 mean_rows=2.00 step_ms=37.3 gbps=238 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.62GiB groups=0 grouped=0
+2026-10-24 05:03:34,796 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.8 mean_rows=2.00 step_ms=37.3 gbps=239 decode_s=10.0 prefill_s=0.0 reserved=0.48/15.75GiB pcache=0.40GiB active=9.63GiB groups=0 grouped=0
+2026-10-24 05:03:35,211 INFO qwen.worker: id=A preempt: stored 3723 tokens (the row's own buffers), 225.0 MB (2 entries, 467.9 MB total) absorbed=1
+2026-10-24 05:03:35,211 WARNING qwen.worker: id=A preempted at 2048 tokens (2 of 2 preemptions): the batch's KV would pass its memory headroom (0.26 GiB reserved); its KV kept in the prompt cache, back at the head of the queue (3724 tokens, 452 left to generate)
+2026-10-24 05:03:35,244 INFO qwen.worker: id=A prompt cache HIT: 3723/3724 tokens reused (common prefix 3723), prefilling 1
+2026-10-24 05:03:35,245 INFO qwen.worker: id=A prompt cache store: 3723 tokens, 1 checkpoints, 225.0 MB (2 entries, 467.9 MB total) reused=3723 gap=0 absorbed=1 pieces=1 states=103.0 MB
+2026-10-24 05:03:44,807 INFO qwen.worker: batch: rows=2 waiting=0 prefilling=- steps/s=26.8 mean_rows=2.00 step_ms=37.3 gbps=239 decode_s=10.0 prefill_s=0.0 reserved=0.51/15.75GiB pcache=0.44GiB active=9.68GiB groups=0 grouped=0
+2026-10-24 05:03:52,204 INFO qwen.worker: id=A prompt cache reply kept: 4176 tokens (+452 generated), 1 checkpoints, 239.9 MB (2 entries, 482.7 MB total) absorbed=1 pieces=2
+2026-10-24 05:03:52,205 INFO qwen.worker: id=A finish=length gen_tokens=2500 ttft_ms=2907 tps=25.7 cached=0 peak=11.48GB active=10.41GB pool=0.26GB queue_ms=2 batch=1.98
+2026-10-24 05:03:54,818 INFO qwen.worker: batch: rows=1 waiting=0 prefilling=- steps/s=29.0 mean_rows=1.68 step_ms=34.5 gbps=257 decode_s=10.0 prefill_s=0.0 reserved=0.27/15.75GiB pcache=0.45GiB active=9.56GiB groups=0 grouped=0
+2026-10-24 05:03:56,365 INFO qwen.worker: id=B prompt cache reply kept: 5296 tokens (+2600 generated), 2 checkpoints, 328.1 MB (2 entries, 567.9 MB total) absorbed=1 pieces=2
+2026-10-24 05:03:56,365 INFO qwen.worker: id=B finish=length gen_tokens=2600 ttft_ms=6126 tps=27.3 cached=0 peak=11.48GB active=10.26GB pool=0.01GB queue_ms=2703 batch=1.94
+05:03:56 phase 1 seeded: 2 preemptions; {'A': (True, True, 2500, 'length'), 'B': (True, True, 2600, 'length')} PASS
+2026-10-24 05:03:56,405 INFO qwen.worker: id=Q0 prompt_tokens=1258 (images=0)
+2026-10-24 05:03:56,406 INFO qwen.worker: id=Q0 prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 05:03:56,615 INFO qwen.worker: id=Q1 prompt_tokens=1674 (images=0)
+2026-10-24 05:03:56,826 INFO qwen.worker: id=Q2 prompt_tokens=2082 (images=0)
+2026-10-24 05:03:57,040 INFO qwen.worker: id=Q3 prompt_tokens=2492 (images=0)
+2026-10-24 05:03:58,582 INFO qwen.worker: id=Q0 prompt cache store: 1257 tokens, 1 checkpoints, 144.2 MB (1 entries, 144.2 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:03:58,604 INFO qwen.worker: id=Q1 prompt cache MISS (common prefix 11, 1 entries)
+2026-10-24 05:04:01,886 INFO qwen.worker: id=Q1 prompt cache store: 1673 tokens, 1 checkpoints, 157.8 MB (2 entries, 302.1 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:04:01,944 INFO qwen.worker: id=Q2 prompt cache MISS (common prefix 11, 2 entries)
+2026-10-24 05:04:05,270 INFO qwen.worker: batch: rows=2 waiting=1 prefilling=Q2 steps/s=7.0 mean_rows=1.03 step_ms=27.9 gbps=311 decode_s=2.0 prefill_s=8.4 reserved=0.57/15.75GiB pcache=0.28GiB active=9.46GiB groups=0 grouped=0
+2026-10-24 05:04:06,542 INFO qwen.worker: id=Q2 prompt cache store: 2081 tokens, 1 checkpoints, 171.2 MB (3 entries, 473.3 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:04:06,659 INFO qwen.worker: id=Q3 prompt cache MISS (common prefix 11, 3 entries)
+2026-10-24 05:04:13,353 INFO qwen.worker: id=Q3 prompt cache store: 2491 tokens, 2 checkpoints, 236.2 MB (4 entries, 709.4 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=154.5 MB
+2026-10-24 05:04:15,289 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=18.9 mean_rows=3.15 step_ms=30.1 gbps=298 decode_s=5.7 prefill_s=4.3 reserved=0.79/15.75GiB pcache=0.66GiB active=10.05GiB groups=0 grouped=0
+2026-10-24 05:04:25,310 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=32.4 mean_rows=4.00 step_ms=30.8 gbps=296 decode_s=10.0 prefill_s=0.0 reserved=0.79/15.75GiB pcache=0.66GiB active=10.09GiB groups=0 grouped=0
+2026-10-24 05:04:35,339 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=32.1 mean_rows=4.00 step_ms=31.1 gbps=295 decode_s=10.0 prefill_s=0.0 reserved=0.79/15.75GiB pcache=0.66GiB active=10.14GiB groups=0 grouped=0
+2026-10-24 05:04:45,345 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=31.9 mean_rows=4.00 step_ms=31.3 gbps=294 decode_s=10.0 prefill_s=0.0 reserved=0.91/15.75GiB pcache=0.66GiB active=10.18GiB groups=0 grouped=0
+2026-10-24 05:04:55,375 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=31.7 mean_rows=4.00 step_ms=31.5 gbps=294 decode_s=10.0 prefill_s=0.0 reserved=0.91/15.75GiB pcache=0.66GiB active=10.20GiB groups=0 grouped=0
+2026-10-24 05:05:05,386 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=31.5 mean_rows=4.00 step_ms=31.8 gbps=293 decode_s=10.0 prefill_s=0.0 reserved=0.91/15.75GiB pcache=0.66GiB active=10.24GiB groups=0 grouped=0
+2026-10-24 05:05:11,627 INFO qwen.worker: id=Q0 prompt cache reply kept: 3258 tokens (+2000 generated), 1 checkpoints, 209.8 MB (4 entries, 775.0 MB total) absorbed=1 pieces=2
+2026-10-24 05:05:11,627 INFO qwen.worker: id=Q0 finish=length gen_tokens=2000 ttft_ms=5016 tps=28.5 cached=0 peak=12.02GB active=11.02GB pool=0.25GB queue_ms=2 batch=3.89
+2026-10-24 05:05:12,128 INFO qwen.worker: id=Q1 prompt cache reply kept: 3674 tokens (+2000 generated), 1 checkpoints, 223.4 MB (4 entries, 840.6 MB total) absorbed=1 pieces=2
+2026-10-24 05:05:12,128 INFO qwen.worker: id=Q1 finish=length gen_tokens=2000 ttft_ms=3341 tps=28.5 cached=0 peak=12.02GB active=10.92GB pool=0.73GB queue_ms=1989 batch=3.91
+2026-10-24 05:05:13,387 INFO qwen.worker: id=Q2 prompt cache reply kept: 4082 tokens (+2000 generated), 1 checkpoints, 236.8 MB (4 entries, 906.1 MB total) absorbed=1 pieces=2
+2026-10-24 05:05:13,387 INFO qwen.worker: id=Q2 finish=length gen_tokens=2000 ttft_ms=4658 tps=29.9 cached=0 peak=12.02GB active=10.79GB pool=0.05GB queue_ms=5119 batch=3.91
+2026-10-24 05:05:15,413 INFO qwen.worker: batch: rows=1 waiting=0 prefilling=- steps/s=32.0 mean_rows=3.04 step_ms=31.2 gbps=293 decode_s=10.0 prefill_s=0.0 reserved=0.25/15.75GiB pcache=0.84GiB active=9.92GiB groups=0 grouped=0
+2026-10-24 05:05:15,893 INFO qwen.worker: id=Q3 prompt cache reply kept: 4492 tokens (+2000 generated), 2 checkpoints, 301.7 MB (4 entries, 971.7 MB total) absorbed=1 pieces=2
+2026-10-24 05:05:15,893 INFO qwen.worker: id=Q3 finish=length gen_tokens=2000 ttft_ms=6756 tps=32.0 cached=0 peak=12.02GB active=10.65GB pool=0.33GB queue_ms=9624 batch=3.82
+2026-10-24 05:05:15,940 INFO qwen.worker: id=Q0 prompt_tokens=1258 (images=0)
+2026-10-24 05:05:15,941 INFO qwen.worker: id=Q0 prompt cache MISS (common prefix 0, 0 entries)
+2026-10-24 05:05:16,149 INFO qwen.worker: id=Q1 prompt_tokens=1674 (images=0)
+2026-10-24 05:05:16,361 INFO qwen.worker: id=Q2 prompt_tokens=2082 (images=0)
+2026-10-24 05:05:16,570 INFO qwen.worker: id=Q3 prompt_tokens=2492 (images=0)
+2026-10-24 05:05:18,123 INFO qwen.worker: id=Q0 prompt cache store: 1257 tokens, 1 checkpoints, 144.2 MB (1 entries, 144.2 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:05:18,144 INFO qwen.worker: id=Q1 prompt cache MISS (common prefix 11, 1 entries)
+2026-10-24 05:05:21,517 INFO qwen.worker: id=Q1 prompt cache store: 1673 tokens, 1 checkpoints, 157.8 MB (2 entries, 302.1 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:05:21,575 INFO qwen.worker: id=Q2 prompt cache MISS (common prefix 11, 2 entries)
+2026-10-24 05:05:25,437 INFO qwen.worker: batch: rows=2 waiting=1 prefilling=Q2 steps/s=4.9 mean_rows=1.33 step_ms=28.8 gbps=301 decode_s=1.4 prefill_s=8.6 reserved=0.57/15.75GiB pcache=0.28GiB active=9.51GiB groups=0 grouped=0
+2026-10-24 05:05:26,311 INFO qwen.worker: id=Q2 prompt cache store: 2081 tokens, 1 checkpoints, 171.2 MB (3 entries, 473.3 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=103.0 MB
+2026-10-24 05:05:26,428 INFO qwen.worker: id=Q3 prompt cache MISS (common prefix 11, 3 entries)
+2026-10-24 05:05:33,317 INFO qwen.worker: id=Q3 prompt cache store: 2491 tokens, 2 checkpoints, 236.2 MB (4 entries, 709.4 MB total) reused=0 gap=11 absorbed=0 pieces=1 states=154.5 MB
+05:05:33   budget cut to 1.463 GiB (4 rows)
+2026-10-24 05:05:35,466 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=18.4 mean_rows=3.26 step_ms=30.0 gbps=299 decode_s=5.5 prefill_s=4.5 reserved=0.79/1.46GiB pcache=0.66GiB active=10.06GiB groups=0 grouped=0
+2026-10-24 05:05:45,493 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=32.8 mean_rows=4.00 step_ms=30.5 gbps=300 decode_s=10.0 prefill_s=0.0 reserved=0.79/1.46GiB pcache=0.66GiB active=10.11GiB groups=0 grouped=0
+2026-10-24 05:05:55,522 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=31.6 mean_rows=4.00 step_ms=31.6 gbps=290 decode_s=10.0 prefill_s=0.0 reserved=0.79/1.46GiB pcache=0.66GiB active=10.14GiB groups=0 grouped=0
+2026-10-24 05:06:00,674 INFO qwen.worker: prompt cache: 1 entries evicted for the growth of id=Q0 (0.44 GiB left)
+2026-10-24 05:06:05,531 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=31.1 mean_rows=4.00 step_ms=32.2 gbps=287 decode_s=10.0 prefill_s=0.0 reserved=0.91/1.46GiB pcache=0.44GiB active=9.96GiB groups=0 grouped=0
+2026-10-24 05:06:15,554 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=30.8 mean_rows=4.00 step_ms=32.4 gbps=286 decode_s=10.0 prefill_s=0.0 reserved=0.91/1.46GiB pcache=0.44GiB active=9.98GiB groups=0 grouped=0
+2026-10-24 05:06:25,561 INFO qwen.worker: batch: rows=4 waiting=0 prefilling=- steps/s=30.5 mean_rows=4.00 step_ms=32.8 gbps=284 decode_s=10.0 prefill_s=0.0 reserved=0.91/1.46GiB pcache=0.44GiB active=10.02GiB groups=0 grouped=0
+2026-10-24 05:06:32,608 INFO qwen.worker: id=Q0 prompt cache reply kept: 3258 tokens (+2000 generated), 1 checkpoints, 209.8 MB (3 entries, 538.8 MB total) absorbed=1 pieces=2
+2026-10-24 05:06:32,608 INFO qwen.worker: id=Q0 finish=length gen_tokens=2000 ttft_ms=5113 tps=28.0 cached=0 peak=12.02GB active=10.78GB pool=0.15GB queue_ms=2 batch=3.89
+2026-10-24 05:06:33,128 INFO qwen.worker: id=Q1 prompt cache reply kept: 3674 tokens (+2000 generated), 1 checkpoints, 223.4 MB (3 entries, 604.4 MB total) absorbed=1 pieces=2
+2026-10-24 05:06:33,128 INFO qwen.worker: id=Q1 finish=length gen_tokens=2000 ttft_ms=3431 tps=28.0 cached=0 peak=12.02GB active=10.69GB pool=0.73GB queue_ms=1996 batch=3.91
+2026-10-24 05:06:34,477 INFO qwen.worker: id=Q2 prompt cache reply kept: 4082 tokens (+2000 generated), 1 checkpoints, 236.8 MB (3 entries, 670.0 MB total) absorbed=1 pieces=2
+2026-10-24 05:06:34,477 INFO qwen.worker: id=Q2 finish=length gen_tokens=2000 ttft_ms=4796 tps=29.4 cached=0 peak=12.02GB active=10.56GB pool=1.07GB queue_ms=5216 batch=3.91
+2026-10-24 05:06:35,580 INFO qwen.worker: batch: rows=1 waiting=0 prefilling=- steps/s=30.6 mean_rows=3.31 step_ms=32.6 gbps=282 decode_s=10.0 prefill_s=0.0 reserved=0.25/1.46GiB pcache=0.62GiB active=9.70GiB groups=0 grouped=0
+2026-10-24 05:06:37,046 INFO qwen.worker: id=Q3 prompt cache reply not kept: its prompt entry is gone (evicted, absorbed or never kept)
+2026-10-24 05:06:37,046 INFO qwen.worker: id=Q3 finish=length gen_tokens=2000 ttft_ms=6949 tps=31.4 cached=0 peak=12.02GB active=10.41GB pool=1.30GB queue_ms=9861 batch=3.82
+05:06:37 phase 2: 0 preemptions; {'Q0': (True, None, 2000), 'Q1': (True, None, 2000), 'Q2': (True, None, 2000), 'Q3': (True, None, 2000)}
+05:06:37 RESULT: PASS -> /tmp/perf/gate1024/preempt_check.json

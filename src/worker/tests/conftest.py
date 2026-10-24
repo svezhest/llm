@@ -42,6 +42,16 @@ VCFG = types.SimpleNamespace(
     image_token_id=500, video_token_id=501, vision_start_token_id=502)
 
 
+@pytest.fixture(autouse=True)
+def _one_prefill_scheduler(monkeypatch):
+    """QWEN_PREFILL_LANE / QWEN_PREEMPT are on by default since 2026-10-24;
+    the suite's scheduler tests count prefills, reservations and "length"
+    cuts of the one-prefill scheduler, so they run with both off and
+    test_lane.py / test_preempt.py switch them on themselves."""
+    monkeypatch.setattr(worker, "PREFILL_LANE", 0)
+    monkeypatch.setattr(worker, "PREEMPT", 0)
+
+
 def build_lm(kind="dense", wbits=None, dtype=mx.float16):
     mx.random.seed(0)
     if kind == "dense":
@@ -148,7 +158,7 @@ def run(sched, reqs, arrive=None, max_ticks=5000, on_tick=None):
             sched.submit(r)
         if on_tick is not None:
             on_tick(t, sched)
-        if not (sched.rows or sched.task or sched.waiting) and not arrive:
+        if not (sched.rows or sched.task or sched.lane or sched.waiting) and not arrive:
             break
         sched.tick()
         for r in reqs:
