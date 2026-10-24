@@ -300,6 +300,22 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   speed drifts ±30% over minutes (probably thermal), so A/B *within* a run
   (`scripts/perf/prof/step_prof.py --ab … --ab-steps N`). Details:
   `docs/perf/2026-10-12/step_profile.md`.
+- **DeepInfer port (2026-10-24, `docs/perf/2026-10-24/`, ideas: `deepinfer_ideas.md`)**: ideas
+  from deepseek-ai/DeepInfer (clone at `~/Git/DeepInfer`), each behind a knob (Env knobs).
+  (0) The `batch:` log line has `step_ms` (decode ticks' wall per step), `gbps` (bytes a
+  step must read — weights + KV + 2× GDN, `_step_bytes` — over it), `decode_s` /
+  `prefill_s` per window (`analyze_worker_log.py` prints them). The old "~200 ms/step at
+  rows=6" was the log (rows/prefilling are a snapshot, steps/s a 10 s window with 4–9 s
+  slabs in it): AppWorld replay decode steps are 36–60 ms at 2–7 rows (200–300 GB/s),
+  and **prefill is 81 % of the scheduler's busy time** (`step_metric.md`) — req/min moves
+  with prefill / cache misses, not the decode step. Cascade's "32K × 16 at 92 ms vs ~62
+  projected" does not reproduce on today's code (62.5 ms; the 2026-10-12 run was ~18 %
+  slow). `QWEN_PROMPT_CACHE_CHAIN_TAIL=0` saves 1.2–1.5 states per entry (−4…8 %) and
+  costs +3–10K replayed tokens only when an older message is edited: default stays
+  4096; for append-only agentic runs under cache pressure 0 is free (`design/chain_tail.md`).
+  Special-token strings in message text become control tokens (as in vLLM: a tool
+  output with `<|im_end|>\n<|im_start|>system` forges a turn; `split_special_tokens`
+  does not help — `<tool_call>`, `<think>` are special=False): `QWEN_SPLIT_SPECIAL_TOKENS`.
 
 ## Implementation notes worth keeping
 
@@ -504,7 +520,20 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
     with mrqmm 100% at B=3/4/8 (KL 8e-6), 99.7% at 16 (KL 1e-5) — so
     under load a greedy answer can differ run to run; `QWEN_MAX_BATCH=1` restores
     determinism (+ `QWEN_PROMPT_CACHE_REPLY=0`: a hit through a reply differs from
-    cold even at B = 1). Cascade groups (default on with fp16 KV + the prompt cache: ≥ 8
+    cold even at B = 1). **Batch-invariant mode (`QWEN_BATCH_INVARIANT=1`, 2026-10-24,
+    `docs/perf/2026-10-24/design/batch_invariant.md`)**: determinism at any batch size
+    instead: mrqmm with one fixed KS (8) for 1..16 rows and also at B ≤ 2 (plain linears,
+    lm_head, fused GDN), cascade and DFlash off — a row in a batch of N == the same row
+    solo, bit for bit (9B GPU gate: 5947 teacher-forced steps at B = 1..16, logprobs and
+    top-5 `==`; control with the mode off diverges). Step cost vs off: B=1 ×1.18, B=2
+    ×0.86, B=4/8 ×1.00, B=16 ×0.97 → for reproducible agentic runs use it with
+    `QWEN_PROMPT_CACHE_REPLY=0` at `QWEN_MAX_BATCH=16` instead of `MAX_BATCH=1/2`.
+    Models with modules mrqmm does not take (27B 5-bit, 35B experts / lm_head,
+    `QWEN_MRQMM=0`, `QWEN_FP16=0`) get max_batch 2 (per-row qmv exact there); an
+    unquantized `nn.Linear` turns the mode off. Rests on MMA results not depending on
+    the column's position and on the MB=1/2 kernel variants compiling `acc += red[s]`
+    alike (true on the 9B shapes; others not gated). Side findings, not applied: at B=2
+    mrqmm is 14 % faster than 2-row qmv; at 9..16 rows 2×8 beats the default 4×4 by 2.6 %. Cascade groups (default on with fp16 KV + the prompt cache: ≥ 8
     rows sharing ≥ 4096 prompt tokens, below) change only the grouped rows'
     attention, in the same numerics class as mrqmm (top-1 ≥ 99.71 %); B ≤ 2 stays
     bit-exact and `QWEN_CASCADE=0` restores this per-row path bit for bit.
@@ -770,6 +799,14 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_SDPA_FUSED` | worker | `1` — force MLX's fused SDPA for fp16-KV prefill slabs ≥ 512 over ≥ 32K keys (per call ×0.89 at 2048 × 32K, ×0.6–0.7 at 64K+; 64K prefill −3…5%, −1.3 GB peak) |
 | `QWEN_GDN_FAST` | worker | `0` — `mx.fast.gated_delta_update` for prefill slabs (×1.02 per slab; rounds the decay to fp16: KL 0.013 on 8K real tokens — rejected) |
 | `QWEN_VERIFY_EXACT_MAX_T` | worker | `8` — DFlash verify blocks ≤ this use mlx-vlm's exact verify kernels (DFlash == greedy), longer ones `quantized_matmul`; 0 = never, 16 = every adaptive block (the drafter's block_size 16; slower; a `QWEN_DRAFT_BLOCK` > 16 still has longer blocks on `quantized_matmul`); empty = default |
+| `QWEN_BATCH_INVARIANT` | worker | `0` — batch-invariant decode (above, Continuous batching): row in a batch == solo bit for bit at 1..16 rows on the 9B; cascade + DFlash off; B=1 step ×1.18 |
+| `QWEN_VERIFY_MRQMM` | worker | `1` — DFlash verify blocks T ∈ [3,16] through mrqmm as (T,1,K) + the drafter's lm_head; with `QWEN_DRAFT_BLOCK` unset a fixed block 8 (DFlash ×1.47 vs the old adaptive exact path: 59–68 tok/s vs plain 34–36); `head` = lm_head only (exact verify, ×1.05); `0` = the old path |
+| `QWEN_SAMPLER_TOPK_FAST` | worker | `0` — with top_k > 0: min_p / top_p / the draw over the k candidates (ties at the k-th as one bucket) instead of a full-vocab argsort; same distribution, different RNG stream for a seed (hence off); card sampler at B=16 7.8 → 3.5 ms, e2e step −7 % |
+| `QWEN_PREFILL_LANE` / `_BURST` | worker | `2048` / `4` — a text request with ≤ N tokens left to prefill (after its prompt-cache hit) is prefilled whole between the slabs of a running long prefill (≤ BURST in a row); the long prefill's slabs are unchanged (bit-identical); gate: short requests during a 40K prefill finish 19 s vs 76 s, the long one ×1.13; `0` = one prefill at a time |
+| `QWEN_PREEMPT` | worker | `2` — a row outgrowing the batch's headroom is preempted (its own KV buffers become a prompt-cache entry, no copy; back to the head of the queue; resumes from that hit) instead of ended with `length`, at most N times per request; the stream continues bit for bit (sampler key, penalties, grammar, logprobs); not for vision / DFlash / cascade-grouped / prompt_logprobs / prompt_cache read-off rows; `0` = the cut |
+| `QWEN_DEBUG_NO_SYNC` | worker | `0` — debug: any CPU↔GPU sync (`mx.eval`, `.item`, `.tolist`, `np.asarray` …) while a decode step is built raises `SyncInStep` (catches step-ahead regressions; on in test_lane / test_preempt) |
+| `QWEN_CASCADE_KERNEL` | worker | `0` — cascade groups attend the shared prefix with a simdgroup-MMA Metal kernel (`cascade_mma.py`) over the donor's fp16 buffer (aliased, no copy) instead of an fp32 copy: −2.3 GB peak at 16 × 32K, no formation transient, groups win from 4 rows; attention ×1.4 at ≤ 8 rows, ×0.84 at 32K × 16 (hence off) |
+| `QWEN_SPLIT_SPECIAL_TOKENS` | worker | `0` (as vLLM) — added-token strings inside user / tool text and tool-call arguments tokenized as plain text, the template's own control tokens by id (`<|im_start|>` in a tool output otherwise becomes a real turn boundary); `docs/perf/2026-10-24/design/special_tokens.md` |
 | `QWEN_LOGPROBS_CHUNK` | worker | `256` — rows per `lm_head` chunk when scoring a prompt (`prompt_logprobs`): 256 × 248K × 6 B ≈ 0.38 GB transient |
 | `QWEN_GEN_SLOTS` | worker | `max(2·max_batch, 8)` — concurrent Generate RPCs, beyond = `RESOURCE_EXHAUSTED`; gRPC threads = slots + 8 (replaces `QWEN_GRPC_THREADS`) |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` (run under sudo) |
@@ -822,10 +859,13 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   ≤ `QWEN_VERIFY_EXACT_MAX_T` (8): longer blocks go through `quantized_matmul`,
   which rounds differently from the 1-row decode, so a near-tie can flip there
   (the adaptive block reaches 16; 15/15 corpus identical at cap 8 nonetheless).
-- DFlash's verify block is adaptive on acceptance stats kept across requests, so the
-  same greedy request can round differently (near-tie flip) between runs: seen once
-  in 2026-10 (first pair differed, the next 5 identical). A fixed `QWEN_DRAFT_BLOCK`
-  should avoid it (not verified); the plain loop is unaffected.
+- DFlash's verify block was adaptive on acceptance stats; since mlx-vlm 0.7.6
+  `draft.reset` clears them per request, so a request's blocks depend on itself only
+  (checked by code, 2026-10-24). Since 2026-10-24 the default is `QWEN_VERIFY_MRQMM=1`
+  with a fixed block 8 (verify rows through mrqmm as (T,1,K)): DFlash ≠ plain greedy
+  bitwise (batched-decode class; 15/16 identical on the corpus, the old adaptive path
+  13/16) but run-to-run deterministic (T ≤ 8 → always mrqmm's MB=1). `head` = only the
+  drafter's lm_head through mrqmm (verify exact, +4.7 %).
 - The gateway waits for the worker's Health before it listens: no worker = no 8080.
 - A scheme-less proxy variable (`HTTP_PROXY=localhost:<port>`) → breaks Python `requests`.
   Use `http://...` or `HF_HUB_OFFLINE=1` (models are cached locally in `weights/`).
