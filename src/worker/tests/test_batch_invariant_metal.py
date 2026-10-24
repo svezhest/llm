@@ -144,3 +144,20 @@ def test_batch_differs_without_mode(lm, monkeypatch):
     diff = [r.id for r in mixed(False)
             if drive(scheduler(lm, max_batch=1), [r])[r.id] != both[r.id]]
     assert diff
+
+
+@pytest.mark.parametrize("bits", [3, 4, 5, 6, 8])
+@pytest.mark.parametrize("K,N", [(4096, 4096), (5120, 17408), (2048, 256)])
+def test_uncovered_qmv_two_rows_exact(bits, K, N):
+    """worker._invariant_check caps max_batch at 2 when modules stay outside
+    mrqmm (27B 5-bit, 35B experts / shared expert / lm_head): that relies on
+    MLX's quantized_matmul giving a row the same bits at 1 and 2 rows (one
+    qmv per row), whatever the bits."""
+    mx.random.seed(bits)
+    wq, s, b = mx.quantize((mx.random.normal((N, K)) * K ** -0.5).astype(mx.float16),
+                           group_size=64, bits=bits)
+    x = mx.random.normal((2, 1, K)).astype(mx.float16)
+    two = mx.quantized_matmul(x, wq, s, b, transpose=True, group_size=64, bits=bits)
+    for i in range(2):
+        one = mx.quantized_matmul(x[i:i + 1], wq, s, b, transpose=True, group_size=64, bits=bits)
+        assert mx.array_equal(two[i:i + 1], one).item(), (bits, K, N, i)

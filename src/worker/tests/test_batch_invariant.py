@@ -229,3 +229,31 @@ def test_batch_row_matches_solo(dense_fused, pcache, inv):
             assert solo[0][:len(r.golden)] == r.golden[:len(solo[0])]
         for (a, ta), (b, tb) in zip(solo[1], got[1]):
             assert abs(a - b) <= 1e-2 and len(ta) == len(tb), r.id
+
+
+# --- load-time guard: modules outside the kernel -> max_batch 2, or refused ------------
+def test_invariant_check(dense_fused, dense, monkeypatch, caplog):
+    monkeypatch.setattr(worker, "BATCH_INVARIANT", True)
+    with monkeypatch.context() as m:                # the 9B, mrqmm on everything: unchanged
+        m.setattr(worker, "_invariant_uncovered", lambda lm: {})
+        assert worker._invariant_check(dense_fused, 16) == 16
+    # the fused GDN on quantized_matmul (as with QWEN_MRQMM=0): exact only at B <= 2
+    assert "fused GDN in-projection on quantized_matmul" in worker._invariant_uncovered(dense_fused)
+    with caplog.at_level("WARNING"):
+        assert worker._invariant_check(dense_fused, 16) == 2
+        assert "max_batch 16 -> 2" in caplog.text and worker.BATCH_INVARIANT
+        assert worker._invariant_check(dense_fused, 2) == 2
+        # unquantized layers (conftest's fp32 `dense`): refused, the mode off
+        assert worker._invariant_check(dense, 16) == 16
+    assert not worker.BATCH_INVARIANT and "refused" in caplog.text
+
+
+def test_no_dflash_for_golden(dense):
+    eng = engine(dense)
+    eng.draft = object()
+    s = scheduler(dense, eng=eng)
+    req = gen_req(prompts([9], 3)[0], 4, "g")
+    req.golden = [5, 6]
+    row = worker._Row(req, 13, 0)
+    row.pen = worker._Penalties(req.sampling, req.ids, V)
+    assert not s._spec_ok(row)

@@ -2252,24 +2252,47 @@ def _invariant_uncovered(lm):
     return out
 
 
+def _invariant_check(lm, max_batch):
+    """QWEN_BATCH_INVARIANT at load, before the scheduler is built -> the
+    max_batch the guarantee holds at. Modules outside the invariant kernel
+    (_invariant_uncovered: 27B / 35B non-8-bit layers, QWEN_MRQMM=0, QWEN_FP16=0)
+    keep MLX's row-count rules, under which only B <= 2 is exact: quantized
+    layers (and the experts' unsorted gather, B * top_k < 64) run one qmv per
+    row there, mrqmm gives 1 and 2 rows the same bits; so max_batch -> 2. An
+    unquantized nn.Linear has no such rule (MLX's 1-row gemv vs a gemm at 2
+    rows): the mode is refused (off, with an error; the drafter, skipped at
+    load, stays off)."""
+    global BATCH_INVARIANT
+    miss = _invariant_uncovered(lm)
+    what = ", ".join(f"{k} x{v}" for k, v in sorted(miss.items()))
+    if any(k.startswith("Linear") for k in miss):
+        log.error("QWEN_BATCH_INVARIANT=1 refused: unquantized layers (%s) are not row-exact "
+                  "at any B; the mode is off", what)
+        BATCH_INVARIANT = False
+        mr = sys.modules.get("mrqmm")
+        if mr is not None:
+            mr.set_invariant(False)
+        return max_batch
+    if miss and max_batch > 2:
+        log.warning("batch-invariant: %d modules not covered (%s): exact only at B <= 2 there, "
+                    "max_batch %d -> 2", sum(miss.values()), what, max_batch)
+        return 2
+    return max_batch
+
+
 def _log_invariant(lm, max_batch):
-    """QWEN_BATCH_INVARIANT's load log: what a decode step runs outside the
-    invariant kernel (mrqmm.uncovered), and what still makes runs differ."""
+    """QWEN_BATCH_INVARIANT's load log (after fit_max_batch: the real
+    max_batch), and what still makes runs differ."""
     if max_batch <= 2:
-        log.info("batch-invariant (QWEN_BATCH_INVARIANT): max_batch %d, per-row qmv "
-                 "(exact as is); DFlash and cascade off", max_batch)
+        log.info("batch-invariant (QWEN_BATCH_INVARIANT): max_batch %d (B <= 2: exact per row); "
+                 "DFlash and cascade off", max_batch)
     else:
         import mrqmm
         n = sum(1 for _, m in lm.named_modules() if type(m) is mrqmm.MRQuantizedLinear)
-        miss = _invariant_uncovered(lm)
-        log.info("batch-invariant (QWEN_BATCH_INVARIANT): %d modules on mrqmm for 1..%d rows "
-                 "(K split %d), %d fused GDN in-projections; DFlash and cascade off", n,
-                 mrqmm.MAX_ROWS, mrqmm.INVARIANT_KS, sum(
+        log.info("batch-invariant (QWEN_BATCH_INVARIANT): max_batch %d, %d modules on mrqmm for "
+                 "1..%d rows (K split %d), %d fused GDN in-projections; DFlash and cascade off",
+                 max_batch, n, mrqmm.MAX_ROWS, mrqmm.INVARIANT_KS, sum(
                      1 for _, m in lm.named_modules() if "_fused_in" in m.__dict__))
-        if miss:
-            log.warning("batch-invariant: %d modules not covered (%s): rows of B >= 3 through "
-                        "them can differ from the same row alone", sum(miss.values()),
-                        ", ".join(f"{k} x{v}" for k, v in sorted(miss.items())))
     if PROMPT_CACHE and PROMPT_CACHE_REPLY:
         log.warning("batch-invariant with QWEN_PROMPT_CACHE_REPLY=1: a hit through a reply's KV "
                     "is not a cold prefill's bits; reproducible runs want REPLY=0")
@@ -3067,7 +3090,7 @@ class _Scheduler:
         req = row.req
         greedy = req.sampling["temperature"] <= 0 and not row.pen.active
         if (self.eng.draft is None or BATCH_INVARIANT or req.images or req.thinking is not None
-                or not (greedy or DRAFT_SAMPLING)):
+                or req.golden is not None or not (greedy or DRAFT_SAMPLING)):
             return False
         if row.lpk is not None or _wants(req, "prompt_logprobs"):
             # the DFlash loop computes neither (its prefill skips the logits,
@@ -4451,6 +4474,9 @@ class _Scheduler:
                 # Reasoning budget: forces \n</think> as the next input (the
                 # KV cache stays consistent)
                 forced = r.req.thinking.pop_forced_token_id() if r.req.thinking is not None else None
+                # golden (tools / tests) wins over the budget's forced token;
+                # the budget's is still popped (its state moves on as if fed):
+                # with both set the budget sees golden's tokens, not its own
                 if r.req.golden is not None and r.n < len(r.req.golden):
                     forced = r.req.golden[r.n]          # r.n: tokens before this one
                 r.y = y if forced is None else mx.array([forced], dtype=y.dtype)
@@ -4645,13 +4671,15 @@ class Engine:
             mrqmm.install(lm)
         log.info("GDN decode in-projections fused (QWEN_GDN_FUSE): %d layers", _install_gdn_fuse(lm))
         if BATCH_INVARIANT:
-            _log_invariant(lm, self.max_batch)
+            self.max_batch = _invariant_check(lm, self.max_batch)
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
         reserve = _prefill_reserve(lm.args.num_attention_heads)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
         self.sched = _Scheduler(self, max_batch=self.max_batch, budget=budget, cap=cap,
                                 prefill_reserve=reserve, on_fault=_exit_soon)
         self.max_batch = self.sched.fit_max_batch()
+        if BATCH_INVARIANT:
+            _log_invariant(lm, self.max_batch)
         log.info("batching: max_batch %d, KV budget %.2f GiB (cap %.1f GiB, prefill reserve %.1f GiB), "
                  "KV %d B/token, recurrent state %.1f MiB/row, reserve <= %d new tokens/row, "
                  "prefill share %.2f, prompt cache %s",

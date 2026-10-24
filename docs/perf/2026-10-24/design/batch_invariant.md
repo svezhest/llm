@@ -83,6 +83,19 @@ exact (qmv per row).
 - 9B: nothing (the test `test_uncovered_9b_layout` on its layout, and the checkpoint's tensors: all
   linears are 8-bit g64, lm_head untied, b/a inside the fused in-projection).
 
+**Load-time guard (`_invariant_check`, review 2026-10-24).** It runs before the scheduler is built.
+
+- If anything is uncovered, `max_batch` drops to 2 with a warning (`… max_batch 16 -> 2`). The
+  reason: quantized layers outside mrqmm run one qmv per row at B ≤ 2, the unsorted expert gather
+  applies there too (B·top_k < 64), and mrqmm gives 1 and 2 rows the same bits.
+- If there is an unquantized `nn.Linear`, the mode is refused: an error in the log and the mode
+  off. MLX's 1-row gemv against a 2-row gemm has no exactness rule.
+- The real max_batch is logged after `fit_max_batch`.
+- The exactness of 3/4/5/6/8-bit qmv at 1 vs 2 rows is covered by
+  `test_uncovered_qmv_two_rows_exact` (Metal, `BATCH_INV_GPU=1`). It was not run yet: the review
+  fixes were CPU-only. Until it passes on the GPU, the 27B / 35B guarantee at B ≤ 2 rests on
+  CLAUDE.md's "B ≤ 2 always bit-exact (per-row qmv)".
+
 **Still run-dependent (documented, not changed).**
 
 - Reply KV (`QWEN_PROMPT_CACHE_REPLY=1`): a hit through a reply is not a cold prefill's bits, and
