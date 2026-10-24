@@ -41,6 +41,8 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
 | `QWEN_PROMPT_CACHE_DISK_QUEUE_GB` | `4` | RAM of evicted entries waiting for the writer. Their MLX buffers stay alive until written and are charged in every budget check (`held_bytes`). An eviction past this cap is a plain deletion, as without the tier. There is no "one entry always" exception. `4` fits one 50K-token entry (~2.5 GB) or two 1 GB AppWorld entries. |
 | `QWEN_PROMPT_CACHE_DISK_MIN_TOKENS` | `4096` | Shorter entries are not written. Their hit saves under ~2 slabs. |
 | `QWEN_PROMPT_CACHE_DISK_WAIT_S` | `10` | How long the head of the queue waits for its own load. After that it is admitted without it. |
+| `QWEN_PROMPT_CACHE_DISK_HELD_WAIT_S` | `5` | A growing row (`_regrow`) or the head of the queue (`_fits`) that only the tier's held RAM keeps out waits this long for it, then decides as without the wait. |
+| `QWEN_PROMPT_CACHE_DISK_TIMEOUT_S` | `30` | A write running this long is a stuck disk. The writes queued behind it are dropped (RAM released, never written) and nothing is taken until it returns. Its own buffers stay held, since the writer is reading them. |
 | `QWEN_PROMPT_CACHE_DISK_NOCACHE` | `1` | `F_NOCACHE` on every file, so the cache's GBs never sit in the macOS unified buffer cache next to the model. `0`: the OS caches as usual. |
 
 ## Design
@@ -119,6 +121,23 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
     Its live check sees the held buffers in `mx.get_active_memory()`.
   - **The queue cap is honest.** `held + freed ≤ QUEUE_GB`, else the eviction is a plain
     deletion.
+  - **Precise hold.** At the offer, held = the bytes of the entry's arrays no other RAM entry
+    holds. At the flush it drops to those the write job keeps, i.e. its fresh blobs' arrays: a
+    blob already on disk is freed with the entry.
+  - **A transient hold never cuts an answer** (re-review #1). When only the hold keeps a growing
+    row out of the headroom, `_regrow` → `_disk_room`:
+    1. it cancels the loads not inserted yet (`cancel_loads`: the loader stops at its next
+       array; the scheduler drops them; their memory goes first);
+    2. it then waits for the writer for at most `HELD_WAIT_S`, blocking the scheduler (decode
+       stalls, rarely);
+    3. only after that does it decide as before.
+
+    A load also starts only when `reserved + charged + need ≤ budget`. That leaves the prefill
+    reserve free for growth.
+  - **A transient hold never takes a hit** (re-review #2). When the head fits with its hit once
+    the hold is released, `_fits` waits for at most `HELD_WAIT_S` (`Want.held_since`). The
+    `KEEP_WAIT` clock stays untouched and the hit is not given up.
+  - **A stuck disk** (re-review #3): see `TIMEOUT_S`. `check_stall` runs at every flush.
   - **With the tier off**, `charged == bytes` and `spill` is unused, so every check is the old
     one bit for bit. The new `_fits` return can never trigger then: after its loop the bytes are
     within the budget, or only `keep` is left, which `blocked()` already ruled out.
@@ -315,11 +334,16 @@ mean a gateway change as well; that is left to the integrator.
 | `test_load_is_charged_until_inserted` | review #2: a load is held from its start until inserted |
 | `test_load_reads_one_array_at_a_time` | review #3: the numpy peak is under 2 arrays, not the blob |
 | `test_insert_failure_drops_the_load` | review #6: a raising insert drops the load; `busy()` false, nothing held |
+| `test_growth_waits_for_the_tier_instead_of_cutting` | re-review #1: no cut while only the hold is in the way; past `HELD_WAIT_S`, cut as before |
+| `test_cancel_loads_frees_their_hold` | re-review #1: a cancelled load yields nothing; hold released, `busy()` false |
+| `test_admission_keeps_its_hit_while_the_writer_holds_ram` | re-review #2: the head waits for the hold, keeps its hit, `keep_since` untouched |
+| `test_stuck_write_drops_the_queue` | re-review #3: queued writes dropped, nothing taken while stalled, resumes after |
+| `test_eviction_holds_only_what_the_writer_keeps` | re-review #4: a blob already on disk is not held |
 
 The test file takes ~25 s.
 
 Full suite (`pytest -q --ignore tests/test_mrqmm.py`, 2026-10-24): 359 passed, 49 skipped,
-9.5 min before the review fixes; after them (ed3b242) 367 passed, 49 skipped, 7 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
+9.5 min before the review fixes; after them (ed3b242) 367 passed; after the re-review fixes 372 passed, 49 skipped, 8.4 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
 device, came back bit-exact (zero-copy views and loader-thread `mx.array` on Metal); it was not
 a speed measurement.
 

@@ -1152,12 +1152,14 @@ class _PrefixCache:
                   len(e.ids), "wanted" if w else
                   "stale" if self.stale(e, time.time()) else "live",
                   self.seq - e.seq, time.time() - e.used)
-        before = self.bytes
         self.entries.remove(e)
         self.evictions += 1
         self._recount(added=False)
         if self.disk is not None and spill:           # written at the end of the tick
-            self.disk.offer(e, before - self.bytes)   # (the RAM it frees once written)
+            # the RAM it frees once written: its arrays no other entry holds
+            live = {id(a) for x in self.entries for a in x.arrays}
+            own = {id(a): a.nbytes for a in e.arrays if id(a) not in live}
+            self.disk.offer(e, sum(own.values()), own)
         return True
 
     def insert(self, new, limit=None, wanted=(), spare=()):
@@ -2910,6 +2912,10 @@ class _Scheduler:
             if n:
                 log.info("prompt cache: %d entries evicted for the growth of id=%s "
                          "(%.2f GiB left)", n, row.req.id, pc.bytes / GIB)
+        if rows + pc.charged() > headroom and pc.disk is not None:
+            # only the disk tier's held RAM is in the way: gone within ~1 s / GB,
+            # a cut answer is not (review: the cut came from a transient)
+            self._disk_room(lambda: rows + pc.charged() <= headroom, row.req.id)
         if rows + pc.charged() > headroom and sum(not r.done for r in self.rows) > 1:
             log.warning("id=%s ended at %d tokens: the batch's KV would pass its memory "
                         "headroom (%.2f GiB reserved)", row.req.id, row.n, self.reserved / GIB)
@@ -2952,10 +2958,17 @@ class _Scheduler:
                 if e is not None and depth >= PREFILL_STEP:
                     keep = (e,)
 
-            def blocked(floor):                 # out even with every other entry evicted
-                return (self.reserved + need + floor + held > self.budget
-                        or live - (pc.bytes - floor) + need + self.prefill_reserve > self.cap)
+            def blocked(floor, h=held):         # out even with every other entry evicted
+                # (h: the tier's hold then; 0 = once the writer released it)
+                return (self.reserved + need + floor + h > self.budget
+                        or live - (held - h) - (pc.bytes - floor) + need + self.prefill_reserve
+                        > self.cap)
             floor = pc.bytes_of(keep)
+            if held and not blocked(floor, 0) and self._held_wait(req):
+                # it fits with its hit once the writer released what it holds
+                # (~1 s / GB): wait for that, the KEEP_WAIT clock untouched and
+                # the hit not given up (review: a second's write did that)
+                return False
             if keep and blocked(floor) and not blocked(0):
                 # only the entry it would resume from is in the way
                 now = time.time()
@@ -3875,12 +3888,14 @@ class _Scheduler:
             w.key = key
         if w.dent is None or w.depth < w.ram + PREFILL_STEP:
             return False
-        # beside the batch and what the tier already holds (the insert evicts
-        # cache entries for it, the hold it cannot); from here until inserted
-        # or dropped `need` is held, so every other budget check sees it
+        # within the budget beside the batch AND the cache as it is (the load
+        # is extra RAM until inserted; the prefill reserve stays free for the
+        # rows' growth, which a load must never cut: _regrow cancels loads
+        # first anyway); from here until inserted or dropped `need` is held,
+        # so every other budget check sees it
         need = disk.cost(w.dent, pc.entries)
         live = mx.get_active_memory() + (0 if CLEAR_CACHE else mx.get_cache_memory())
-        if (need + pc.charged() - pc.bytes > self.budget + self.prefill_reserve - self.reserved
+        if (self.reserved + pc.charged() + need > self.budget
                 or live + need + self.prefill_reserve > self.cap):
             return False
         w.job, w.t0 = disk.load(w.dent, pc.entries, req, need), time.time()
@@ -3890,6 +3905,39 @@ class _Scheduler:
         log.info("id=%s prompt cache disk: loading an entry of %d tokens (%.1f MB to read) for a "
                  "%d-token hit (%d in RAM)", req.id, w.dent.L, need / 1e6, w.depth, w.ram)
         return True
+
+    @staticmethod
+    def _held_wait(req):
+        """_fits: may `req` still wait for the disk tier's held RAM (at most
+        pcdisk.HELD_WAIT_S from its first such wait)? (False without the tier.)"""
+        w = req.disk
+        if w is None:
+            w = req.disk = pcdisk.Want()
+        now = time.time()
+        if w.held_since is None:
+            w.held_since = now
+        return now - w.held_since <= pcdisk.HELD_WAIT_S
+
+    def _disk_room(self, ok, rid):
+        """`ok()` false only for the disk tier's held RAM (_regrow): the loads
+        not inserted go first (cancelled, dropped: a waiting request goes
+        without its hit), then the writer is waited for, at most
+        pcdisk.HELD_WAIT_S (the scheduler blocks meanwhile: decode stalls,
+        rarely, against cutting a row's answer); the caller decides after."""
+        disk = self.eng._pcache.disk
+        if ok() or not disk.held_bytes():
+            return
+        t0 = time.time()
+        n = disk.cancel_loads()
+        while True:
+            for job in disk.done():
+                self._disk_take(disk, job)
+            if ok() or not disk.held_bytes() or time.time() - t0 > pcdisk.HELD_WAIT_S:
+                break
+            disk.wait(0.05)
+        log.info("id=%s waited %.2f s for the prompt cache disk tier's held RAM before growing "
+                 "(%d loads cancelled; %s)", rid, time.time() - t0, n,
+                 "room made" if ok() else "still short")
 
     def _disk_take(self, disk, job):
         """_disk_insert, never raising: a failure drops that load (unpinned,
