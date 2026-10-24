@@ -1,0 +1,53 @@
+[
+ {
+  "pair": 0,
+  "prompt_tokens": 15622,
+  "tf_cached": 15401,
+  "tf_first_scored": 15402,
+  "tf_equal": true,
+  "tf_disk_load": 1,
+  "gen_cached": 15401,
+  "gen_equal": true,
+  "gen_disk_load": 1,
+  "t": {
+   "tf_hit": 1.154674768447876,
+   "tf_cold": 33.63599610328674,
+   "gen_hit": 2.6207690238952637,
+   "gen_cold": 30.355244874954224
+  }
+ },
+ {
+  "pair": 1,
+  "prompt_tokens": 67947,
+  "tf_cached": 67940,
+  "tf_first_scored": 67941,
+  "tf_equal": true,
+  "tf_disk_load": 1,
+  "gen_cached": 67940,
+  "gen_equal": true,
+  "gen_disk_load": 1,
+  "t": {
+   "tf_hit": 1.2125048637390137,
+   "tf_cold": 195.65208506584167,
+   "gen_hit": 2.7668843269348145,
+   "gen_cold": 169.12180519104004
+  }
+ },
+ {
+  "pair": 2,
+  "prompt_tokens": 25668,
+  "tf_cached": 25661,
+  "tf_first_scored": 25662,
+  "tf_equal": true,
+  "tf_disk_load": 1,
+  "gen_cached": 25661,
+  "gen_equal": true,
+  "gen_disk_load": 1,
+  "t": {
+   "tf_hit": 0.7029149532318115,
+   "tf_cold": 58.851141929626465,
+   "gen_hit": 1.85744309425354,
+   "gen_cold": 51.566359996795654
+  }
+ }
+]

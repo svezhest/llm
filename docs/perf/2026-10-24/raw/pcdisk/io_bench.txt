@@ -1,0 +1,13 @@
+dir /tmp/scratch/pcdisk_dir/io_dir, F_NOCACHE True, mlx 0.32.3, device Device(gpu, 0)
+round=0 size_gb=1.000 tokens=22583 entry_gb=0.998 flush_ms=0.863 write_s=0.194 write_gbps=5.142 read_ms=400.954 read_gbps=2.488 finish_ms=0.408 peak_gb=1.952 bit_exact=True
+round=0 size_gb=2.500 tokens=68359 entry_gb=2.498 flush_ms=1.730 write_s=0.429 write_gbps=5.822 read_ms=682.956 read_gbps=3.657 finish_ms=0.741 peak_gb=5.794 bit_exact=True
+round=1 size_gb=1.000 tokens=22583 entry_gb=0.998 flush_ms=0.876 write_s=0.159 write_gbps=6.274 read_ms=428.448 read_gbps=2.328 finish_ms=0.375 peak_gb=1.952 bit_exact=True
+round=1 size_gb=2.500 tokens=68359 entry_gb=2.498 flush_ms=1.695 write_s=0.411 write_gbps=6.077 read_ms=696.550 read_gbps=3.586 finish_ms=0.719 peak_gb=5.794 bit_exact=True
+round=2 size_gb=1.000 tokens=22583 entry_gb=0.998 flush_ms=0.957 write_s=0.163 write_gbps=6.120 read_ms=410.627 read_gbps=2.429 finish_ms=0.412 peak_gb=1.952 bit_exact=True
+round=2 size_gb=2.500 tokens=68359 entry_gb=2.498 flush_ms=1.893 write_s=0.400 write_gbps=6.244 read_ms=666.363 read_gbps=3.748 finish_ms=0.712 peak_gb=5.794 bit_exact=True
+
+medians over rounds:
+| entry GB | flush ms | write s | write GB/s | read ms | read GB/s | finish ms | peak GB | exact |
+|---|---|---|---|---|---|---|---|---|
+| 1.00 | 0.9 | 0.16 | 6.12 | 411 | 2.43 | 0.4 | 1.95 | True |
+| 2.50 | 1.7 | 0.41 | 6.08 | 683 | 3.66 | 0.7 | 5.79 | True |
