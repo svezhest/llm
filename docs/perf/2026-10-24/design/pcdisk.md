@@ -42,8 +42,12 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
 | `QWEN_PROMPT_CACHE_DISK_MIN_TOKENS` | `4096` | Shorter entries are not written. Their hit saves under ~2 slabs. |
 | `QWEN_PROMPT_CACHE_DISK_WAIT_S` | `10` | How long the head of the queue waits for its own load. After that it is admitted without it. |
 | `QWEN_PROMPT_CACHE_DISK_HELD_WAIT_S` | `5` | A growing row (`_regrow`) or the head of the queue (`_fits`) that only the tier's held RAM keeps out waits this long for it, then decides as without the wait. |
-| `QWEN_PROMPT_CACHE_DISK_TIMEOUT_S` | `30` | A write running this long is a stuck disk. The writes queued behind it are dropped (RAM released, never written) and nothing is taken until it returns. Its own buffers stay held, since the writer is reading them. |
+| `QWEN_PROMPT_CACHE_DISK_TIMEOUT_S` | `30` | A write running this long is a stuck disk. The writes queued behind it are dropped (RAM released, never written) and nothing is taken until it returns. Its own buffers stay held, since the writer is reading them, and no budget check waits for that hold (`stuck_bytes`). A load running this long is abandoned: its hold and pin go, its request goes without it, and no new load starts until the loader returns. |
 | `QWEN_PROMPT_CACHE_DISK_NOCACHE` | `1` | `F_NOCACHE` on every file, so the cache's GBs never sit in the macOS unified buffer cache next to the model. `0`: the OS caches as usual. |
+
+The numeric knobs are parsed only when `QWEN_PROMPT_CACHE_DISK` is set: a bad value never stops a
+worker that does not use the tier. With the tier on, an unparsable value turns it off, and
+`Engine.load` logs which one (`pcdisk.ENV_ERRORS`; logging is not set up at import).
 
 ## Design
 
@@ -122,21 +126,46 @@ CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at t
   - **The queue cap is honest.** `held + freed ≤ QUEUE_GB`, else the eviction is a plain
     deletion.
   - **Precise hold.** At the offer, held = the bytes of the entry's arrays no other RAM entry
-    holds. At the flush it drops to those the write job keeps, i.e. its fresh blobs' arrays: a
-    blob already on disk is freed with the entry.
+    holds. At the flush it becomes what the write job keeps alive, i.e. **every** array of its
+    fresh blobs: a blob already on disk is freed with the entry, so it is not held. A fresh
+    segment it shares with an entry still in RAM is held too (final review #2). Before, it was
+    left out of the hold because the other entry held it. Once that entry was evicted (freed at
+    once, or its own write borrowing the pending blob), the segment stayed alive in this job's
+    views but was charged nowhere. It is now counted twice while the other entry is in RAM
+    (`pc.bytes` + held), which errs on the safe side. The `QUEUE_GB` check at the offer sees
+    only the entry's own bytes, so the hold can pass the cap by such shared arrays.
+  - **Unflushed offers are taken back when the RAM is needed within the tick** (final review
+    #1). An offer reaches the writer only at the tick's flush, so waiting for its hold inside
+    the same tick waits for nothing. Such an offer comes from `_drop_done` → reply store,
+    `_fits`, or `pc.insert` in `_disk_tick`, earlier in the tick. `_disk_room` therefore first
+    calls `revoke(over)`: the latest offers go until the shortfall is covered, their hold is
+    released and their entries are freed at once, as `spill=False` (logged "not written: its
+    RAM is needed now"). Before, the row waited `HELD_WAIT_S` and was then cut anyway, where
+    without the tier the entries would have been freed at once.
+  - **A stuck write's hold is never waited for** (final review #4). `stuck_bytes()` is the hold
+    of a write running past `TIMEOUT_S`. `_disk_room` waits only while `held − stuck` covers
+    the shortfall. `_fits` waits only when the hold beyond `stuck` would admit the head. Before,
+    each growing row and each head waited `HELD_WAIT_S` for a hold that might never go.
   - **A transient hold never cuts an answer** (re-review #1). When only the hold keeps a growing
     row out of the headroom, `_regrow` → `_disk_room`:
-    1. it cancels the loads not inserted yet (`cancel_loads`: the loader stops at its next
+    1. it takes back this tick's unflushed offers (`revoke`, above);
+    2. it cancels the loads not inserted yet (`cancel_loads`: the loader stops at its next
        array; the scheduler drops them; their memory goes first);
-    2. it then waits for the writer for at most `HELD_WAIT_S`, blocking the scheduler (decode
-       stalls, rarely);
-    3. only after that does it decide as before.
+    3. it then waits for the writer for at most `HELD_WAIT_S`, blocking the scheduler (decode
+       stalls, rarely), and only while what the tier can still release (not a stuck write's
+       hold) covers the shortfall;
+    4. only after that does it decide as before.
 
     A load also starts only when `reserved + charged + need ≤ budget`. That leaves the prefill
     reserve free for growth.
   - **A transient hold never takes a hit** (re-review #2). When the head fits with its hit once
     the hold is released, `_fits` waits for at most `HELD_WAIT_S` (`Want.held_since`). The
-    `KEEP_WAIT` clock stays untouched and the hit is not given up.
+    `KEEP_WAIT` clock stays untouched and the hit is not given up. Checked in the final review
+    (#5): it waits only when the hold is what keeps it out. That means two conditions. First,
+    with every other entry evicted it would still not fit beside the current hold
+    (`blocked(floor)`). Second, it would fit once the hold beyond a stuck write's is gone
+    (`not blocked(floor, stuck)`). When evicting the others admits it beside the hold, they go
+    at once (spilled), and the head waits only for their own write, not for another eviction's.
   - **A stuck disk** (re-review #3): see `TIMEOUT_S`. `check_stall` runs at every flush.
   - **With the tier off**, `charged == bytes` and `spill` is unused, so every check is the old
     one bit for bit. The new `_fits` return can never trigger then: after its loop the bytes are
@@ -168,7 +197,9 @@ pcdisk.json     {format, key}
 
   Blobs are therefore deduplicated by object identity:
   - `_Seg` → uid in a `WeakKeyDictionary`;
-  - a state → uid keyed by its first array (held weakly), with every array's id compared.
+  - a state → uid keyed by the ids of all its arrays, every one held weakly. A record matches
+    only while all of them are alive and identical, so a reused `id()` can never alias another
+    state (final review #6).
 
   Blobs are reference-counted by the disk entries. A blob already on disk is not written again,
   and a blob whose object is still alive in RAM is reused at load, neither read nor duplicated.
@@ -228,6 +259,14 @@ pcdisk.json     {format, key}
 - **Failures.** If the entry left the disk between the peek and the load (the writer's LRU),
   `load()` returns None and the scheduler peeks again. A failed read (a torn file, EIO) is a
   miss: logged, the request is prefilled as without the tier.
+- **A stuck read** (final review #4). `check_loads()` runs at every flush and in `_disk_room`'s
+  wait. It abandons a load running past `TIMEOUT_S`: the load is cancelled and marked taken,
+  its hold and the entry's pin go at once, and its request goes without it. Only the accounting
+  and the pin are released. The numpy and MLX buffers the loader thread is filling stay its
+  own, since freeing them under it would be a use-after-free. `busy()` stays true while the
+  abandoned load is still inside the loader (`_hung`), because a new load would only queue
+  behind it on the single loader thread. When the read returns, the loader stops at its next
+  array, and the scheduler drops the late result without releasing anything twice.
 
 ### Validity
 
@@ -292,8 +331,9 @@ mean a gateway change as well; that is left to the integrator.
     once (`spill=False`).
   - **Loaded entries** are inserted through the same headroom as a store. A load starts only when
     its non-live bytes fit beside what is already held, by budget and by live memory.
-  - **Pending writes** are bounded by `QUEUE_GB`, honestly, with no exception. Their MLX
-    buffers count in active memory until written.
+  - **Pending writes** are bounded by `QUEUE_GB` with no exception, counted on the evicted
+    entries' own bytes. A fresh segment shared with a RAM entry is held on top of that (final
+    review #2). Their MLX buffers count in active memory until written.
 - **Bits.**
   - **The bytes are exact.** fp16, fp32, packed uint32 and bf16 (as uint16) are written and read
     back as raw bytes. The tests compare every restore position of the loaded entry with the
@@ -339,11 +379,20 @@ mean a gateway change as well; that is left to the integrator.
 | `test_admission_keeps_its_hit_while_the_writer_holds_ram` | re-review #2: the head waits for the hold, keeps its hit, `keep_since` untouched |
 | `test_stuck_write_drops_the_queue` | re-review #3: queued writes dropped, nothing taken while stalled, resumes after |
 | `test_eviction_holds_only_what_the_writer_keeps` | re-review #4: a blob already on disk is not held |
+| `test_growth_frees_this_ticks_unwritten_evictions` | final review #1: a spill earlier in the same tick is taken back; the growth neither waits nor cuts, the same as with the tier off |
+| `test_revoke_takes_back_unflushed_offers` | final review #1: `revoke(need)` releases the latest offers until `need` is covered; a revoked entry is never written |
+| `test_shared_fresh_segment_stays_held_while_written` | final review #2: a fresh segment shared with another entry stays held until written |
+| `test_close_with_unflushed_offer` | final review #3: `close()` with an unflushed offer releases its hold (was a ValueError) |
+| `test_growth_does_not_wait_for_a_stuck_write` | final review #4: `_regrow` does not wait `HELD_WAIT_S` for a stuck write's hold |
+| `test_admission_does_not_wait_for_a_stuck_write` | final review #4/#5: `_fits` does not wait for a stuck write's hold |
+| `test_stuck_load_is_abandoned` | final review #4: a load past `TIMEOUT_S` loses its hold and pin; `busy()` holds until the loader returns; nothing is released twice |
+| `test_state_identity_holds_every_array_weakly` | final review #6: a state's uid record goes when any of its arrays dies |
+| `test_env_parsed_only_with_the_tier_on` | final review #6: a bad knob value never breaks the import; with the tier on it is recorded |
 
-The test file takes ~25 s.
+The test file takes ~25 s (41 tests).
 
 Full suite (`pytest -q --ignore tests/test_mrqmm.py`, 2026-10-24): 359 passed, 49 skipped,
-9.5 min before the review fixes; after them (ed3b242) 367 passed; after the re-review fixes 372 passed, 49 skipped, 8.4 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
+9.5 min before the review fixes; after them (ed3b242) 367 passed; after the re-review fixes 372 passed, 49 skipped, 8.4 min; after the final-review fixes 381 passed, 49 skipped, 7.2 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
 device, came back bit-exact (zero-copy views and loader-thread `mx.array` on Metal); it was not
 a speed measurement.
 

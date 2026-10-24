@@ -56,7 +56,24 @@ log = logging.getLogger("qwen.worker")
 
 FORMAT = 1
 DIR = os.environ.get("QWEN_PROMPT_CACHE_DISK", "")
-GB = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_GB", "32") or "32")
+# the knobs below are parsed only with the tier on (a bad value never stops a
+# worker that does not use it); an unparsable one turns the tier off, logged
+# by Engine.load (logging is not set up at import)
+ENV_ERRORS = []
+
+
+def _num(name, unset, empty, cast=float):
+    raw = os.environ.get(name)
+    if not DIR or raw is None:
+        return cast(unset)
+    try:
+        return cast(raw or empty)
+    except ValueError:
+        ENV_ERRORS.append(f"{name}={raw!r}")
+        return cast(unset)
+
+
+GB = _num("QWEN_PROMPT_CACHE_DISK_GB", "32", "32")
 # keep the files of a previous run whose key (model, numerics flags, code) matches;
 # 0: the directory's cache files are deleted at start
 KEEP = os.environ.get("QWEN_PROMPT_CACHE_DISK_KEEP", "0") == "1"
@@ -64,20 +81,22 @@ KEEP = os.environ.get("QWEN_PROMPT_CACHE_DISK_KEEP", "0") == "1"
 # written, charged in the batch budget beside the cache: held_bytes); an
 # eviction past it is a plain deletion, as without the tier (4: one 50K-token
 # entry of ~2.5 GB fits, two 1 GB AppWorld entries at once)
-QUEUE_GB = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_QUEUE_GB", "4") or "4")
+QUEUE_GB = _num("QWEN_PROMPT_CACHE_DISK_QUEUE_GB", "4", "4")
 # shorter entries are not worth a file: their hit saves less than a slab or two
-MIN_TOKENS = int(os.environ.get("QWEN_PROMPT_CACHE_DISK_MIN_TOKENS", "4096") or "0")
+MIN_TOKENS = _num("QWEN_PROMPT_CACHE_DISK_MIN_TOKENS", "4096", "0", int)
 # the head of the queue waits this long for its load before going without it
-WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_WAIT_S", "10") or "0")
+WAIT_S = _num("QWEN_PROMPT_CACHE_DISK_WAIT_S", "10", "0")
 # the RAM the tier holds (held_bytes) is gone within ~1 s per GB written: a
 # growing row (_regrow) and an admission (_fits) that only it keeps out wait
 # for it this long (the growth blocks the scheduler meanwhile, a cut answer
 # would be worse) before deciding as without the wait
-HELD_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_HELD_WAIT_S", "5") or "0")
+HELD_WAIT_S = _num("QWEN_PROMPT_CACHE_DISK_HELD_WAIT_S", "5", "0")
 # a write running this long means a stuck disk: the writes queued behind it
 # are dropped (their RAM freed: never written), nothing more is taken until it
-# returns; its own buffers stay held (the writer is reading them)
-TIMEOUT_S = float(os.environ.get("QWEN_PROMPT_CACHE_DISK_TIMEOUT_S", "30") or "0")
+# returns; its own buffers stay held (the writer is reading them), and no
+# budget check waits for them. A load running this long is abandoned: its hold
+# and pin go (its request goes without it), its buffers stay the loader's
+TIMEOUT_S = _num("QWEN_PROMPT_CACHE_DISK_TIMEOUT_S", "30", "0")
 # F_NOCACHE (macOS) on every file: the cache's GBs never sit in the unified
 # buffer cache beside the model (RAM is what the tier frees; a page-cache copy
 # of each written entry would compete with the batch and push other processes
@@ -262,7 +281,7 @@ class _Cancelled(Exception):
 
 class _Load:
     __slots__ = ("dent", "req", "live", "data", "error", "done", "ms", "nbytes", "taken", "held",
-                 "cancelled")
+                 "cancelled", "t0")
 
     def __init__(self, dent, req, live):
         self.dent, self.live = dent, live     # live: uid -> object still in RAM (not read)
@@ -275,6 +294,7 @@ class _Load:
         self.taken = False                    # finished / discarded by the scheduler
         self.held = 0                         # charged in DiskTier.held until then
         self.cancelled = False                # cancel_loads(): the loader stops, it is dropped
+        self.t0 = time.time()                 # started (check_loads: TIMEOUT_S)
 
 
 class _Write:
@@ -327,7 +347,8 @@ class DiskTier:
         # identity of live objects -> blob uid (dedup); weak: never keeps anything alive
         self._seg_uid = weakref.WeakKeyDictionary()       # _Seg -> uid
         self._segs = weakref.WeakValueDictionary()        # uid -> _Seg
-        self._st = {}                                     # id(first array) -> (uid, ref, ids)
+        self._st = {}                                     # ids of its arrays -> (uid, weakrefs)
+        self._hung = []                                   # loads abandoned, still in the loader
         self._classes = {}
         self._wq, self._lq = queue.SimpleQueue(), queue.SimpleQueue()
         self._done = []                                   # finished loads (scheduler polls)
@@ -443,16 +464,18 @@ class DiskTier:
         return [a for layer in st for a in layer if a is not None]
 
     def _st_id(self, st, assign=True, uid=None):
-        """A state's uid: by the identity of its arrays (the first one held
-        weakly, the others' ids compared: states are lists, shared by
-        reference between entries, never weakref-able themselves). `uid`:
-        register `st` under it (a state just loaded from that blob)."""
+        """A state's uid: by the identity of its arrays, every one held
+        weakly (states are lists, shared by reference between entries, never
+        weakref-able themselves): a record matches only while all of its
+        arrays are alive and are these, so a reused id() can never alias
+        another state (review 2026-10-24 #6). `uid`: register `st` under it
+        (a state just loaded from that blob)."""
         arrs = self._st_arrays(st)
         if not arrs:
             return (uid or _new_uid()) if assign else None
-        k, ids = id(arrs[0]), tuple(map(id, arrs))
+        k = tuple(map(id, arrs))
         rec = self._st.get(k)
-        if uid is None and rec is not None and rec[1]() is arrs[0] and rec[2] == ids:
+        if uid is None and rec is not None and all(r() is a for r, a in zip(rec[1], arrs)):
             return rec[0]
         if not assign:
             return None
@@ -460,9 +483,9 @@ class DiskTier:
 
         def gone(r, k=k):
             cur = self._st.get(k)
-            if cur is not None and cur[1] is r:
+            if cur is not None and any(x is r for x in cur[1]):
                 self._st.pop(k, None)
-        self._st[k] = (u, weakref.ref(arrs[0], gone), ids)
+        self._st[k] = (u, [weakref.ref(a, gone) for a in arrs])
         return u
 
     # --- write: eviction -> file (offer, flush: scheduler thread) ----------------
@@ -500,6 +523,39 @@ class DiskTier:
         or dropped. The scheduler charges it beside pc.bytes."""
         with self.lock:
             return self.held
+
+    def revoke(self, need=None):
+        """Scheduler thread: the offers not flushed yet are taken back, as
+        evictions with spill False: their hold released now, their arrays
+        freed as soon as the caller drops the entries (here: nothing else
+        holds them). For a caller that needs the RAM within the tick
+        (_Scheduler._disk_room): an offer is handed to the writer only at
+        the end of the tick, so waiting for it would be waiting for nothing
+        (review 2026-10-24 #1). `need`: the latest offers go until that many
+        bytes are released (None: all) -> (entries, bytes released)."""
+        with self.lock:
+            offers, n = [], 0
+            while self.offers and (need is None or n < need):
+                offers.append(self.offers.pop())
+                n += offers[-1][1]
+            self.held -= n
+            self.idle.notify_all()
+        for e, _, _ in offers:
+            log.info("prompt cache disk: evicted entry of %d tokens not written: its RAM is "
+                     "needed now", len(e.ids))
+        self.skipped += len(offers)
+        return len(offers), n
+
+    def stuck_bytes(self):
+        """Of held_bytes(), what a write running past TIMEOUT_S holds (a
+        stuck disk: its buffers stay until it returns, if ever). No budget
+        check waits for it (review 2026-10-24 #4)."""
+        if not self.timeout_s:
+            return 0
+        now = time.time()
+        with self.lock:
+            return sum(j.held for j in self._writes
+                       if j.started and now - j.started > self.timeout_s)
 
     def _release(self, n):
         with self.lock:
@@ -551,10 +607,41 @@ class DiskTier:
                   "writes dropped, nothing more written until it returns", self.timeout_s,
                   len(drop))
 
+    def check_loads(self):
+        """Scheduler thread (each flush, _disk_room): a load running past
+        TIMEOUT_S (a stuck read) is abandoned: its hold and its pin go now
+        (its request goes without it; the entry may be deleted), the loader
+        stops at its next array if it ever returns. Only the accounting and
+        the pin: the buffers the loader thread is reading into stay its own
+        (freeing them under it would be a use-after-free). busy() stays true
+        until it returns -> how many."""
+        if not self.timeout_s:
+            return 0
+        now = time.time()
+        with self.lock:
+            hung = [j for j in self._loads
+                    if not j.taken and not j.done.is_set() and now - j.t0 > self.timeout_s]
+            for j in hung:
+                j.cancelled = True
+                j.taken = True                        # finish / discard: nothing more to undo
+                j.dent.pins -= 1
+                self.held -= j.held
+                j.held = 0
+                self._loads.remove(j)
+                self._hung.append(j)
+                self.errors += 1
+            if hung:
+                self.idle.notify_all()
+        for j in hung:
+            log.error("prompt cache disk: loading an entry of %d tokens has run for over %.0f s "
+                      "(stuck disk?): abandoned, its RAM hold released", j.dent.L, self.timeout_s)
+        return len(hung)
+
     def flush(self):
         """Scheduler thread: the offered entries to the writer. Never raises."""
         try:
             self.check_stall()
+            self.check_loads()
         except Exception:  # noqa: BLE001
             log.exception("prompt cache disk: stall check failed")
         offers, self.offers = self.offers, []
@@ -680,17 +767,32 @@ class DiskTier:
                 self.queued -= 1
             raise
         e.disk_uid = uid
-        # what the job keeps alive of the RAM the eviction frees: its views'
-        # arrays among the evicted entry's own (`own`; the blobs already on
-        # disk and the arrays other entries hold are not the writer's to hold)
-        keep = held if own is None else min(held, sum(
-            a.nbytes for kind, _, x in fresh
-            for a in (x.arrays if kind == "seg" else self._st_arrays(x)) if id(a) in own))
+        # what the job keeps alive: every array of its fresh blobs (its views),
+        # whoever else holds them. Not only the evicted entry's own (`own`,
+        # what the offer charged): a segment it shares with an entry still in
+        # RAM is kept alive by this job too, and once that entry is evicted
+        # (freed at once, or its write borrowing this pending blob) it would
+        # be charged nowhere (review 2026-10-24 #2). Counted twice while the
+        # other entry is in RAM (pc.bytes + held): safe. The blobs already on
+        # disk are freed with the entry: not held. (own None: a caller's
+        # plain count, kept as is.)
+        if own is None:
+            keep = held
+        else:
+            seen, keep = set(), 0
+            for kind, _, x in fresh:
+                for a in (x.arrays if kind == "seg" else self._st_arrays(x)):
+                    if id(a) not in seen:
+                        seen.add(id(a))
+                        keep += a.nbytes
         w = _Write(d, jobs, borrowed, nbytes, meta, covers, keep)
         with self.lock:
             self._writes.append(w)
+            self.held += keep - held                  # +: shared arrays; -: blobs on disk
+            if keep < held:
+                self.idle.notify_all()
         self._wq.put(w)
-        return held - keep
+        return 0
 
     def _unregister(self, d, new):
         """Under the lock: an entry registered but never handed to the writer
@@ -961,9 +1063,12 @@ class DiskTier:
         return hit, at
 
     def busy(self):
-        """A load is reading (one at a time: the SSD is the bottleneck)."""
+        """A load is reading (one at a time: the SSD is the bottleneck; an
+        abandoned one still inside the loader too: a new one would queue
+        behind it)."""
         with self.lock:
-            return any(d.pins for d in self.entries.values())
+            self._hung = [j for j in self._hung if not j.done.is_set()]
+            return bool(self._hung) or any(d.pins for d in self.entries.values())
 
     def _live(self, d, ram_entries):
         """The blobs of `d` whose objects are alive in RAM (not read)."""
@@ -1096,7 +1201,7 @@ class DiskTier:
         with self.lock:
             self.closed = True
             offers, self.offers = self.offers, []
-            self.held -= sum(h for _, h in offers)
+            self.held -= sum(h for _, h, _ in offers)
         ok = self.drain(timeout)
         if ok:                                        # the directory is free for another one
             self._lockf.close()

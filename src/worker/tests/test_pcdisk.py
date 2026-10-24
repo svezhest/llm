@@ -970,3 +970,280 @@ def test_eviction_holds_only_what_the_writer_keeps(tmp_path):
         assert t.drain() and t.held_bytes() == 0
     finally:
         pcdisk._write_blob = pcdisk_write
+
+
+# --- final review 2026-10-24 (scratchpad/review_disk2/): repros of the findings -----
+def test_growth_frees_this_ticks_unwritten_evictions(dense, small, tmp_path, monkeypatch,
+                                                      caplog):
+    """Final review #1: an eviction spilled earlier in the same tick (a reply
+    store's soft cap in _drop_done) is not handed to the writer before the
+    tick's flush, so _disk_room waiting for its hold waited for nothing and
+    then cut the row. Now the tick's unwritten offers are taken back first
+    (freed at once, as without the tier): no wait, no cut, as with it off."""
+    import time
+    from test_prompt_cache import fill
+    monkeypatch.setattr(worker, "RESERVE_TOKENS", 2)
+    monkeypatch.setattr(pcdisk, "HELD_WAIT_S", 2.0)
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    ps = prompts([8, 8], 54)
+    out = {}
+    for with_disk in (False, True):
+        sched = scheduler(dense, budget=1 << 40)
+        pc = sched.eng._pcache
+        fill(sched)
+        if with_disk:
+            pc.disk = tier(tmp_path / "d")
+        a, b = request(ps[0], 40, "a"), request(ps[1], 40, "b")
+        state = {"armed": False, "spilled": False, "waited": 0.0}
+        step, room = sched._step, sched._disk_room
+
+        def spy_step(rows):
+            # what a reply store's soft-cap loop does in _drop_done: evict
+            # with spill (nothing is over the headroom yet)
+            if state["armed"] and not state["spilled"] and pc.entries and \
+                    any(r.pos + 1 >= r.tokens for r in sched.rows):
+                while pc.evict():
+                    pass
+                state["spilled"] = True
+            return step(rows)
+
+        def spy_room(over, rid):
+            t0 = time.time()
+            room(over, rid)
+            state["waited"] += time.time() - t0
+        sched._step, sched._disk_room = spy_step, spy_room
+
+        def squeeze(t, s):
+            if len(s.rows) == 2 and not state["armed"]:
+                # the growth needs the cache's room (without the tier: freed at once)
+                s.prefill_reserve = 0
+                s.budget = s.reserved + pc.bytes + 1
+                state["armed"] = True
+        got = run(sched, [a, b], on_tick=squeeze)
+        assert state["spilled"]
+        out[with_disk] = {k: len(v[0]) for k, v in got.items()}
+        if with_disk:
+            assert pc.disk.drain() and pc.disk.held_bytes() == 0
+            assert state["waited"] < 1.0, state
+    assert out[False] == out[True] == {"a": 40, "b": 40}, out
+    assert any("unwritten evictions freed" in m for m in caplog.messages)
+
+
+def test_revoke_takes_back_unflushed_offers(tmp_path):
+    """Final review #1: revoke(need) releases the latest offers' hold until
+    `need` is met; a revoked entry is never written."""
+    t = tier(tmp_path)
+    es = [_entry(range(100 * i, 100 * i + 8), [(worker._Seg(0, 8, [_kv(8, 40 + i)]), 0, 8)])
+          for i in range(3)]
+    for e in es:
+        assert t.offer(e, 1000)
+    assert t.held_bytes() == 3000
+    assert t.revoke(1500) == (2, 2000) and t.held_bytes() == 1000
+    t.flush()
+    assert t.drain() and t.held_bytes() == 0 and t.stats()["writes"] == 1
+    assert es[0].disk_uid in t.entries and not hasattr(es[2], "disk_uid")
+    assert t.revoke() == (0, 0)
+    _consistent(t)
+
+
+def test_shared_fresh_segment_stays_held_while_written(tmp_path, monkeypatch):
+    """Final review #2: A and B share a segment S not on disk yet; A is
+    evicted (S not in its `own`: B holds it), then B. A's write job keeps S's
+    views alive, so S stays charged until A's file is written (was: charged
+    nowhere while written)."""
+    import threading
+    gate = threading.Event()
+    slow = pcdisk._write_blob
+
+    def write(*a, **k):
+        gate.wait(10)
+        return slow(*a, **k)
+    monkeypatch.setattr(pcdisk, "_write_blob", write)
+    t = tier(tmp_path)
+    S = worker._Seg(0, 8, [_kv(8, 31)])
+    TA = worker._Seg(8, 16, [_kv(8, 32)])
+    TB = worker._Seg(8, 16, [_kv(8, 33)])
+    A = _entry(list(range(16)), [(S, 0, 8), (TA, 8, 16)])
+    B = _entry(list(range(8)) + list(range(50, 58)), [(S, 0, 8), (TB, 8, 16)])
+    entries = [A, B]
+    for e in (A, B):                          # as _PrefixCache.evict does it
+        entries.remove(e)
+        live = {id(a) for x in entries for a in x.arrays}
+        own = {id(a): a.nbytes for a in e.arrays if id(a) not in live}
+        assert t.offer(e, sum(own.values()), own)
+    t.flush()
+    assert t.held_bytes() == S.nbytes + TA.nbytes + TB.nbytes
+    gate.set()
+    assert t.drain() and t.held_bytes() == 0
+    _consistent(t)
+
+
+def test_close_with_unflushed_offer(tmp_path):
+    """Final review #3: close() with an offer not flushed (a tick that raised
+    before its flush) releases its hold (was: ValueError)."""
+    t = tier(tmp_path)
+    e = _entry(range(8), [(worker._Seg(0, 8, [_kv(8, 1)]), 0, 8)])
+    assert t.offer(e, 1000)
+    assert t.close() and t.held_bytes() == 0 and not t.offers
+
+
+def _stuck_write(t, monkeypatch, H):
+    """A write that the writer took and that runs past t.timeout_s (0.2),
+    holding H -> its gate (set it to let it return)."""
+    import threading
+    import time
+    gate = threading.Event()
+    slow = pcdisk._write_blob
+
+    def write(*a, **k):
+        gate.wait(30)
+        return slow(*a, **k)
+    monkeypatch.setattr(pcdisk, "_write_blob", write)
+    t.timeout_s = 0.2
+    assert t.offer(_entry(range(900, 908), [(worker._Seg(0, 8, [_kv(8, 77)]), 0, 8)]), H)
+    t.flush()
+    time.sleep(0.35)
+    assert t.stuck_bytes() == H == t.held_bytes()
+    return gate
+
+
+def test_growth_does_not_wait_for_a_stuck_write(dense, small, tmp_path, monkeypatch):
+    """Final review #4: only a stuck write's hold keeps a growing row out:
+    _regrow does not wait HELD_WAIT_S for it (once per row), it decides at
+    once (the row is cut, as without the wait)."""
+    import time
+    from test_prompt_cache import fill
+    monkeypatch.setattr(worker, "RESERVE_TOKENS", 2)
+    monkeypatch.setattr(pcdisk, "HELD_WAIT_S", 3.0)
+    ps = prompts([8, 8], 54)
+    probe = scheduler(dense)
+    short, grown = probe._bytes(8 + 2), probe._bytes(8 + 40 + 1)
+    sched = scheduler(dense, budget=1 << 40)
+    pc = sched.eng._pcache
+    fill(sched)
+    pc.entries = []
+    pc._recount()
+    disk = pc.disk = tier(tmp_path)
+    H = 4 * (grown - short)
+    gate = _stuck_write(disk, monkeypatch, H)
+    a, b = request(ps[0], 40, "a"), request(ps[1], 40, "b")
+    waited = []
+    room = sched._disk_room
+
+    def spy_room(over, rid):
+        t0 = time.time()
+        room(over, rid)
+        waited.append(time.time() - t0)
+    sched._disk_room = spy_room
+
+    def squeeze(t, s):
+        if len(s.rows) == 2 and s.budget > 2 * short:
+            s.budget, s.prefill_reserve = 2 * short, 2 * (grown - short) + 4096
+    try:
+        got = run(sched, [a, b], on_tick=squeeze)
+    finally:
+        gate.set()
+    assert [k for k in "ab" if len(got[k][0]) < 40], got        # cut, as without a wait
+    assert waited and max(waited) < 0.5, waited
+    assert disk.drain() and disk.held_bytes() == 0
+
+
+def test_admission_does_not_wait_for_a_stuck_write(dense, small, tmp_path, monkeypatch, caplog):
+    """Final review #4/#5: the head that only a stuck write's hold keeps out
+    does not wait HELD_WAIT_S for it: it decides at once (here: gives its hit
+    up, as without the tier's wait)."""
+    from test_prompt_cache import fill
+    monkeypatch.setattr(worker, "PROMPT_CACHE_KEEP_TOKENS", 1 << 20)
+    monkeypatch.setattr(pcdisk, "HELD_WAIT_S", 30.0)
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    ws = fill(sched)
+    disk = pc.disk = tier(tmp_path)
+    target = pc.entries[0]
+    H = target.nbytes // 2
+    gate = _stuck_write(disk, monkeypatch, H)
+    a_ids = prompts([10], 106)[0]
+    b_ids = ws[0][:30] + prompts([8], 107)[0]
+    a, b = request(a_ids, 30, "a"), request(b_ids, 6, "b")
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+
+    def squeeze(t, s):
+        if t == 3:
+            s.budget = s.reserved + s._reserve(b) + target.nbytes + (64 << 10)
+    try:
+        run(sched, [a, b], arrive={3: [b]}, on_tick=squeeze)
+    finally:
+        gate.set()
+    assert b.disk is None or b.disk.held_since is None          # never waited for the hold
+    assert any("gives up" in m and "id=b" in m for m in caplog.messages)
+    assert disk.drain() and disk.held_bytes() == 0
+
+
+def test_stuck_load_is_abandoned(dense, small, tmp_path, monkeypatch):
+    """Final review #4: a load running past TIMEOUT_S is abandoned: its hold
+    and pin go at once (the loader's buffers stay its own); busy() stays
+    true until the loader returns, then the late result is dropped and
+    nothing is released twice."""
+    import threading
+    import time
+    a, b = turns(260)
+    sched = scheduler(dense)
+    pc = sched.eng._pcache
+    disk = pc.disk = tier(tmp_path)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_GB", TINY)
+    for rid, ids in (("a0", a[0]), ("b", b)):
+        run(sched, [request(ids, 4, rid)])
+        assert disk.drain()
+    gate = threading.Event()
+    slow = pcdisk._read_blob
+
+    def read(*x, **k):
+        gate.wait(30)
+        return slow(*x, **k)
+    monkeypatch.setattr(pcdisk, "_read_blob", read)
+    disk.timeout_s = 0.2
+    d, _ = disk.peek(np.asarray(a[1], np.int32), set(worker._bounds(a[1], IM_START)))
+    job = disk.load(d, pc.entries)
+    assert disk.held_bytes() > 0 and d.pins == 1 and disk.check_loads() == 0
+    time.sleep(0.3)
+    assert disk.check_loads() == 1
+    assert disk.held_bytes() == 0 and d.pins == 0 and disk.busy()
+    assert disk.cancel_loads() == 0 and disk.check_loads() == 0
+    gate.set()
+    assert job.done.wait(10) and disk.drain()
+    assert not disk.busy() and disk.done() == [job]
+    assert disk.finish(job) is None and disk.held_bytes() == 0 and d.pins == 0
+    assert disk.stats()["errors"] == 1
+
+
+def test_state_identity_holds_every_array_weakly(tmp_path):
+    """Final review #6: a state's uid record holds every array weakly and
+    goes when any of them dies (a reused id() can never alias it)."""
+    import gc
+    t = tier(tmp_path)
+    x, y = mx.zeros((4,)), mx.ones((4,))
+    mx.eval(x, y)
+    u = t._st_id([[x, y]])
+    assert t._st_id([[x, y]], assign=False) == u
+    assert t._st_id([[x, mx.ones((4,))]], assign=False) is None
+    del y
+    gc.collect()
+    assert not t._st
+
+
+def test_env_parsed_only_with_the_tier_on(tmp_path):
+    """Final review #6: a bad QWEN_PROMPT_CACHE_DISK_* value never breaks the
+    import; with the tier on it is recorded (Engine.load: tier off, logged)."""
+    import subprocess
+    import sys
+    code = "import pcdisk; print(pcdisk.ENV_ERRORS, pcdisk.GB, pcdisk.MIN_TOKENS)"
+    env = dict(os.environ, QWEN_PROMPT_CACHE_DISK_GB="3O", QWEN_PROMPT_CACHE_DISK_MIN_TOKENS="")
+    env.pop("QWEN_PROMPT_CACHE_DISK", None)
+    cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    off = subprocess.run([sys.executable, "-c", code], env=env, cwd=cwd, capture_output=True,
+                         text=True, check=True).stdout.split()
+    assert off == ["[]", "32.0", "4096"]
+    env["QWEN_PROMPT_CACHE_DISK"] = str(tmp_path)
+    on = subprocess.run([sys.executable, "-c", code], env=env, cwd=cwd, capture_output=True,
+                        text=True, check=True).stdout
+    assert "QWEN_PROMPT_CACHE_DISK_GB='3O'" in on and on.split()[-2:] == ["32.0", "0"]

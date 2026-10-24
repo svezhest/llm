@@ -2915,7 +2915,7 @@ class _Scheduler:
         if rows + pc.charged() > headroom and pc.disk is not None:
             # only the disk tier's held RAM is in the way: gone within ~1 s / GB,
             # a cut answer is not (review: the cut came from a transient)
-            self._disk_room(lambda: rows + pc.charged() <= headroom, row.req.id)
+            self._disk_room(lambda: rows + pc.charged() - headroom, row.req.id)
         if rows + pc.charged() > headroom and sum(not r.done for r in self.rows) > 1:
             log.warning("id=%s ended at %d tokens: the batch's KV would pass its memory "
                         "headroom (%.2f GiB reserved)", row.req.id, row.n, self.reserved / GIB)
@@ -2964,10 +2964,17 @@ class _Scheduler:
                         or live - (held - h) - (pc.bytes - floor) + need + self.prefill_reserve
                         > self.cap)
             floor = pc.bytes_of(keep)
-            if held and not blocked(floor, 0) and self._held_wait(req):
-                # it fits with its hit once the writer released what it holds
-                # (~1 s / GB): wait for that, the KEEP_WAIT clock untouched and
-                # the hit not given up (review: a second's write did that)
+            # a stuck write's hold (pcdisk TIMEOUT_S) may never go: not waited for
+            stuck = pc.disk.stuck_bytes() if held else 0
+            if held > stuck and blocked(floor) and not blocked(floor, stuck) and \
+                    self._held_wait(req):
+                # the tier's hold is what keeps it out (with every other entry
+                # evicted it would not fit beside the hold), and it fits with
+                # its hit once the writer released what it holds (~1 s / GB):
+                # wait for that, the KEEP_WAIT clock untouched and the hit not
+                # given up (review: a second's write did that). When evicting
+                # the others admits it beside the hold, they go now instead
+                # (spilled: it then waits for their own write only)
                 return False
             if keep and blocked(floor) and not blocked(0):
                 # only the entry it would resume from is in the way
@@ -3918,26 +3925,34 @@ class _Scheduler:
             w.held_since = now
         return now - w.held_since <= pcdisk.HELD_WAIT_S
 
-    def _disk_room(self, ok, rid):
-        """`ok()` false only for the disk tier's held RAM (_regrow): the loads
-        not inserted go first (cancelled, dropped: a waiting request goes
+    def _disk_room(self, over, rid):
+        """`over()` (bytes past the headroom) > 0 only for the disk tier's
+        held RAM (_regrow): the offers of this tick not handed to the writer
+        yet go first (pcdisk.revoke: freed now, as spill False; the writer
+        never sees them before the tick's flush, review 2026-10-24 #1), then
+        the loads not inserted (cancelled, dropped: a waiting request goes
         without its hit), then the writer is waited for, at most
         pcdisk.HELD_WAIT_S (the scheduler blocks meanwhile: decode stalls,
-        rarely, against cutting a row's answer); the caller decides after."""
+        rarely, against cutting a row's answer) and only while what the tier
+        can still release covers the shortfall (not a stuck write's hold);
+        the caller decides after."""
         disk = self.eng._pcache.disk
-        if ok() or not disk.held_bytes():
+        if over() <= 0 or not disk.held_bytes():
             return
         t0 = time.time()
-        n = disk.cancel_loads()
-        while True:
+        r, freed = disk.revoke(over())
+        n = disk.cancel_loads() if over() > 0 else 0
+        while over() > 0:
             for job in disk.done():
                 self._disk_take(disk, job)
-            if ok() or not disk.held_bytes() or time.time() - t0 > pcdisk.HELD_WAIT_S:
+            disk.check_loads()                  # a stuck read's hold goes after TIMEOUT_S
+            if over() <= 0 or over() > disk.held_bytes() - disk.stuck_bytes() \
+                    or time.time() - t0 > pcdisk.HELD_WAIT_S:
                 break
             disk.wait(0.05)
         log.info("id=%s waited %.2f s for the prompt cache disk tier's held RAM before growing "
-                 "(%d loads cancelled; %s)", rid, time.time() - t0, n,
-                 "room made" if ok() else "still short")
+                 "(%d unwritten evictions freed, %.1f MB; %d loads cancelled; %s)", rid,
+                 time.time() - t0, r, freed / 1e6, n, "room made" if over() <= 0 else "still short")
 
     def _disk_take(self, disk, job):
         """_disk_insert, never raising: a failure drops that load (unpinned,
@@ -4812,7 +4827,10 @@ class Engine:
                  f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
                  f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
         log.info("cascade attention (QWEN_CASCADE): %s", self.sched.cascade_state())
-        if PROMPT_CACHE and pcdisk.DIR:
+        if PROMPT_CACHE and pcdisk.DIR and pcdisk.ENV_ERRORS:
+            log.error("prompt cache disk: off (QWEN_PROMPT_CACHE_DISK=%s): unparsable %s",
+                      pcdisk.DIR, ", ".join(pcdisk.ENV_ERRORS))
+        elif PROMPT_CACHE and pcdisk.DIR:
             try:
                 disk = pcdisk.DiskTier(pcdisk.DIR, pcdisk.GB * GIB, self._disk_key(),
                                        seg_cls=_Seg, entry_cls=_Entry, keep=pcdisk.KEEP)
