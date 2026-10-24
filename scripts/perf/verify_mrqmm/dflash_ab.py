@@ -10,7 +10,7 @@ globals between requests (the scheduler is idle then):
   off/<blk>    DFlash, knob 0 (today's path: exact qmv <= 8, quantized_matmul above)
   head/<blk>   DFlash, drafter lm_head on mrqmm only (output must stay == off)
   on/<blk>     DFlash, verify blocks 3..16 + drafter lm_head on mrqmm
-  <blk>: ad = adaptive (QWEN_DRAFT_BLOCK=0), 8 / 16 = fixed blocks.
+  <blk>: ad = adaptive (QWEN_DRAFT_BLOCK=0), adN = adaptive with ceiling N, 8 / 16 = fixed.
 
 Phase speed: the 5 coding tasks (scripts/perf/prof/wtest.py TASKS[:5], greedy,
 thinking off, max_tokens 256) x variants x --rounds; per request decode tok/s
@@ -89,8 +89,9 @@ def set_variant(v):
     eng.draft = DRAFT
     W.VERIFY_MR = knob == "on"
     W.VERIFY_MR_HEAD = knob in ("on", "head")
-    W.DRAFT_BLOCK = 0 if blk == "ad" else int(blk)
-    DRAFT.prefer_requested_block_size = blk != "ad"
+    # ad = adaptive up to the drafter's 16; adN = adaptive with ceiling N; N = fixed N
+    W.DRAFT_BLOCK = int(blk[2:] or 0) if blk.startswith("ad") else int(blk)
+    DRAFT.prefer_requested_block_size = not blk.startswith("ad")
 
 
 def request(text, rid):
@@ -196,4 +197,5 @@ if a.json:
         o.pop("tokens", None)
     json.dump(res, open(a.json, "w"), indent=1)
     print("wrote", a.json)
+sys.stdout.flush()
 os._exit(0)          # the scheduler thread never returns (worker.py: MLX stream teardown)

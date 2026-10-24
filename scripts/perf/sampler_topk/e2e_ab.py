@@ -101,9 +101,10 @@ for v, s in summ.items():
     print(f"{v:3s}: step {s['step_ms']:.1f} ms, per-request {s['tps']:.1f} tok/s, aggregate {s['agg']:.1f} tok/s")
 import mlx.core as mx  # noqa: E402
 print(f"peak {mx.get_peak_memory() / 1e9:.2f} GB")
-print(f"step on/off x{summ['on']['step_ms'] / summ['off']['step_ms']:.3f}")
+print(f"step on/off x{summ['on']['step_ms'] / summ['off']['step_ms']:.3f}", flush=True)
 if a.json:
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
     json.dump({"rounds": res, "summary": summ}, open(a.json, "w"), indent=1)
     print("wrote", a.json)
+sys.stdout.flush()
 os._exit(0)

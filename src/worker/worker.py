@@ -561,10 +561,20 @@ class _Sampler:
         return _TopK(z, ids, order, start, extra)
 
     def draw(self, x):
-        self.key, sub = mx.random.split(self.key)
         if isinstance(x, _TopK):
-            return x.draw(sub)
+            return x.pick(self.noise(*x.z.shape[:-1], x.width))
+        self.key, sub = mx.random.split(self.key)
         return mx.random.categorical(x, key=sub)
+
+    def noise(self, rows, width):
+        """The fast path's randomness for `rows` rows: one uniform draw of
+        (rows, width) from the next key (_TopK.pick turns it into Gumbels +
+        the tie bucket's pick). One split + one random op per row: the rest
+        of a group's draw runs once on the stack (sample_rows), since a
+        per-row draw of ~25 small ops cost more host time at B = 16 than the
+        filter saved on the GPU (GPU phase 2026-10-24)."""
+        self.key, sub = mx.random.split(self.key)
+        return mx.random.uniform(shape=(rows, width), key=sub)
 
     def __call__(self, logits):
         if self.greedy:
@@ -576,22 +586,24 @@ class _TopK:
     """_Sampler.survivors of some rows: z (R, k + 1) logits of the k
     candidates `ids` (R, k) + the ties-of-the-k-th bucket, `order` (R, V)
     the sorted vocab, the bucket's tokens = order[start : start + extra].
-    Rows slice like an array (sample_rows draws each row with its own key)."""
+    sample_rows draws a group at once from the rows' own noise (_Sampler.noise)."""
     __slots__ = ("z", "ids", "order", "start", "extra")
 
     def __init__(self, z, ids, order, start, extra):
         self.z, self.ids, self.order, self.start, self.extra = z, ids, order, start, extra
 
-    def __getitem__(self, sl):
-        return _TopK(*(getattr(self, a)[sl] for a in self.__slots__))
+    @property
+    def width(self):
+        return self.z.shape[-1] + 1          # k + 1 Gumbels + the bucket's uniform
 
-    def draw(self, key):
-        """Tokens (R,) uint32, as mx.random.categorical over the full vocab."""
-        kc, ku = mx.random.split(key)
+    def pick(self, u):
+        """Tokens (R,) uint32 from uniforms u (R, width): Gumbel-max over z
+        (as mx.random.categorical), the last column picks inside the bucket."""
         k = self.ids.shape[-1]
-        t = mx.random.categorical(self.z, key=kc)
+        g = -mx.log(-mx.log(mx.maximum(u[..., :k + 1], 1e-30)))
+        t = mx.argmax(self.z + g, axis=-1)
         tok = mx.take_along_axis(self.ids, mx.minimum(t, k - 1)[..., None], axis=-1)[..., 0]
-        u = mx.floor(mx.random.uniform(shape=self.extra.shape, key=ku) * self.extra)
+        u = mx.floor(u[..., k + 1:] * self.extra)
         pos = mx.clip(self.start + mx.minimum(u, self.extra - 1), 0, self.order.shape[-1] - 1)
         tie = mx.take_along_axis(self.order, pos.astype(mx.int32), axis=-1)[..., 0]
         return mx.where(t == k, tie, tok)
@@ -638,6 +650,9 @@ def _sample_group(samplers, logits):
         toks = s0(stack)
         return [toks[j:j + 1] for j in range(len(samplers))]
     x = s0.prepare(stack)
+    if isinstance(x, _TopK):            # one draw for the stack, each row's own noise
+        toks = x.pick(mx.concatenate([s.noise(1, x.width) for s in samplers]))
+        return [toks[j:j + 1] for j in range(len(samplers))]
     return [s.draw(x[j:j + 1]) for j, s in enumerate(samplers)]
 
 

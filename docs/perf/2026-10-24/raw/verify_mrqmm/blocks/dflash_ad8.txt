@@ -1,0 +1,85 @@
+loaded; max_batch 16, verify exact max T 8
+r0 code0 plain    n=256 tps=  33.3 accept=  0.0%
+r0 code0 off/ad   n=256 tps=  40.9 accept= 53.2%
+r0 code0 on/8     n=256 tps=  63.9 accept= 39.7%
+r0 code0 on/ad8   n=256 tps=  59.6 accept= 55.3%
+r0 code0 off/ad8  n=256 tps=  45.5 accept= 54.7%
+r0 code1 off/ad8  n=256 tps=  41.8 accept= 46.4%
+r0 code1 on/ad8   n=256 tps=  51.4 accept= 46.4%
+r0 code1 on/8     n=256 tps=  49.8 accept= 27.7%
+r0 code1 off/ad   n=256 tps=  40.4 accept= 45.0%
+r0 code1 plain    n=256 tps=  36.4 accept=  0.0%
+r0 code2 plain    n=256 tps=  36.5 accept=  0.0%
+r0 code2 off/ad   n=256 tps=  43.3 accept= 49.6%
+r0 code2 on/8     n=256 tps=  69.7 accept= 38.1%
+r0 code2 on/ad8   n=256 tps=  63.2 accept= 52.4%
+r0 code2 off/ad8  n=256 tps=  46.3 accept= 52.4%
+r0 code3 off/ad8  n=256 tps=  50.1 accept= 59.2%
+r0 code3 on/ad8   n=256 tps=  65.4 accept= 59.2%
+r0 code3 on/8     n=256 tps=  69.9 accept= 42.2%
+r0 code3 off/ad   n=256 tps=  49.5 accept= 56.8%
+r0 code3 plain    n=256 tps=  36.9 accept=  0.0%
+r0 code4 plain    n=256 tps=  36.1 accept=  0.0%
+r0 code4 off/ad   n=256 tps=  47.3 accept= 59.2%
+r0 code4 on/8     n=256 tps=  77.9 accept= 47.9%
+r0 code4 on/ad8   n=256 tps=  65.9 accept= 61.1%
+r0 code4 off/ad8  n=256 tps=  50.1 accept= 61.1%
+r1 code0 plain    n=256 tps=  36.8 accept=  0.0%
+r1 code0 off/ad8  n=256 tps=  45.2 accept= 54.7%
+r1 code0 on/ad8   n=256 tps=  61.4 accept= 55.3%
+r1 code0 on/8     n=256 tps=  67.8 accept= 39.7%
+r1 code0 off/ad   n=256 tps=  47.4 accept= 53.2%
+r1 code1 off/ad   n=256 tps=  42.7 accept= 45.0%
+r1 code1 on/8     n=256 tps=  53.6 accept= 27.7%
+r1 code1 on/ad8   n=256 tps=  52.3 accept= 46.4%
+r1 code1 off/ad8  n=256 tps=  42.8 accept= 46.4%
+r1 code1 plain    n=256 tps=  36.5 accept=  0.0%
+r1 code2 plain    n=256 tps=  36.4 accept=  0.0%
+r1 code2 off/ad8  n=256 tps=  44.4 accept= 52.4%
+r1 code2 on/ad8   n=256 tps=  65.5 accept= 52.4%
+r1 code2 on/8     n=256 tps=  63.8 accept= 38.1%
+r1 code2 off/ad   n=256 tps=  44.5 accept= 49.6%
+r1 code3 off/ad   n=256 tps=  49.5 accept= 56.8%
+r1 code3 on/8     n=256 tps=  72.8 accept= 42.2%
+r1 code3 on/ad8   n=256 tps=  61.6 accept= 59.2%
+r1 code3 off/ad8  n=256 tps=  48.2 accept= 59.2%
+r1 code3 plain    n=256 tps=  36.8 accept=  0.0%
+r1 code4 plain    n=256 tps=  35.3 accept=  0.0%
+r1 code4 off/ad8  n=256 tps=  49.0 accept= 61.1%
+r1 code4 on/ad8   n=256 tps=  71.3 accept= 61.1%
+r1 code4 on/8     n=256 tps=  75.1 accept= 47.9%
+r1 code4 off/ad   n=256 tps=  51.0 accept= 59.2%
+r2 code0 on/8     n=256 tps=  70.7 accept= 39.7%
+r2 code0 on/ad8   n=256 tps=  57.5 accept= 55.3%
+r2 code0 off/ad8  n=256 tps=  47.7 accept= 54.7%
+r2 code0 plain    n=256 tps=  34.3 accept=  0.0%
+r2 code0 off/ad   n=256 tps=  40.0 accept= 53.2%
+r2 code1 off/ad   n=256 tps=  35.4 accept= 45.0%
+r2 code1 plain    n=256 tps=  35.1 accept=  0.0%
+r2 code1 off/ad8  n=256 tps=  38.1 accept= 46.4%
+r2 code1 on/ad8   n=256 tps=  52.3 accept= 46.4%
+r2 code1 on/8     n=256 tps=  52.6 accept= 27.7%
+r2 code2 on/8     n=256 tps=  62.2 accept= 38.1%
+r2 code2 on/ad8   n=256 tps=  62.4 accept= 52.4%
+r2 code2 off/ad8  n=256 tps=  46.4 accept= 52.4%
+r2 code2 plain    n=256 tps=  37.0 accept=  0.0%
+r2 code2 off/ad   n=256 tps=  44.0 accept= 49.6%
+r2 code3 off/ad   n=256 tps=  49.2 accept= 56.8%
+r2 code3 plain    n=256 tps=  36.4 accept=  0.0%
+r2 code3 off/ad8  n=256 tps=  42.7 accept= 59.2%
+r2 code3 on/ad8   n=256 tps=  63.9 accept= 59.2%
+r2 code3 on/8     n=256 tps=  67.1 accept= 42.2%
+r2 code4 on/8     n=256 tps=  81.3 accept= 47.9%
+r2 code4 on/ad8   n=256 tps=  68.1 accept= 61.1%
+r2 code4 off/ad8  n=256 tps=  50.4 accept= 61.1%
+r2 code4 plain    n=256 tps=  36.9 accept=  0.0%
+r2 code4 off/ad   n=256 tps=  47.6 accept= 59.2%
+
+== speed: median decode tok/s over rounds x tasks (median of per-task medians) ==
+plain    tps   36.4  per task  34.3  36.4  36.5  36.8  36.1  accept   0.0%  == plain 15/15
+off/ad   tps   44.0  per task  40.9  40.4  44.0  49.5  47.6  accept  53.2%  == plain 15/15
+on/8     tps   67.8  per task  67.8  52.6  63.8  69.9  77.9  accept  39.7%  == plain 15/15
+on/ad8   tps   63.2  per task  59.6  52.3  63.2  63.9  68.1  accept  55.3%  == plain 15/15
+off/ad8  tps   46.3  per task  45.5  41.8  46.3  48.2  50.1  accept  54.7%  == plain 15/15
+peak 11.45 GB
+wrote /tmp/perf/verify_mrqmm/blocks/dflash_ad8.json
