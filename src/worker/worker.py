@@ -2756,6 +2756,9 @@ class _Scheduler:
         # task's slabs, and how many were admitted since the main one's last slab
         self.lane = self.lane_row = None
         self.lane_run = 0
+        # a lane row that joined and has not read its first token yet: decode
+        # runs until it has, before the main prefill's next slab (_lane_first)
+        self.lane_new = None
         self.resume = 0.0               # prefill waits until then (decode's share)
         self.reserved = 0
         self.steps = 0
@@ -2867,7 +2870,7 @@ class _Scheduler:
         for req in left:
             req.out.put(("error", kind, msg))
         self.rows, self.gdn, self.task, self.task_row, self.reserved = [], None, None, None, 0
-        self.lane = self.lane_row = None
+        self.lane = self.lane_row = self.lane_new = None
         self._drop_groups()
         try:
             from mlx_vlm.generate.common import generation_stream
@@ -2904,7 +2907,7 @@ class _Scheduler:
             self._admit()
         t = time.time()
         if ((self.task is not None or self.lane is not None)
-                and (not self.rows or time.time() >= self.resume)):
+                and (not self.rows or time.time() >= self.resume) and not self._lane_first()):
             # prefill's turn: the lane first (a short request beside a running
             # plain prefill; at most PREFILL_LANE_BURST of them in a row)
             if (PREFILL_LANE and self.lane is None and self.waiting and self.task is not None
@@ -2930,6 +2933,22 @@ class _Scheduler:
                 mx.clear_cache()
             self.clear = False
         self._log()
+
+    def _lane_first(self):
+        """True while the row the lane just prefilled waits for its first
+        token: its first decode step computes it and the next one reads it
+        (step-ahead), so with the decode share of a few rows (1 - s: ~3 % of a
+        main slab at B = 1 of 16) the next main slab (seconds at long offsets)
+        would run between the two and hold its first token (GPU gate
+        2026-10-24: short TTFT p50 6.5 s, ~half a slab + a whole one). Two
+        decode steps per lane request; the main prefill's slabs are unchanged."""
+        r = self.lane_new
+        if r is None:
+            return False
+        if r.done or r.n > 0 or not any(r is x for x in self.rows):
+            self.lane_new = None
+            return False
+        return True
 
     def _bytes(self, n):
         """Reservation for a row of n KV tokens."""
@@ -3298,6 +3317,9 @@ class _Scheduler:
 
     def _task_done(self, lane):
         if lane:
+            row = self.lane_row
+            if row is not None and not row.done and any(row is x for x in self.rows):
+                self.lane_new = row                 # (joined: _lane_first)
             self.lane = self.lane_row = None
         else:
             self.task = self.task_row = None

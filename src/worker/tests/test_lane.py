@@ -216,6 +216,35 @@ def test_multi_slab_lane_request_beside_a_cold_prefill(dense, small):
     assert got["t"] == cold(dense, t_ids, 6, "t")
 
 
+
+@pytest.mark.parametrize("share", [1.0, 0.5])
+def test_lane_row_reads_its_first_token_before_the_next_main_slab(dense, small, share):
+    """GPU gate 2026-10-24: a lane row's first token is computed by its first
+    decode step and read by the next one (step-ahead); with decode's share of
+    a few rows the next main slab ran between the two, so every short TTFT
+    carried a whole main slab. Now decode runs until the lane row has read
+    its first token; the main prefill's slabs stay the same."""
+    sched = scheduler(dense, share=share)
+    convs = [conv(10 + 3 * i) for i in range(3)]
+    run(sched, [request(a, 2, f"w{i}") for i, (a, _) in enumerate(convs)])
+    long = request(prompts([120], 3)[0], 5, "long")
+    shorts = [request(b, 6, f"s{i}") for i, (_, b) in enumerate(convs)]
+    lane_ids, late = {r.id for r in shorts}, []
+    main = sched._advance
+
+    def adv():
+        if sched.task_row is not None and sched.task_row.req is long:
+            late.extend(r.req.id for r in sched.rows
+                        if r.req.id in lane_ids and not r.done and r.n == 0)
+        main()
+    sched._advance = adv
+    got = run(sched, [long] + shorts, arrive={2: shorts})
+    assert not late, late
+    assert sched.lane_new is None or sched.lane_new.done
+    assert got["long"] == cold(dense, prompts([120], 3)[0], 5, "long")
+    for i, (_, b) in enumerate(convs):
+        assert got[f"s{i}"] == cold(dense, b, 6, f"s{i}"), i
+
 # --- review 2026-10-24 (repros: the lane's admission must not cost others their hits) ---
 @pytest.mark.parametrize("lane", [0, 16])
 def test_lane_overtake_keeps_the_heads_hit(dense, small, monkeypatch, lane):
