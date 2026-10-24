@@ -12,7 +12,10 @@ An eviction used to be a deletion. Now an evicted entry is written to the SSD. A
 whose deepest hit is on disk gets that entry loaded back while it waits. Its lookup then resumes
 from it exactly as from a RAM entry.
 
-CPU-only work so far. Nothing has been measured on the GPU. The GPU plan is at the end.
+GPU gate done on 2026-10-24 (see "GPU results" at the end): AppWorld replay at
+`QWEN_PROMPT_CACHE_GB=3`, 8 episodes, req/min ×2.3 (10.3 / 10.4 → 23.4 / 24.5 in two interleaved
+pairs), after one fix found by the gate (a loaded entry was evicted again before its request's
+turn).
 
 ## What was done
 
@@ -234,6 +237,14 @@ pcdisk.json     {format, key}
     reserved (what a store may take), and live + that + prefill reserve ≤ cap (`_fits`'s live
     check).
   - One load at a time (`busy()`): the SSD is the bottleneck.
+  - **Room beside the requests ahead** (GPU gate fix): a request that is not first in line
+    (the admitted request whose prefill has not started counts as ahead) loads only when its
+    `need` fits under `QWEN_PROMPT_CACHE_GB` beside the RAM entries the requests ahead of it
+    resume from. Otherwise their stores before its turn evict it again.
+  - **Reload**: a request whose loaded entry was kept and then left the RAM cache before its
+    turn loads it again when the peek finds it on disk (written back: its blobs are shared, so
+    the write costs ~0.1 MB). At most `pcdisk.MAX_LOADS` (3) loads per request, and never after
+    a failed load or one that was not kept. The log says `…, load N` from the 2nd on.
 - **The loader thread** reads each array of a blob into numpy (`readinto`, GIL released) and
   turns it into `mx.array(numpy)` at once, before reading the next one (`_read_blob(each=…)`).
   The result is constant arrays: allocation + memcpy, no graph, no stream, the same as the
@@ -250,6 +261,11 @@ pcdisk.json     {format, key}
      parent spared.
   3. `pc.version` bumps, so every peek memo (`req.peeked`) is recomputed. The head's `_fits`
      keeps the entry (≥ a slab deep), and `_wanted` protects it.
+  4. **Wanted order with the tier** (GPU gate fix): `victim` evicts the wanted entries in
+     reverse queue order (`_wanted` lists them in queue order), the one whose request comes
+     last first. Before, it was MRU among wanted ones. A just-inserted entry has `used` = now,
+     so it was the first wanted victim at the next store ahead of its request, and 21 of 57
+     loads in the first "on" run went for nothing. The order without the tier is unchanged.
 
   The lookup in `_prompt_cache` is unchanged: it finds the entry as any RAM entry. A load whose
   request was admitted or cancelled meanwhile is dropped, at the next tick or at the idle pass.
@@ -496,6 +512,147 @@ the main tree's venv python. Never `uv`.
   written" log lines against the writes.
 - Disk space: ≤ `QWEN_PROMPT_CACHE_DISK_GB` (32), deleted at the end of each run. 179 GB free on
   2026-10-24.
+
+## GPU results (2026-10-24)
+
+M1 Max 32 GB, Ornith-1.5 9B 8-bit, the worker of this worktree, the main tree's venv. Raw files:
+`../raw/pcdisk/`. Summary: `../raw/pcdisk/summary.md`. The cache files went to the session's
+scratchpad (`PCDISK_DIR`, new in the scripts) and were deleted after each run. The gateway on
+:8090 was already running with the scripts' settings and was reused.
+
+**Verdict: PASS on 5 of 6 replay criteria plus io_bench and exactness. Criterion 4 (peak) fails
+as written, but the extra peak comes from the load, not the tier.** That took one worker fix
+(below). The first "on" run (`on_a_v1`) used the code before the fix: it got +25 % req/min, and
+21 of its 57 loads went for nothing.
+
+### 1. io_bench: PASS
+
+Medians of 3 interleaved rounds. `F_NOCACHE` on.
+
+| entry | flush ms | write | read | finish ms | bit-exact |
+|---|---|---|---|---|---|
+| 1.0 GB | 0.9 | 0.16 s (6.1 GB/s) | 411 ms (2.4 GB/s) | 0.4 | 3/3 |
+| 2.5 GB | 1.7 | 0.41 s (6.1 GB/s) | 683 ms (3.7 GB/s) | 0.7 | 3/3 |
+
+- Every number beats the bounds: flush < 20 ms, finish < 50 ms, a 2.5 GB read < 2 s.
+- The SSD writes about twice as fast as expected.
+- `peak_gb` (1.95 / 5.79) is the benchmark's own entry build: the fp32 `normal` → fp16 cast. A
+  separate probe shows the load adds exactly the entry (0.998 GB for 1 GB) and the tier holds
+  nothing after the write.
+- Script fix: `io_bench` called `_unlink`, which the review had renamed to `_unlink_locked`.
+
+### 2. Exactness on the real 9B: PASS (3/3, before and after the fix)
+
+| pair | prompt | resumed at | tf `==` cold | 64 greedy tokens `==` | disk loads | tf hit / cold s | gen hit / cold s |
+|---|---|---|---|---|---|---|---|
+| 0 | 15622 | 15401 | yes | yes | 1 + 1 | 1.3 / 35.9 | 2.6 / 31.2 |
+| 1 | 67947 | 67940 | yes | yes | 1 + 1 | 1.3 / 198.7 | 2.8 / 169.0 |
+| 2 | 25668 | 25661 | yes | yes | 1 + 1 | 0.7 / 58.8 | 2.0 / 51.5 |
+
+- Writes took 0.15–0.45 s. Loads took 258–754 ms for 0.69–2.5 GB.
+- Peak was 18.9 GB, from the cold 68K prefill. The plan expected 6–30K prompts, but pair 1's
+  last call is 68K.
+- The scored teacher-forced positions start right after the resume point, so the `==` covers
+  only the last 7–221 tokens of each prompt. The 64-token generation covers the rest.
+- Rerun on the fixed code (commit `c09ef8d`): again 3/3, the same resume points, one disk load per hit, peak 18.9 GB (`exact.txt`; the first run is `exact_v1.txt`).
+
+### 3. AppWorld replay: req/min ×2.3
+
+Settings: `QWEN_PROMPT_CACHE_GB=3`, 8 episodes × 10 min, order
+`off_a, on_a_v1 | off_b, on_b, off_c, on_c`.
+
+- `on_a_v1` ran before the fix. The worker was then fixed (commit `c09ef8d`), and the pairs
+  `(off_b, on_b)` and `(off_c, on_c)` ran interleaved on the fixed code.
+- The off path is unchanged by the fix: the new victim order applies only with the tier.
+
+| | off_a | on_a_v1 | off_b | **on_b** | off_c | **on_c** |
+|---|---|---|---|---|---|---|
+| requests/min | 10.3 | 12.9 | 10.3 | **23.4** | 10.4 | **24.5** |
+| MISS share (`disk_log`) | 38.1 % | 23.0 % | 34.5 % | **7.0 %** | 36.8 % | **7.1 %** |
+| disk hits (share) | – | 36 (25.9 %) | – | 137 (56.1 %) | – | 148 (58.0 %) |
+| loaded, then resumed from nothing | – | 21 | – | 3 | – | 3 |
+| reloads (`load 2/3`) | – | – | – | 20 | – | 19 |
+| MISS TTFT p50 / p90 s | 14.5 / 22.5 | 21.9 / 26.0 | 15.8 / 26.3 | 9.1 / 36.4 | 16.6 / 22.3 | 10.8 / 34.3 |
+| disk-hit TTFT p50 / p90 s | – | 1.5 / 6.5 | – | 1.5 / 4.7 | – | 1.5 / 5.1 |
+| RAM-hit TTFT p50 / p90 s | 1.2 / 4.5 | 0.7 / 4.5 | 1.2 / 4.6 | 0.8 / 5.2 | 1.1 / 4.5 | 1.1 / 4.6 |
+| queue mean / p90 s | 24.9 / 55.6 | 22.1 / 85.1 | 25.2 / 60.5 | 7.3 / 20.0 | 26.5 / 62.9 | 6.9 / 20.2 |
+| client latency p50 / p90 s | 38.4 / 85.4 | 15.5 / 127.1 | 35.8 / 100.4 | 15.0 / 41.0 | 36.8 / 92.9 | 14.1 / 34.9 |
+| mean reused tokens | 3927 | 5285 | 4145 | 9668 | 4120 | 9580 |
+| sched prefill / decode % | 87 / 9 | 86 / 10 | 87 / 9 | 78 / 16 | 87 / 9 | 79 / 16 |
+| mean rows | 2.52 | 2.38 | 2.48 | 4.16 | 2.60 | 4.32 |
+| writes: n, GB, writer s (p50 per entry) | – | 63, 26.6, 6.8 (0.09) | – | 148, 25.5, 7.3 (0.04) | – | 161, 27.4, 7.9 (0.04) |
+| loads: n, GB, p50 / max ms | – | 57, 34.2, 281 / 684 | – | 140, 92.2, 322 / 749 | – | 151, 97.6, 319 / 593 |
+| on disk max | – | 10 entries, 6.7 GiB | – | 13, 7.8 GiB | – | 12, 8.1 GiB |
+| worker peak GB | 16.75 | 17.37 | 16.10 | 19.43 | 16.31 | 19.74 |
+| swap used GB max | 3.7 | 3.7 | 3.7 | 3.6 | 3.6 | 3.6 |
+| worker CMPRS GB max | 0 | 0 | 0 | 0.34 | 0 | 0.39 |
+| warm 8K probe TTFT s | 14.4 | 15.4 | 15.3 | 15.6 | 15.4 | 15.6 |
+
+Criteria, pairs b and c:
+
+1. **req/min, on > off in both pairs, mean ≥ +10 %: PASS.** +127 % and +136 %. With few MISSes,
+   prefill drops from 87 % to 78 % of the scheduler's time, twice as many rows decode together,
+   and the queue wait falls from ~25 s to ~7 s.
+2. **MISS share, on < off in both pairs: PASS.** 34.5 → 7.0 % and 36.8 → 7.1 %. The MISSes left
+   are mostly the first calls of new tasks: of 15–16 replay MISSes per run, 8 are turn 1, plus
+   the probe's 2 requests. The rest include the 3 wasted loads (below).
+3. **No write or load failures, no request errors: PASS.** 0 failed writes, 0 failed loads,
+   0 "not written", 0 dropped, 0 "not kept", 0 request errors.
+4. **Peak ≤ off + 1 GB: FAIL as written (+3.3 / +3.4 GB). Swap ≤ off + 1 GB: PASS** (3.6 vs
+   3.7 GB, flat).
+   - The extra peak is the rows' KV. Over every `batch:` line, active − reserved − pcache (the
+     weights plus whatever the tier holds plus transients) peaks at 9.52–9.54 GiB with the tier
+     and 9.17 GiB without it, i.e. the tier adds ≤ 0.4 GB.
+   - `reserved` peaks at 5.1–5.4 GiB with the tier and 2.2–2.6 GiB without it. At twice the
+     throughput the episodes get twice as far in 10 minutes: disk hits average 12.4–12.8K
+     tokens, the off prompts ~7K. Mean rows rise too (4.2–4.3 vs 2.5).
+   - The cost is real for a 32 GB machine all the same. The compressor reached 1.9 GB (off:
+     1.4), and the worker had 0.34–0.39 GB compressed (off: 0).
+5. **Load p50 < 1.5 s: PASS.** 322 / 319 ms. The max is 749 ms.
+6. **Warm probes within ±15 %: PASS.** 8K TTFT 14.4–15.6 s across all six runs (±4 %).
+
+**The fix the gate found** (commit `c09ef8d`; tests `test_victim_wanted_in_queue_order_with_the_tier`,
+`test_no_load_that_the_requests_ahead_would_evict`,
+`test_reload_when_the_loaded_entry_left_before_its_turn`):
+
+- **The bug.** In `on_a_v1`, 21 of 57 loads were wasted. The entry was loaded and inserted for
+  a request 3rd to 6th in line, then evicted at the next store ahead of it, so the request
+  prefilled cold anyway.
+- **Why.** `pc.insert` sets `used` = now. When every entry is wanted (8 episodes vs ~4 entries
+  in 3 GB), `victim` evicted the MRU wanted entry, which was the one just loaded.
+- **The fix** has three parts:
+  1. with the tier, wanted entries go in reverse queue order;
+  2. a request that is not first loads only when it fits under the soft cap beside the
+     entries of the requests ahead;
+  3. a request can reload, up to 3 loads, when its kept entry left RAM before its turn.
+- **After the fix**, 3 wasted loads per run remain. Each is a request that used all 3 loads,
+  with loads 2 and 3 0.25–0.5 s apart. Two neighbours in the queue (e.g. `e1-28` / `e5-28`)
+  loaded and evicted each other in turn. An open refinement: don't let a reload for a request
+  further back evict the entry of a request ahead of it.
+- The loads went from 57 to ~145 per run (92–98 GB read in 10 min, ~150 MB/s on average). The
+  SSD has room for that.
+
+Also fixed in the scripts:
+
+- `disk_log.py` counted a request that had an entry loaded but resumed from nothing as a disk
+  hit. Such a request is now a MISS and is counted in "loaded for but resumed from nothing". The
+  plan's run_all summary for `on_a` (before both fixes) would have read MISS 7.9 %; the true
+  value was 23 %.
+- Script bugs fixed on the way: `io_bench` (`_unlink_locked`), the `PCDISK_DIR` override for the
+  cache files.
+
+**Recommendation.** Turn the tier on for AppWorld-type agentic load with
+`QWEN_PROMPT_CACHE_GB=3`, as measured (`QWEN_PROMPT_CACHE_DISK=<dir on the internal SSD>`, other
+disk knobs at their defaults).
+
+- **Why 3 GB.** A small RAM cache plus the disk beats a big RAM cache. The 3 GB leave room for
+  the extra rows that the higher throughput brings: peak 19.7 GB against a 28 GB cap.
+- **6 GB** (the 17.10 setting) is not measured with the tier. It would add ~3 GB of RAM to a
+  peak that has already grown with the rows, for at most a few % fewer loads.
+- **Before 8+ processes or long-tail histories (27–58K)**, rerun the replay at that load and
+  watch CMPRS and swap. Each such entry is 1.5–2.5 GB, so the write queue cap (`QUEUE_GB`=4)
+  and the head's wait for the writer matter there. This gate did not exercise them: entries
+  were 0.4–1.1 GB.
 
 ## Left open
 

@@ -1,0 +1,7 @@
+requests 113 (loaded for but resumed from nothing, in miss: 0)
+miss: n=43 (38.1 %), ttft p50/p90 14.5/22.5 s, arrival->first token p50/p90 34.0/78.2 s, prompt 7273, prefilled 7273 tok/request
+ram: n=70 (61.9 %), ttft p50/p90 1.2/4.5 s, arrival->first token p50/p90 20.3/56.7 s, prompt 6705, prefilled 477 tok/request
+disk: 0
+MISS >= 10K tokens: n=6 ttft p50 25.1 s, max 26.9 s at 12658 tokens
+disk: 0 writes, 0 MB in 0.0 s (p50 0.00 s per entry), 0 not written, 0 failed; 0 loads, 0 MB, p50 0 ms (max 0), 0 failed, 0 dropped, 0 not kept; max 0 entries / 0.00 GiB on disk
+peak max 16.75 GB

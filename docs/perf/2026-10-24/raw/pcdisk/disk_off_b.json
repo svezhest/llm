@@ -1,0 +1,42 @@
+{
+ "requests": 113,
+ "loaded_unused": 0,
+ "miss": {
+  "n": 39,
+  "share": 0.34513274336283184,
+  "ttft_p50": 15.771,
+  "ttft_p90": 26.314,
+  "arrival_to_first_p50": 34.467,
+  "arrival_to_first_p90": 95.339,
+  "prefilled_mean": 7456.692307692308,
+  "prompt_mean": 7456.692307692308
+ },
+ "ram": {
+  "n": 74,
+  "share": 0.6548672566371682,
+  "ttft_p50": 1.164,
+  "ttft_p90": 4.648,
+  "arrival_to_first_p50": 17.278,
+  "arrival_to_first_p90": 58.982,
+  "prefilled_mean": 469.55405405405406,
+  "prompt_mean": 6687.216216216216
+ },
+ "disk": {
+  "writes": 0,
+  "write_mb": 0,
+  "write_s": 0,
+  "write_s_p50": 0,
+  "loads": 0,
+  "load_mb": 0,
+  "load_ms_p50": 0,
+  "load_ms_max": 0,
+  "not_written": 0,
+  "write_failed": 0,
+  "load_failed": 0,
+  "dropped": 0,
+  "not_kept": 0,
+  "on_disk_max": 0,
+  "entries_max": 0
+ },
+ "peak_max": 16.1
+}

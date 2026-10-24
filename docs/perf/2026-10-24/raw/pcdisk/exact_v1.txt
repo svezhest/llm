@@ -1,0 +1,24 @@
+{"pair": 0, "prompt_tokens": 15622, "tf_cached": 15401, "tf_first_scored": 15402, "tf_equal": true, "tf_disk_load": 1, "gen_cached": 15401, "gen_equal": true, "gen_disk_load": 1, "t": {"tf_hit": 1.2952969074249268, "tf_cold": 35.9482102394104, "gen_hit": 2.6275148391723633, "gen_cold": 31.248172998428345}}
+{"pair": 1, "prompt_tokens": 67947, "tf_cached": 67940, "tf_first_scored": 67941, "tf_equal": true, "tf_disk_load": 1, "gen_cached": 67940, "gen_equal": true, "gen_disk_load": 1, "t": {"tf_hit": 1.2719290256500244, "tf_cold": 198.66259789466858, "gen_hit": 2.7549991607666016, "gen_cold": 169.0000958442688}}
+{"pair": 2, "prompt_tokens": 25668, "tf_cached": 25661, "tf_first_scored": 25662, "tf_equal": true, "tf_disk_load": 1, "gen_cached": 25661, "gen_equal": true, "gen_disk_load": 1, "t": {"tf_hit": 0.741466760635376, "tf_cold": 58.75837516784668, "gen_hit": 1.984692096710205, "gen_cold": 51.54500198364258}}
+3 pairs, 0 failed
+2026-10-24 05:22:59,628 INFO  qwen.worker id=chatcmpl-0a25d92b23154913bf4350e59de7d685 prompt cache disk: loading an entry of 67946 tokens (2535.6 MB to read) for a 67940-token hit (0 in RAM)
+2026-10-24 05:23:00,319 INFO  qwen.worker id=chatcmpl-0a25d92b23154913bf4350e59de7d685 prompt cache disk: entry of 67946 tokens loaded (2535.5 MB read in 690 ms; 1 entries, 2535.5 MB total)
+2026-10-24 05:23:00,927 INFO  qwen.worker prompt cache disk: wrote an entry of 9951 tokens (686.8 MB new, 0 blobs shared) in 0.25 s; 5 entries, 5.67 GiB on disk
+2026-10-24 05:26:19,448 INFO  qwen.worker id=chatcmpl-6cc51b91c4f747efbb3988b46c6a99bd prompt cache disk: loading an entry of 9951 tokens (686.7 MB to read) for a 9951-token hit (0 in RAM)
+2026-10-24 05:26:19,707 INFO  qwen.worker id=chatcmpl-6cc51b91c4f747efbb3988b46c6a99bd prompt cache disk: entry of 9951 tokens loaded (686.7 MB read in 258 ms; 1 entries, 686.7 MB total)
+2026-10-24 05:26:20,171 INFO  qwen.worker prompt cache disk: wrote an entry of 67946 tokens (2535.8 MB new, 0 blobs shared) in 0.45 s; 5 entries, 5.67 GiB on disk
+2026-10-24 05:26:22,946 INFO  qwen.worker id=chatcmpl-a882755eb870444c9e11b05fcebbd495 prompt cache disk: loading an entry of 67946 tokens (2535.6 MB to read) for a 67940-token hit (0 in RAM)
+2026-10-24 05:26:23,702 INFO  qwen.worker id=chatcmpl-a882755eb870444c9e11b05fcebbd495 prompt cache disk: entry of 67946 tokens loaded (2535.5 MB read in 754 ms; 1 entries, 2535.5 MB total)
+2026-10-24 05:26:24,148 INFO  qwen.worker prompt cache disk: wrote an entry of 9951 tokens (0.0 MB new, 6 blobs shared) in 0.00 s; 5 entries, 5.58 GiB on disk
+2026-10-24 05:30:05,479 INFO  qwen.worker prompt cache disk: wrote an entry of 67953 tokens (2536.1 MB new, 0 blobs shared) in 0.44 s; 6 entries, 7.94 GiB on disk
+2026-10-24 05:30:55,840 INFO  qwen.worker prompt cache disk: wrote an entry of 25667 tokens (1150.3 MB new, 0 blobs shared) in 0.22 s; 7 entries, 9.01 GiB on disk
+2026-10-24 05:30:58,786 INFO  qwen.worker id=chatcmpl-49e493f08f6647d7b0f7b80c24f199af prompt cache disk: loading an entry of 25667 tokens (1150.2 MB to read) for a 25661-token hit (0 in RAM)
+2026-10-24 05:30:59,123 INFO  qwen.worker id=chatcmpl-49e493f08f6647d7b0f7b80c24f199af prompt cache disk: entry of 25667 tokens loaded (1150.1 MB read in 336 ms; 1 entries, 1150.1 MB total)
+2026-10-24 05:30:59,645 INFO  qwen.worker prompt cache disk: wrote an entry of 25597 tokens (1096.5 MB new, 0 blobs shared) in 0.23 s; 8 entries, 10.03 GiB on disk
+2026-10-24 05:31:58,277 INFO  qwen.worker id=chatcmpl-465007654ed146428243401a1ffb6623 prompt cache disk: loading an entry of 25597 tokens (1096.4 MB to read) for a 25597-token hit (0 in RAM)
+2026-10-24 05:31:58,608 INFO  qwen.worker id=chatcmpl-465007654ed146428243401a1ffb6623 prompt cache disk: entry of 25597 tokens loaded (1096.3 MB read in 330 ms; 1 entries, 1096.3 MB total)
+2026-10-24 05:31:58,847 INFO  qwen.worker prompt cache disk: wrote an entry of 25667 tokens (1150.3 MB new, 0 blobs shared) in 0.21 s; 8 entries, 10.03 GiB on disk
+2026-10-24 05:32:01,778 INFO  qwen.worker id=chatcmpl-0a954e79581949ada726f7153ff1a895 prompt cache disk: loading an entry of 25667 tokens (1150.2 MB to read) for a 25661-token hit (0 in RAM)
+2026-10-24 05:32:02,157 INFO  qwen.worker id=chatcmpl-0a954e79581949ada726f7153ff1a895 prompt cache disk: entry of 25667 tokens loaded (1150.1 MB read in 378 ms; 1 entries, 1150.1 MB total)
+2026-10-24 05:32:02,531 INFO  qwen.worker prompt cache disk: wrote an entry of 25597 tokens (0.1 MB new, 6 blobs shared) in 0.00 s; 8 entries, 10.03 GiB on disk
