@@ -8,7 +8,16 @@ worker.sample_rows at the real vocabulary (grouped draw == solo per row).
 Needs Metal (skipped otherwise; conftest makes the CPU the default device,
 these tests switch to the GPU and back).
 
-Real 9B weights (slow, optional): MRQMM_REAL_WEIGHTS=1 pytest tests/test_mrqmm.py
+The 5-bit kernel (QWEN_MRQMM5, the 27B): the same checks on 5-bit weights,
+the unpack of every k position exactly (one-hot x on unit scales), rows
+independent of the row count and of their neighbours, the knob (off: 5-bit
+modules untouched), a tiny 5-bit model's decode step and the worker's fused
+GDN in-projection. The CPU part (dispatch, pinned 8-bit source) is
+tests/test_mrqmm_bits.py.
+
+Real weights (slow, optional): MRQMM_REAL_WEIGHTS=1 pytest tests/test_mrqmm.py
+(9B: weights/ornith15-9b-mlx-8bit; 27B: weights/qwen38-27b-mlx-5bit or
+MRQMM_WEIGHTS_27B=<dir>)
 """
 import json
 import math
@@ -23,6 +32,8 @@ import mrqmm
 pytestmark = pytest.mark.skipif(not mx.metal.is_available(), reason="needs Metal")
 
 W9B = os.path.join(os.path.dirname(__file__), "..", "..", "..", "weights", "ornith15-9b-mlx-8bit")
+W27B = os.environ.get("MRQMM_WEIGHTS_27B") or os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "weights", "qwen38-27b-mlx-5bit")
 
 
 @pytest.fixture(autouse=True)
@@ -35,8 +46,10 @@ def gpu():
 
 @pytest.fixture(autouse=True)
 def narrow(monkeypatch):
-    """The test layers are tiny: let install() take N >= 8 (default MIN_N 512)."""
+    """The test layers are tiny: let install() take N >= 8 (default MIN_N 512).
+    QWEN_MRQMM5 is off unless a test sets it."""
     monkeypatch.setattr(mrqmm, "MIN_N", 8)
+    monkeypatch.delenv("QWEN_MRQMM5", raising=False)
 
 
 def qweights(N, K, seed=0, outlier_rows=0, bits=8, dtype=mx.float16):
@@ -48,8 +61,8 @@ def qweights(N, K, seed=0, outlier_rows=0, bits=8, dtype=mx.float16):
     return wq, s.astype(dtype), b.astype(dtype)
 
 
-def ref32(x, w, s, b):
-    deq = mx.dequantize(w, s.astype(mx.float32), b.astype(mx.float32), group_size=64, bits=8)
+def ref32(x, w, s, b, bits=8):
+    deq = mx.dequantize(w, s.astype(mx.float32), b.astype(mx.float32), group_size=64, bits=bits)
     return x.astype(mx.float32) @ deq.T
 
 
@@ -57,11 +70,11 @@ def qmm(x, w, s, b, bits=8):
     return mx.quantized_matmul(x, w, s, b, transpose=True, group_size=64, bits=bits)
 
 
-def check_close(y, x, w, s, b):
+def check_close(y, x, w, s, b, bits=8):
     """Within fp16 output rounding of the fp32 reference, and no worse than
     quantized_matmul itself (+ one fp16 ulp)."""
-    ref = ref32(x, w, s, b)
-    q = qmm(x, w, s, b).astype(mx.float32)
+    ref = ref32(x, w, s, b, bits)
+    q = qmm(x, w, s, b, bits).astype(mx.float32)
     y = y.astype(mx.float32)
     assert y.shape == ref.shape
     assert mx.isfinite(y).all().item()
@@ -367,3 +380,254 @@ def test_sample_rows_full_vocab_stack_equals_solo(dtype):
             want = [solo[i](xs[i]).tolist() for i in range(B)]
             got = [y.tolist() for y in worker.sample_rows(grouped, xs)]
             assert got == want, (c, step)
+
+
+# --- 5 bits (QWEN_MRQMM5) -----------------------------------------------------
+
+SHAPES5 = [(128, 64), (256, 200), (640, 1032), (5120, 1024), (2048, 8)]
+
+
+@pytest.mark.parametrize("K,N", SHAPES5)
+@pytest.mark.parametrize("M", [1, 2, 3, 5, 8, 9, 13, 16])
+def test_kernel5_matches_reference(K, N, M):
+    w, s, b = qweights(N, K, seed=K + N, bits=5)
+    assert w.shape == (N, K * 5 // 32)
+    x = (mx.random.normal((M, 1, K)) * 0.5).astype(mx.float16)
+    check_close(mrqmm.mrqmm(x, w, s, b), x, w, s, b, bits=5)
+
+
+@pytest.mark.parametrize("N", [64, 200])
+def test_kernel5_unpacks_every_k(N):
+    """Unit scales, zero biases, one-hot x rows: y[m, n] is the 5-bit weight
+    of (n, k_m) itself, exactly, for every k of a 192-wide row (3 groups: KS
+    does not divide them) and every row slot of both buckets."""
+    K = 192
+    w, s, b = qweights(N, K, seed=N, bits=5)
+    one, zero = mx.ones_like(s), mx.zeros_like(b)
+    q = mx.dequantize(w, one.astype(mx.float32), zero.astype(mx.float32), group_size=64, bits=5)
+    assert q.min().item() == 0 and q.max().item() == 31
+    for M in (8, 16, 5):
+        for k0 in range(0, K, M):
+            ks = [(k0 + i) % K for i in range(M)]
+            x = mx.zeros((M, 1, K), mx.float16)
+            for m, k in enumerate(ks):
+                x[m, 0, k] = 1.0
+            y = mrqmm.mrqmm(x, w, one, zero).reshape(M, N)
+            assert mx.array_equal(y.astype(mx.float32), q[:, ks].T).item(), (M, k0)
+
+
+@pytest.mark.parametrize("cfg", [(1, 1), (2, 2), (4, 4), (2, 8), (4, 8), (1, 8)])
+@pytest.mark.parametrize("M", [3, 8, 9, 16])
+def test_kernel5_every_config_with_tails(cfg, M):
+    K, N = 640, 200
+    w, s, b = qweights(N, K, seed=3, bits=5)
+    x = (mx.random.normal((M, 1, K))).astype(mx.float16)
+    check_close(mrqmm.mrqmm(x, w, s, b, cfg=cfg), x, w, s, b, bits=5)
+
+
+@pytest.mark.parametrize("M", [3, 7, 16])
+def test_kernel5_outliers(M):
+    K, N = 1024, 512
+    w, s, b = qweights(N, K, seed=5, outlier_rows=4, bits=5)
+    x = mx.random.normal((M, 1, K))
+    x[..., ::97] = x[..., ::97] * 40.0
+    x[0, 0, :8] = 200.0
+    x = x.astype(mx.float16)
+    check_close(mrqmm.mrqmm(x, w, s, b), x, w, s, b, bits=5)
+
+
+@pytest.mark.parametrize("K,N", [(5120, 4096), (640, 200)])
+def test_kernel5_rows_do_not_depend_on_the_batch(K, N):
+    """A row's bits are the same at every row count 1..16 (both row buckets
+    split K over the same KS at 5 bits, mrqmm._config) and whatever the other
+    rows hold."""
+    w, s, b = qweights(N, K, seed=11, bits=5)
+    X = mx.random.normal((16, 1, K)).astype(mx.float16)
+    Z = mx.random.normal((16, 1, K)).astype(mx.float16)
+    assert mrqmm._config(K, N, 1, 5)[1] == mrqmm._config(K, N, 2, 5)[1]
+    for rows in ((1, 2, 3, 4, 6, 8, 9, 12, 16),):
+        base = mrqmm.mrqmm(X[:rows[-1]], w, s, b)
+        for M in rows:
+            if M < 3:
+                assert mx.array_equal(mrqmm.mrqmm(X[:M], w, s, b), base[:M]).item(), M
+                continue
+            y = mrqmm.mrqmm(X[:M], w, s, b)
+            assert mx.array_equal(y, base[:M]).item(), M
+            y2 = mrqmm.mrqmm(mx.concatenate([Z[:1], X[1:2], Z[2:M]]), w, s, b)
+            assert mx.array_equal(y2[1], base[1]).item(), M
+
+
+@pytest.mark.parametrize("M", list(range(1, 18)))
+def test_dispatch_boundaries5(M, monkeypatch):
+    K, N = 256, 128
+    lin = make_linear(K, N, bits=5)
+    x = mx.random.normal((M, 1, K)).astype(mx.float16)
+    before = lin(x)
+    assert mrqmm.install(Holder(l=lin), warmup=False) == 0          # knob off: untouched
+    assert type(lin) is nn.QuantizedLinear
+    monkeypatch.setenv("QWEN_MRQMM5", "1")
+    assert mrqmm.install(Holder(l=lin), warmup=False) == 1
+    assert type(lin) is mrqmm.MRQuantizedLinear
+    after = lin(x)
+    if 3 <= M <= 16:
+        assert mx.array_equal(after, mrqmm.mrqmm(x, lin.weight, lin.scales, lin.biases)).item()
+        check_close(after, x, lin.weight, lin.scales, lin.biases, bits=5)
+    else:   # M <= 2 (bit-identical to solo) and M > 16: quantized_matmul untouched
+        assert mx.array_equal(after, before).item()
+    xs = mx.random.normal((1, M, K)).astype(mx.float16)
+    assert mx.array_equal(lin(xs), qmm(xs, lin.weight, lin.scales, lin.biases, bits=5)).item()
+    mrqmm.uninstall(Holder(l=lin))
+    assert type(lin) is nn.QuantizedLinear
+
+
+def test_install5_knob_and_invariant(monkeypatch):
+    def holder():
+        return Holder(a=make_linear(256, 64), c=make_linear(256, 64, bits=5),
+                      f=make_linear(256, 64, bits=5, dtype=mx.bfloat16), b=make_linear(256, 64, bits=4))
+    monkeypatch.setenv("QWEN_MRQMM5", "1")
+    m = holder()
+    assert mrqmm.install(m, warmup=True) == 2
+    assert type(m.a) is type(m.c) is mrqmm.MRQuantizedLinear
+    assert type(m.f) is type(m.b) is nn.QuantizedLinear
+    assert {k[5] for k in mrqmm._KERNELS if k[:2] == (256, 64)} == {8, 5}      # warmed per bit width
+    mrqmm.set_invariant(True)
+    try:
+        m = holder()
+        assert mrqmm.install(m, warmup=False) == 1 and type(m.c) is nn.QuantizedLinear
+    finally:
+        mrqmm.set_invariant(False)
+        mrqmm.uninstall(m)
+
+
+@pytest.mark.parametrize("B", [2, 5, 16])
+def test_tiny_model_decode_step5(B, monkeypatch):
+    lm = tiny_lm(wbits=5)
+    ids = mx.random.randint(0, 512, (B, 1))
+    ref = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+    assert mrqmm.install(lm) == 0
+    monkeypatch.setenv("QWEN_MRQMM5", "1")
+    assert mrqmm.install(lm) > 0
+    calls = []
+    orig = mrqmm.mrqmm
+    mrqmm.mrqmm = lambda x, w, *a, **k: calls.append((x.shape[-1], w.shape)) or orig(x, w, *a, **k)
+    try:
+        y = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+    finally:
+        mrqmm.mrqmm = orig
+        mrqmm.uninstall(lm)
+    if B < 3:
+        assert not calls and mx.array_equal(y, ref).item()
+    else:
+        assert len(calls) == 3 * (4 + 1) + 4 + 4 * 3 + 1, calls
+        assert all(mrqmm._bits_of(K, ws[1]) == 5 for K, ws in calls)
+        assert mx.abs(y - ref).max().item() <= 3e-2 * max(1.0, mx.abs(ref).max().item())
+        assert (y.argmax(-1) == ref.argmax(-1)).all().item()
+
+
+@pytest.mark.parametrize("B", [1, 2, 5, 16])
+def test_worker_gdn_fuse5(B, monkeypatch):
+    """worker._install_gdn_fuse on a 5-bit model with QWEN_MRQMM5=1: the fused
+    in-projection (N = 784) takes the 5-bit kernel for 3..16 rows, its kernels
+    compiled at install; B <= 2 is bit-identical to the unfused model."""
+    import worker
+    monkeypatch.setenv("QWEN_MRQMM5", "1")
+    lm = tiny_lm(wbits=5)
+    ids = mx.random.randint(0, 512, (B, 1))
+    ref = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+    mrqmm.install(lm)
+    for k in [k for k in mrqmm._KERNELS if k[1] == 784 and k[5] == 5]:
+        del mrqmm._KERNELS[k]
+    for k in [k for k in mrqmm._CALLS if k[2] == (784, 20)]:
+        del mrqmm._CALLS[k]
+    try:
+        assert worker._install_gdn_fuse(lm) == 3
+        assert all(x.linear_attn.__dict__["_fused_in"][7] is mrqmm for x in lm.model.layers if x.is_linear)
+        assert {k[2] for k in mrqmm._KERNELS if k[:2] == (128, 784) and k[5] == 5} == {1, 2}
+        calls = []
+        orig = mrqmm.mrqmm
+        mrqmm.mrqmm = lambda x, w, *a, **k: calls.append(w.shape) or orig(x, w, *a, **k)
+        try:
+            y = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+        finally:
+            mrqmm.mrqmm = orig
+    finally:
+        mrqmm.uninstall(lm)
+    if B < 3:
+        assert not calls and mx.array_equal(y, ref).item()
+    else:
+        assert calls.count((784, 20)) == 3, calls
+        assert mx.abs(y - ref).max().item() <= 3e-2 * max(1.0, mx.abs(ref).max().item())
+        assert (y.argmax(-1) == ref.argmax(-1)).all().item()
+
+
+@pytest.mark.skipif(os.environ.get("MRQMM_REAL_WEIGHTS") != "1" or not os.path.isdir(W27B),
+                    reason="slow: set MRQMM_REAL_WEIGHTS=1 (needs weights/qwen38-27b-mlx-5bit "
+                           "or MRQMM_WEIGHTS_27B)")
+def test_real_27b_weights():
+    """Layer 2 (GDN + MLP), layer 3 (attention) and lm_head of the 27B, loaded
+    lazily from the safetensors (~1.3 GB, not the model); scales / biases cast
+    bf16 -> fp16 as the worker does."""
+    idx = json.load(open(os.path.join(W27B, "model.safetensors.index.json")))["weight_map"]
+    files = {}
+
+    def lin(prefix):
+        out = []
+        for p in ("weight", "scales", "biases"):
+            f = idx[f"{prefix}.{p}"]
+            files.setdefault(f, mx.load(os.path.join(W27B, f)))
+            a = files[f][f"{prefix}.{p}"]
+            out.append(a if p == "weight" else a.astype(mx.float16))
+        return out
+
+    P = "language_model.model.layers."
+    names = [P + "3.self_attn." + n for n in ("q_proj", "k_proj", "v_proj", "o_proj")]
+    names += [P + "2.linear_attn.out_proj"] + [P + "2.mlp." + n for n in ("gate_proj", "up_proj", "down_proj")]
+    names += ["language_model.lm_head"]
+    ws = [lin(n) for n in names]
+    gdn = [lin(P + "2.linear_attn." + p) for p in ("in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a")]
+    ws.append([mx.concatenate([g[i] for g in gdn]) for i in range(3)])
+    mx.random.seed(1)
+    for w, s, b in ws:
+        K = w.shape[1] * 32 // 5
+        assert mrqmm._bits_of(K, w.shape[1]) == 5 and s.shape == (w.shape[0], K // 64)
+        for M in (3, 8, 9, 16):
+            x = mx.random.normal((M, 1, K))
+            x[..., ::211] = x[..., ::211] * 30.0
+            x = x.astype(mx.float16)
+            y = mrqmm.mrqmm(x, w, s, b)
+            for lo in range(0, w.shape[0], 32768):         # the fp32 reference in chunks (lm_head)
+                hi = lo + 32768
+                check_close(y[..., lo:hi], x, w[lo:hi], s[lo:hi], b[lo:hi], bits=5)
+
+
+# --- 4 bits (kernel only: never dispatched, scripts/perf/dflash2/kern5_bench.py --bits 4) ---
+
+@pytest.mark.parametrize("K,N", [(128, 64), (640, 200), (5120, 1024)])
+@pytest.mark.parametrize("M", [1, 3, 8, 9, 16])
+def test_kernel4_matches_reference(K, N, M):
+    w, s, b = qweights(N, K, seed=K + N, bits=4)
+    assert w.shape == (N, K // 8)
+    x = (mx.random.normal((M, 1, K)) * 0.5).astype(mx.float16)
+    check_close(mrqmm.mrqmm(x, w, s, b), x, w, s, b, bits=4)
+
+
+def test_kernel4_unpacks_every_k():
+    K, N = 192, 200
+    w, s, b = qweights(N, K, seed=N, bits=4)
+    one, zero = mx.ones_like(s), mx.zeros_like(b)
+    q = mx.dequantize(w, one.astype(mx.float32), zero.astype(mx.float32), group_size=64, bits=4)
+    assert q.min().item() == 0 and q.max().item() == 15
+    for M in (8, 16):
+        for k0 in range(0, K, M):
+            x = mx.zeros((M, 1, K), mx.float16)
+            for m in range(M):
+                x[m, 0, k0 + m] = 1.0
+            y = mrqmm.mrqmm(x, w, one, zero).reshape(M, N)
+            assert mx.array_equal(y.astype(mx.float32), q[:, k0:k0 + M].T).item(), (M, k0)
+
+
+def test_4bit_is_never_dispatched(monkeypatch):
+    monkeypatch.setenv("QWEN_MRQMM5", "1")
+    m = Holder(b=make_linear(256, 64, bits=4))
+    assert mrqmm.install(m, warmup=False) == 0 and type(m.b) is nn.QuantizedLinear
+    assert not mrqmm.supported(m.b.weight, m.b.scales, m.b.biases, 4, 64)

@@ -364,6 +364,124 @@ class FakeDraft:
         return mx.array([d], dtype=dtype)
 
 
+@pytest.mark.parametrize("drafts", ["free", "budgeted"])
+def test_dflash_thinking_budget(dense, monkeypatch, drafts):
+    """A thinking budget no longer turns DFlash off: the round's block is cut
+    where the budget forces the next token (the later drafts leave the cache
+    with the commit), \\n</think> are emitted and fed by plain steps, and the
+    answer equals the plain loop's with the same budget. "free": the drafter
+    proposes what the target would say without a budget (accepted drafts
+    cross the boundary: the cut inside the block); "budgeted": the answer
+    with the forced tokens (the target's own token is the one dropped)."""
+    from mlx_vlm.utils import ThinkingBudgetCriteria
+    no_metal_verify(monkeypatch)
+    NL, CLOSE, OPEN = 11, 12, 13
+    tok = FakeTok({"</think>": [CLOSE], "<think>": [OPEN], "\n": [NL]})
+    p = prompts([25], 30)[0] + [OPEN]
+
+    def crit(budget):
+        return ThinkingBudgetCriteria(tokenizer=tok, thinking_budget=budget, thinking_end_token="</think>",
+                                      thinking_start_token="<think>", enable_thinking=True,
+                                      prompt_preopens_thinking=True)
+
+    free = run(scheduler(dense, max_batch=1), [request(p, 24, "a")])["a"]
+    spec = cut = 0
+    for budget, max_tokens in [(0, 24), (1, 24), (2, 24), (3, 24), (4, 24), (5, 24), (6, 24), (9, 24),
+                               (3, 4), (3, 5), (4, 5), (4, 6), (40, 24)]:
+        plain = run(scheduler(dense, max_batch=1), [request(p, max_tokens, "a", thinking=crit(budget))])["a"]
+        if budget < max_tokens - 2 and CLOSE not in free[0][:budget + 1]:
+            assert plain[0][budget + 1:budget + 3] == [NL, CLOSE], (budget, plain)
+        sched = scheduler(dense, max_batch=1)
+        d = sched.eng.draft = FakeDraft(free[0] if drafts == "free" else plain[0])
+        got = run(sched, [request(p, max_tokens, "a", thinking=crit(budget))])["a"]
+        assert got == plain, (budget, max_tokens, got, plain)
+        spec += len(d.accept_lens)
+        # rounds whose accepted drafts ran past the budget's boundary
+        emitted = 1
+        for a in d.accept_lens:
+            cut += emitted <= budget < emitted + a
+            emitted += a + 1
+    assert spec > 20                                       # the speculative path did run
+    if drafts == "free":
+        assert cut > 0
+
+
+def test_dflash_fp32_drafter(dense, monkeypatch):
+    """QWEN_DRAFT_FP32 (a drafter whose residual stream overflows fp16, the
+    27B's DFlash2): the target's hidden states reach draft_block as fp32, the
+    drafter's hidden reaches the target's lm_head in the target's dtype, and
+    the answer is still the plain greedy one."""
+    no_metal_verify(monkeypatch)
+    seen = {"hidden": set(), "head": set()}
+
+    class Wide(FakeDraft):
+        def reset(self, model):
+            self.lm_head = lambda x: seen["head"].add(x.dtype) or x
+            return None
+
+        def draft_block(self, b, hidden, cache, bs, sampler, dtype):
+            seen["hidden"].add(hidden.dtype)
+            self.lm_head(mx.zeros((1, 1, 4), dtype=mx.float32))
+            return super().draft_block(b, hidden, cache, bs, sampler, dtype)
+
+    p = prompts([25], 30)[0]
+    plain = run(scheduler(dense, max_batch=1), [request(p, 30, "a")])["a"]
+    sched = scheduler(dense, max_batch=1)
+    sched.eng.draft, sched.eng.draft_wide = Wide(plain[0]), True
+    assert run(sched, [request(p, 30, "a")])["a"] == plain
+    assert seen["hidden"] == {mx.float32} and seen["head"] == {sched._hidden_dtype()}
+
+    sched = scheduler(dense, max_batch=1)                  # off: dtypes untouched
+    seen = {"hidden": set(), "head": set()}
+    sched.eng.draft = Wide(plain[0])
+    assert run(sched, [request(p, 30, "a")])["a"] == plain
+    assert seen["hidden"] == {sched._hidden_dtype()} and seen["head"] == {mx.float32}
+
+
+def test_widen_drafter(monkeypatch):
+    """_draft_wide: auto by class (DFlash2*), the knob forces; _widen_drafter:
+    bf16 leftovers of a quantized drafter -> fp32, codebooks -> fp16, input
+    embeddings cast to fp32."""
+    import mlx.nn as nn
+
+    class DFlash2Toy(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(64, 8, bias=False)
+            self.norm = nn.RMSNorm(8)
+            self.candidate_selector = nn.Module()
+            self.candidate_selector.predecessor_codebook = nn.Embedding(16, 4)
+            self.embed = nn.Embedding(16, 8)
+
+        def _embed_input_tokens(self, ids):
+            return self.embed(ids).astype(mx.float16)
+
+    class Other:
+        pass
+
+    monkeypatch.setattr(worker, "DRAFT_FP32", "")
+    assert worker._draft_wide(DFlash2Toy()) and not worker._draft_wide(Other())
+    monkeypatch.setattr(worker, "DRAFT_FP32", "0")
+    assert not worker._draft_wide(DFlash2Toy())
+    monkeypatch.setattr(worker, "DRAFT_FP32", "1")
+    assert worker._draft_wide(Other())
+
+    d = DFlash2Toy()
+    d.apply(lambda a: a.astype(mx.bfloat16))
+    nn.quantize(d, group_size=64, bits=4, class_predicate=lambda _p, m: isinstance(m, nn.Linear))
+    worker._widen_drafter(d, True)
+    assert d.fc.scales.dtype == mx.float32 and d.fc.weight.dtype == mx.uint32
+    assert d.norm.weight.dtype == mx.float32
+    assert d.candidate_selector.predecessor_codebook.weight.dtype == mx.float16
+    assert d._embed_input_tokens(mx.array([[1, 2]])).dtype == mx.float32
+
+    d = DFlash2Toy()                                       # unquantized: weights as loaded
+    d.apply(lambda a: a.astype(mx.bfloat16))
+    worker._widen_drafter(d, False)
+    assert d.fc.weight.dtype == mx.bfloat16
+    assert d._embed_input_tokens(mx.array([[1, 2]])).dtype == mx.float32
+
+
 def test_dflash_exact_and_demoted(dense_or_fused, monkeypatch):
     """The speculative path is exact for greedy: the same tokens as plain
     decoding (also checks the first target call's position, appendix A1),

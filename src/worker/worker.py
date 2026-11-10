@@ -20,6 +20,7 @@ import base64
 import bisect
 import collections
 import contextlib
+import copy
 import dataclasses
 import functools
 import hashlib
@@ -969,8 +970,10 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # Speculative decoding (QWEN_DRAFT=<dir>): a DFlash block-diffusion drafter
 # (e.g. z-lab/Qwen3.5-9B-DFlash, trained on the base Qwen3.5-9B — it also works
 # on the Ornith finetunes, ~60% token acceptance). Exact-greedy walk, so it is
-# only used when the request is greedy (temperature 0, no presence penalty),
-# text-only and without a thinking budget; otherwise the plain loop runs.
+# only used when the request is greedy (temperature 0, no presence penalty) and
+# text-only; otherwise the plain loop runs. A thinking budget is honoured
+# inside the rounds (2026-11-11: the block is cut where the budget forces the
+# next token, \n</think> go through plain steps; _Scheduler._spec).
 # Output is identical to the plain greedy loop up to fp16 noise.
 DRAFT = os.environ.get("QWEN_DRAFT", "")
 DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
@@ -979,6 +982,17 @@ DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
 # ≈ fp16 acceptance (~60%), and the round gets cheaper (fp16 ~100 ms → 4-bit
 # ~85 ms): decode ×1.16–1.52 (fp16) → ×1.43–1.64 (4-bit).
 DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
+# QWEN_DRAFT_FP32 ("" = auto: on for DFlash2 drafters; 1 / 0 force): the
+# drafter's activations in fp32 instead of fp16 (its weights stay quantized;
+# scales, norms and kernels fp32, the selector codebooks fp16). The fp16 cast
+# of QWEN_FP16 breaks z-lab/Qwen3.8-27B-DFlash2: its residual stream reaches
+# 5.7e4 after the first layer and overflows fp16 (max 65504) in the next ones,
+# every logit is NaN and no draft is ever accepted (measured 2026-11-10: 0/420
+# drafts; in fp32 3.16 of 7 accepted at 4 bits vs 3.28 unquantized, the block
+# 36 ms vs 32 in fp16). The 9B's DFlash drafter is fine in fp16 (~60 %).
+# With QWEN_DRAFT_BITS=0 the weights stay as loaded (bf16: correct, but ~10x
+# slower per block on M1/M2; fp32 weights would be 2x the memory).
+DRAFT_FP32 = os.environ.get("QWEN_DRAFT_FP32", "")
 # Sampling / presence-penalty requests can take the speculative path too
 # (QWEN_DRAFT_SAMPLING=1, exact "sample-match" acceptance, see _Scheduler._spec), but a
 # round (draft ~15 ms + a 4..16-row verify, flat ~2.6x a 1-row step on M1: the
@@ -999,6 +1013,15 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # (bit-identical to solo); prefill slabs, the DFlash verify / drafter (always
 # (1, T, K)) and B > 16 stay on quantized_matmul. 9B decode step (M1 Max, ctx
 # 1K, same process A/B): 56 / 86 / 93 -> 31 / 34 / 52 ms at B = 4 / 8 / 16.
+#
+# QWEN_MRQMM5 (default 0, read by mrqmm at load): the same kernel for 5-bit
+# affine g64 modules (the 27B: every linear incl. lm_head and the fused GDN
+# in-projection), 3..16 rows; with it the batched decode, the fused GDN
+# in-projection (_gdn_call) and, with a drafter, the DFlash verify block and the
+# drafter's lm_head (QWEN_VERIFY_MRQMM) take the kernel on 5-bit models exactly
+# as they do on 8-bit ones. 0 = 5-bit calls stay on quantized_matmul, bit for
+# bit as before. Ignored with QWEN_BATCH_INVARIANT=1 (5-bit modules stay
+# uncovered there: max_batch 2). Kernel numbers: scripts/perf/dflash2/.
 
 # Prefill matmul (QWEN_PFQMM, default 1, read by pfqmm.install at load; 0 =
 # always quantized_matmul): on M1/M2 MLX's qmm_t uses 32x32 output tiles and
@@ -2675,7 +2698,8 @@ def _install_verify_mrqmm(lm):
 
 def _setup_verify_mrqmm(lm, draft):
     """At load, with a drafter and QWEN_VERIFY_MRQMM 1 / head: nothing when
-    mrqmm covers no module (QWEN_MRQMM=0, QWEN_FP16=0, the 5-bit 27B); else
+    mrqmm covers no module (QWEN_MRQMM=0, QWEN_FP16=0, the 5-bit 27B without
+    QWEN_MRQMM5=1); else
     the fused GDN verify (1) and, unless QWEN_DRAFT_BLOCK is set, the fixed
     block VERIFY_MR_BLOCK. -> what the load log says."""
     global DRAFT_BLOCK
@@ -2692,6 +2716,45 @@ def _setup_verify_mrqmm(lm, draft):
             f"block {DRAFT_BLOCK}")
 
 
+def _draft_wide(draft):
+    """QWEN_DRAFT_FP32: does this drafter run fp32 activations?"""
+    if DRAFT_FP32 in ("0", "1"):
+        return DRAFT_FP32 == "1"
+    return type(draft).__name__.startswith("DFlash2")
+
+
+def _widen_drafter(draft, quantized):
+    """QWEN_DRAFT_FP32, at load after the drafter's quantization: every bf16
+    parameter left (quantization scales / biases, norms, conv kernels) to
+    fp32, the selector's codebooks (embedding lookups, 2 x vocab x rank) to
+    fp16, and the block's input embeddings (the target's, fp16) cast to fp32
+    so the residual stream is fp32 whatever the promotion rules. Unquantized
+    weights are left as loaded (bf16). _spec casts the target's hidden states
+    on the way in and the drafter's on the way to the target's lm_head."""
+    if quantized:
+        from mlx.utils import tree_flatten, tree_unflatten
+        draft.update(tree_unflatten(
+            [(k, v.astype(mx.float16 if "codebook" in k else mx.float32)
+              if v.dtype == mx.bfloat16 else v) for k, v in tree_flatten(draft.parameters())]))
+    embed = draft._embed_input_tokens
+    draft._embed_input_tokens = lambda ids: embed(ids).astype(mx.float32)
+
+
+def _budget_cut(think, new, stopping):
+    """DFlash with a thinking budget: the index in `new` (a round's tokens:
+    accepted drafts + the target's own) of the token after whose emission
+    the budget forces the next one; None = it forces nothing in this block.
+    On a copy of the criteria: the request's own sees emitted tokens only."""
+    sim = copy.copy(think)
+    for j, tok in enumerate(new):
+        if stopping(tok):
+            return None
+        sim(tok)
+        if sim.pop_forced_token_id() is not None:
+            return j
+    return None
+
+
 def _verify_head(head):
     """QWEN_VERIFY_MRQMM 1 / head: the drafter's lm_head (bound to the
     target's at every draft.reset) with 3..16-row blocks on mrqmm."""
@@ -2703,7 +2766,8 @@ def _verify_head(head):
 
 # QWEN_GDN_FUSE (1): a decode step's four GDN in-projections (qkv, z, b, a)
 #   as ONE quantized matmul (qmv for 1..2 rows, mrqmm for 3..16 rows on 8-bit
-#   models, otherwise quantized_matmul's own qmv/qmm) over their weights
+#   models and, with QWEN_MRQMM5=1, 5-bit ones, otherwise quantized_matmul's
+#   own qmv/qmm) over their weights
 #   concatenated at load; the four modules keep row views of the concatenation
 #   (no extra memory). Needs fp16 scales/biases: with QWEN_FP16=0 (bf16) it
 #   fuses nothing (the load log says "0 layers"). mlx-vlm 0.6.2 did this (with a second copy of the
@@ -2783,7 +2847,8 @@ def _install_gdn_fuse(lm):
         for l, (lo, hi) in zip(ls, offs):     # row views: the old buffers are freed
             l.weight, l.scales, l.biases = w[lo:hi], s[lo:hi], b[lo:hi]
             mx.eval(l.weight, l.scales, l.biases)
-        use_mr = (mr is not None and mr.enabled() and f.bits == mr.BITS and f.group_size == mr.GROUP
+        # the kernel's bit widths: 8, and 5 with QWEN_MRQMM5=1 (mr.supported)
+        use_mr = (mr is not None and mr.enabled() and f.group_size == mr.GROUP
                   and mr.supported(w, s, b, f.bits, f.group_size, getattr(f, "mode", "affine")))
         m.__dict__["_fused_in"] = (w, s, b, [hi for _, hi in offs[:-1]], f.group_size, f.bits,
                                    getattr(f, "mode", "affine"), mr if use_mr else None)
@@ -3859,7 +3924,7 @@ class _Scheduler:
     def _spec_ok(self, row):
         req = row.req
         greedy = req.sampling["temperature"] <= 0 and not row.pen.active
-        if (self.eng.draft is None or BATCH_INVARIANT or req.images or req.thinking is not None
+        if (self.eng.draft is None or BATCH_INVARIANT or req.images
                 or req.golden is not None or not (greedy or DRAFT_SAMPLING)):
             return False
         if row.lpk is not None or _wants(req, "prompt_logprobs"):
@@ -4292,6 +4357,13 @@ class _Scheduler:
         i.e. the same distribution as the plain loop; temperature only lowers
         the acceptance rate.
 
+        Thinking budget (req.thinking): the criteria sees every emitted token,
+        as in the plain loop. A round's block is cut at the token after which
+        it forces the next one (_budget_cut; later drafts and the target's own
+        token leave the cache with the commit), the forced tokens are emitted
+        and fed by plain steps (close), then rounds go on. Same tokens as the
+        plain loop with that budget (tests/test_scheduler.py).
+
         Demotion (another request waiting, max_batch > 1): after a round the
         target cache holds every token before the last emitted one, `b` —
         exactly a batch row whose next input is b, already emitted (`first`).
@@ -4302,6 +4374,7 @@ class _Scheduler:
                                                 _speculative_walk)
         from mlx_vlm.speculative.dflash import _dflash_next_block_size
         req, lm, draft = row.req, self.lm, self.eng.draft
+        wide = getattr(self.eng, "draft_wide", False)    # QWEN_DRAFT_FP32
         row.spec = True                         # also after a demotion: never grouped
         input_ids, cache, pos, cuts, on_ckpt, on_prefilled = self._prompt_cache(row)
         row.cache = cache
@@ -4371,6 +4444,41 @@ class _Scheduler:
             req.out.put(("tok", tok, True))
             return True
 
+        think = req.thinking                    # ThinkingBudgetCriteria or None
+
+        def budget(tok):
+            """The token the thinking budget forces next, after `tok` was
+            emitted (the plain loop: req.thinking(tok), then
+            pop_forced_token_id at the next step)."""
+            if think is None:
+                return None
+            think(tok)
+            return think.pop_forced_token_id()
+
+        def close(last, cached, f):
+            """The budget forces `f` after `last` (emitted; `cached`: already
+            in the target cache). Plain steps feed what is not cached yet
+            (their hidden states are the drafter's next context), the forced
+            tokens are emitted; again while the budget goes on forcing
+            (\n, then </think>). -> (the last emitted token, not in the cache:
+            the next round's anchor; the fed tokens' hidden states; "stop" or
+            None)."""
+            nonlocal n
+            ctx = []
+            while f is not None and n < max_tokens:
+                if not cached:
+                    o = lm(mx.array([[last]], dtype=dtype), cache=cache, capture_layer_ids=layers)
+                    h = mx.concatenate(o.hidden_states, axis=-1)
+                    mx.eval(h, [c.state for c in cache])
+                    ctx.append(h)
+                    req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
+                last, cached = f, False
+                if not emit(last):
+                    return last, ctx, "stop"
+                n += 1
+                f = budget(last)
+            return last, ctx, None
+
         finish, n, acc, drafted = "length", 0, 0, 0
         if max_tokens > 0 and not emit(first):
             finish = "stop"
@@ -4381,8 +4489,19 @@ class _Scheduler:
             draft_cache = draft.reset(self.model)
             if VERIFY_MR_HEAD and getattr(draft, "lm_head", None) is not None:
                 draft.lm_head = _verify_head(draft.lm_head)
-            b = first
-            while n < max_tokens:
+            if wide and getattr(draft, "lm_head", None) is not None:
+                # the target's head (bound at reset) takes the target's dtype
+                draft.lm_head = (lambda x, head=draft.lm_head, hd=self._hidden_dtype():
+                                 head(x.astype(hd)))
+            b, why = first, None
+            f = budget(first)
+            if f is not None:                   # a budget the first token already passes
+                b, ctx, why = close(first, False, f)
+                if ctx:
+                    hidden = mx.concatenate([hidden] + ctx, axis=1)[:, -win:]
+                if why:
+                    finish = why
+            while n < max_tokens and not why:
                 yield
                 if req.cancel.is_set():
                     finish = "cancelled"
@@ -4403,7 +4522,8 @@ class _Scheduler:
                 bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
                 if bs <= 1:
                     break
-                drafts = draft.draft_block(b, hidden, draft_cache, bs, argmax, dtype)
+                drafts = draft.draft_block(b, hidden.astype(mx.float32) if wide else hidden,
+                                           draft_cache, bs, argmax, dtype)
                 mx.async_eval(drafts)
                 fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
                 txn = None
@@ -4416,29 +4536,53 @@ class _Scheduler:
                     targets = pick(out.logits, fed[0])
                     mx.async_eval(targets, hidden)
                     accepted, new = _speculative_walk(drafts, targets, max_tokens - n)
+                    hit, cut = accepted, None       # hit: the drafter's score (statistics)
+                    if think is not None:
+                        cut = _budget_cut(think, new, self.eng.stopping)
+                        if cut is not None and cut < accepted:
+                            # the budget forces the token after the draft
+                            # new[cut]: the later drafts and the target's own
+                            # token leave the cache with the commit
+                            accepted, new = cut + 1, new[:cut + 1]
                     commit_speculative_round(lm, cache, txn, accepted, bs)
                 except BaseException:
                     abort_speculative_round(txn)
                     raise
-                _record_speculative_round(draft, accepted, bs - 1)
-                acc, drafted = acc + accepted, drafted + bs - 1
+                _record_speculative_round(draft, hit, bs - 1)
+                acc, drafted = acc + hit, drafted + bs - 1
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
-                stopped = False
-                for tok in new:
+                stopped, f = False, None
+                for j, tok in enumerate(new):
                     if not emit(tok):
                         finish, stopped = "stop", True
                         break
                     n += 1
+                    f = budget(tok)
+                    if f is not None and j != len(new) - 1:
+                        raise RuntimeError("dflash: the thinking budget forced a token inside "
+                                           "a committed block")
                 if stopped or not new:
                     break
                 b = new[-1]
                 if accepted < bs - 1:
                     hidden = hidden[:, : accepted + 1, :]
+                if f is not None:
+                    # new[-1] is a draft the commit kept (the block was cut
+                    # there) or the target's own token (not in the cache yet)
+                    b, ctx, why = close(b, cut is not None and cut < hit, f)
+                    if ctx:
+                        hidden = mx.concatenate([hidden] + ctx, axis=1)
+                    if why:
+                        finish = why
+                        break
                 if n % 256 < len(new) and CLEAR_CACHE:
                     mx.clear_cache()
         if max_tokens > 1:
             log.info("dflash: %d tokens, accept rate %.0f%% (%d/%d drafts)",
                      n, 100.0 * acc / max(1, drafted), acc, drafted)
+            if drafted >= 64 and not acc:
+                log.warning("dflash: none of %d drafts accepted: the drafter's output is "
+                            "unusable (NaN from an fp16 overflow? try QWEN_DRAFT_FP32=1)", drafted)
         self._finish(row, finish)
 
     def fit_max_batch(self):
@@ -5715,6 +5859,7 @@ class Engine:
         self._cancels_lock = threading.Lock()
         self._pcache = _PrefixCache()
         self.draft = None
+        self.draft_wide = False                 # QWEN_DRAFT_FP32: fp32 drafter activations
         self._span_tokens = None        # (header, think pre-opens, <|im_end|>): _assistant_spans
         self._tok_str = {}              # id -> tokenizer.decode([id]) (logprobs; vocab-bounded)
         self._plain = None              # _PlainContent (QWEN_SPLIT_SPECIAL_TOKENS)
@@ -5753,20 +5898,28 @@ class Engine:
             if kind != "dflash":
                 raise RuntimeError(f"unsupported drafter kind {kind!r} (only dflash)")
             validate_drafter_compatibility(self.model, draft, kind)
-            if FP16:
+            wide = _draft_wide(draft)
+            if FP16 and not wide:
                 draft.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
             if DRAFT_BITS:
                 import mlx.nn as nn
                 nn.quantize(draft, group_size=64, bits=DRAFT_BITS,
                             class_predicate=lambda _p, m: isinstance(m, nn.Linear)
                             and m.weight.shape[1] % 64 == 0)
+            if wide:
+                _widen_drafter(draft, bool(DRAFT_BITS))
             mx.eval(draft.parameters())
             if DRAFT_BLOCK:
                 draft.prefer_requested_block_size = True
-            self.draft = draft
-            log.info("dflash drafter loaded: %s (%s, block %s, target layers %s)", DRAFT,
-                     f"{DRAFT_BITS}-bit" if DRAFT_BITS else "fp16", DRAFT_BLOCK or "adaptive",
-                     list(draft.config.target_layer_ids))
+            self.draft, self.draft_wide = draft, wide
+            log.info("dflash drafter loaded: %s (%s %s, %s, block %s, target layers %s)", DRAFT,
+                     type(draft).__name__, f"{DRAFT_BITS}-bit" if DRAFT_BITS else
+                     ("bf16" if wide or not FP16 else "fp16"),
+                     "fp32 activations (QWEN_DRAFT_FP32)" if wide else "activations as the weights",
+                     DRAFT_BLOCK or "adaptive", list(draft.config.target_layer_ids))
+            if wide and not DRAFT_BITS:
+                log.warning("QWEN_DRAFT_FP32 with QWEN_DRAFT_BITS=0: the drafter's weights stay "
+                            "bf16 (slow on M1/M2: no native bf16)")
         _tok = getattr(self.processor, "tokenizer", self.processor)
         # mlx-vlm стопит только на верхнем eos_token_id; у qwen их два
         # (<|im_end|> и <|endoftext|>), стоп на всех — как в HF/vLLM

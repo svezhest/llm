@@ -33,6 +33,33 @@ Used only for 8-bit affine, group size 64, fp16 x/scales/biases, 3 <= rows
 (MIN_N); every other call goes to mx.quantized_matmul unchanged (M <= 2 stays
 bit-identical to a solo row).
 
+5 bits (QWEN_MRQMM5=1, default 0; the 27B, whose every linear is 5-bit g64):
+the same kernel with another weight side (_WSIDE[5]): a 64-group of a row is
+40 bytes with the fields crossing byte boundaries, a thread loads the 3 words
+that hold its 16 weights and regroups them once per group so that an MMA
+step's two A elements are one shift and one mask. Everything else (x side,
+MMAs, K split, reduction, fp16 dequantized weight, fp32 accumulation, the
+row and N rules above) is shared; the 8-bit kernel's source is unchanged.
+Measured 2026-11-10 on the real 27B weights (M1 Max, chains of distinct
+layers, scripts/perf/dflash2/kern5_bench.py; raw: docs/perf/2026-11-10/raw/
+kern5_*.json), the linears of one 27B forward (353 matmuls incl. lm_head):
+a solo row (qmv) 55 ms; quantized_matmul 84 / 121 / 159 / 250 / 249 / 254 ms
+at 2 / 3 / 4 / 6 / 8 / 16 rows (x1.5 / 2.2 / 2.9 / 4.6 / 4.5 / 4.5); this
+kernel 81 / 83 / 86 / 89 ms at 3 / 4 / 6 / 8 rows (x1.48-1.61) and 124 / 126
+ms at 12 / 16 (x2.2); lm_head alone 11.6 -> 4.0 ms at 8 rows. mlx-vlm's exact
+verify kernels: 117 ms at 3 rows, 1.6 s at 8. At 8 rows it runs ~4.7 TFLOPS
+(16 rows: 6.7), i.e. MMA-bound like the 8-bit kernel at 16 rows: the unpack
+is not the cost (random 4-bit weights of the same shapes: 76 ms at 8 rows,
+x1.64 of their own 46.5 ms solo row; a 4-bit build would gain its 4/5 of
+bytes, not a cheaper kernel). Numerics on every real shape, rows 3..16: rms
+rel error vs an fp32 reference 2.3-2.4e-4, never above quantized_matmul's at
+the same rows (2.3e-4..1.4e-3) and 4-6x below a solo qmv row's (0.9-1.4e-3);
+rows are NOT bit-equal to a solo qmv row (15-23 % of the elements are), but a
+row's bits are the same at every row count 3..16 and whatever sits beside it
+(KS 8 in both buckets, _config).
+4 bits: the weight side exists (_WSIDE[4]) for that comparison only; it is
+never dispatched.
+
 Batch-invariant mode (set_invariant, the worker's QWEN_BATCH_INVARIANT=1): row m
 of the output is then the same bits whatever the number of rows (1..16) and
 whichever rows sit beside it. The order of the sum for one output (n, m) is
@@ -76,6 +103,24 @@ MAX_ROWS = 16
 MIN_N = 512
 BITS = 8
 GROUP = 64
+# Bit widths the kernel exists for. 8 is always dispatched; 5 (the 27B) only
+# with QWEN_MRQMM5=1 (default 0: every 5-bit call stays on quantized_matmul,
+# the worker is unchanged bit for bit) and never in batch-invariant mode (its
+# guarantee is gated on the 8-bit kernel only: 5-bit modules stay "uncovered"
+# there, max_batch 2 as before). 4 is never dispatched (no model here is 4-bit
+# throughout; the 35B's 4-bit shared expert is not worth a kernel): the weight
+# side exists so that scripts/perf/dflash2/kern5_bench.py can price a 4-bit
+# build against the 5-bit one, `mrqmm()` called directly takes it.
+KERNEL_BITS = (8, 5, 4)
+
+
+def bits5() -> bool:
+    return os.environ.get("QWEN_MRQMM5", "0") == "1"
+
+
+def _bits_on(bits: int) -> bool:
+    """Bit widths install / supported dispatch to the kernel now."""
+    return bits == BITS or (bits == 5 and not INVARIANT and bits5())
 
 _HEADER = """
 #include <metal_simdgroup_matrix>
@@ -84,8 +129,11 @@ using namespace metal;
 
 # Constants (prepended per kernel, see _get_kernel): K, N, MB (M/8: 1 or 2),
 # NA (A frags per simdgroup), KS (simdgroups splitting K); T = half.
-# Input `m0` = int32[1] valid rows.
-_SRC = r"""
+# Input `m0` = int32[1] valid rows. The @W...@ marks are the weight side, per
+# bit width (_WSIDE, _src): which bytes of a row's 64-group a thread loads and
+# how its two A elements of MMA step st come out of them as a uint `q` holding
+# them in 16-bit lanes; everything else is shared.
+_SRC_T = r"""
     constexpr int G = K / 64;
     threadgroup float2 red[(KS > 1 ? KS - 1 : 1) * NA * MB * 32];
     const uint lid = thread_index_in_simdgroup;
@@ -96,16 +144,13 @@ _SRC = r"""
     const short fm = (qid & 4) + ((short(lid) / 2) % 4);
     const short fn = (qid & 2) * 2 + (short(lid) % 2) * 2;
 
-    // weights: thread reads bytes [16*(fn/2), +16) of each 64-byte group of row n0+8i+fm
-    const device uint4* wp[NA];
-    const device T* sp[NA];
+@WDECL@    const device T* sp[NA];
     const device T* bp[NA];
     bool act[NA];
     for (int i = 0; i < NA; ++i) {
       act[i] = n0 + 8 * i < N;
       const int r = act[i] ? n0 + 8 * i + fm : fm;
-      wp[i] = (const device uint4*)((const device uint8_t*)w + size_t(r) * K) + fn / 2;
-      sp[i] = scales + size_t(r) * G;
+@WPTR@      sp[i] = scales + size_t(r) * G;
       bp[i] = biases + size_t(r) * G;
     }
     // x: thread's B elements of step st are x[8mb+fn+e][g*64 + 8*fm + st], i.e.
@@ -130,11 +175,9 @@ _SRC = r"""
       uint4 xw[MB][2];
       for (int mb = 0; mb < MB; ++mb)
         for (int e = 0; e < 2; ++e) xw[mb][e] = xp[mb][e][8 * g];
-      uint4 wq[NA];
-      vec<T, 2> s2[NA], b2[NA];
+@WQDECL@      vec<T, 2> s2[NA], b2[NA];
       for (int i = 0; i < NA; ++i) {
-        wq[i] = wp[i][4 * g];
-        s2[i] = vec<T, 2>(sp[i][g]);
+@WLOAD@        s2[i] = vec<T, 2>(sp[i][g]);
         b2[i] = vec<T, 2>(bp[i][g]);
       }
 #pragma unroll
@@ -149,13 +192,7 @@ _SRC = r"""
           B[mb].thread_elements()[1] = h.y;
         }
         for (int i = 0; i < NA; ++i) {
-          // A elements (k = 8fn + st, 8fn + 8 + st): byte st%4 of words st/4 and 2 + st/4
-          // -> half2 (0x6400 | q) - 1024 = q, exact
-          const uint w0 = wq[i][st / 4], w1 = wq[i][2 + st / 4];
-          const uint m0 = ((st % 2) ? (w0 >> 8) : w0) & 0x00ff00ffu;
-          const uint m1 = ((st % 2) ? (w1 >> 8) : w1) & 0x00ff00ffu;
-          const uint q = ((st / 2) % 2) ? insert_bits(m1, m0 >> 16, 0u, 16u) : insert_bits(m0, m1, 16u, 16u);
-          const vec<T, 2> a = fma(as_type<vec<T, 2>>(q | 0x64006400u) - vec<T, 2>(1024), s2[i], b2[i]);
+@WSTEP@          const vec<T, 2> a = fma(as_type<vec<T, 2>>(q | 0x64006400u) - vec<T, 2>(1024), s2[i], b2[i]);
           simdgroup_matrix<T, 8, 8> A;
           A.thread_elements()[0] = a.x;
           A.thread_elements()[1] = a.y;
@@ -192,23 +229,124 @@ _SRC = r"""
     }
 """
 
+# The weight side of _SRC_T. 8 bits is the kernel as it has always been
+# (tests/test_mrqmm_bits.py pins the rendered source by hash). 5 bits
+# (the 27B): a row's 64-group is 40 bytes = 10 words, weight k at bit 5k, LSB
+# first across byte boundaries (MLX's packing, kernels/quantized.h
+# `dequantize`). The thread's 16 weights k in [8fn, 8fn + 16) are the 80 bits
+# from byte 5fn of the group: 3 words starting at word {0, 2, 5, 7}[fn/2], the
+# field at bit 0 or 16 of them (the 4 threads of a row read 12 of the 10 words:
+# words 2 and 7 twice). Once per group they are regrouped into 3 words of two
+# 16-bit lanes, the low lane from weights 0..7 (bits 0..39) and the high lane
+# from weights 8..15 (bits 40..79), word j holding bits [15j, 15j + 16) of each
+# 40-bit half: weights 3j..3j+2 sit at lane bits 0, 5, 10, so step st is one
+# shift and one mask (cheaper per step than the 8-bit byte shuffle; the
+# regrouping costs ~25 integer ops per group against 8 x 3 saved).
+_WSIDE = {
+    8: dict(
+        WDECL="""    // weights: thread reads bytes [16*(fn/2), +16) of each 64-byte group of row n0+8i+fm
+    const device uint4* wp[NA];
+""",
+        WPTR="""      wp[i] = (const device uint4*)((const device uint8_t*)w + size_t(r) * K) + fn / 2;
+""",
+        WQDECL="""      uint4 wq[NA];
+""",
+        WLOAD="""        wq[i] = wp[i][4 * g];
+""",
+        WSTEP="""          // A elements (k = 8fn + st, 8fn + 8 + st): byte st%4 of words st/4 and 2 + st/4
+          // -> half2 (0x6400 | q) - 1024 = q, exact
+          const uint w0 = wq[i][st / 4], w1 = wq[i][2 + st / 4];
+          const uint m0 = ((st % 2) ? (w0 >> 8) : w0) & 0x00ff00ffu;
+          const uint m1 = ((st % 2) ? (w1 >> 8) : w1) & 0x00ff00ffu;
+          const uint q = ((st / 2) % 2) ? insert_bits(m1, m0 >> 16, 0u, 16u) : insert_bits(m0, m1, 16u, 16u);
+"""),
+    5: dict(
+        WDECL="""    // weights (5-bit): thread reads words [(5*fn)/4, +3) of each 10-word group of row n0+8i+fm;
+    // its 80 bits (16 weights from k = 8fn) start at bit 16 there when fn/2 is odd
+    const device uint* wp[NA];
+    const bool wodd = (fn / 2) % 2 != 0;
+""",
+        WPTR="""      wp[i] = (const device uint*)w + size_t(r) * (K / 32 * 5) + (5 * fn) / 4;
+""",
+        WQDECL="""      uint3 wq[NA];
+""",
+        WLOAD="""        {
+          const device uint* p = wp[i] + 10 * g;
+          const uint a0 = p[0], a1 = p[1], a2 = p[2];
+          // the 80 bits from bit 0: v0 | v1 << 32 | v2 << 64
+          const uint v0 = wodd ? (a0 >> 16) | (a1 << 16) : a0;
+          const uint v1 = wodd ? (a1 >> 16) | (a2 << 16) : a1;
+          const uint v2 = wodd ? a2 >> 16 : a2;
+          // 16-bit lanes (low: bits 0..39, high: bits 40..79), word j = bits [15j, 15j+16) of each
+          wq[i] = uint3(insert_bits(v0, v1 >> 8, 16u, 16u),
+                        insert_bits(v0 >> 15, (v1 >> 23) | (v2 << 9), 16u, 16u),
+                        insert_bits((v0 >> 30) | (v1 << 2), v2 >> 6, 16u, 16u));
+        }
+""",
+        WSTEP="""          // A elements (k = 8fn + st, 8fn + 8 + st): bits [5*(st%3), +5) of both lanes of word st/3
+          // -> half2 (0x6400 | q) - 1024 = q, exact
+          const uint q = (wq[i][st / 3] >> uint(5 * (st % 3))) & 0x001f001fu;
+"""),
+    # 4 bits: a 64-group is 32 bytes, the thread's 16 weights are 2 aligned
+    # words (nibbles k = 8fn.. in the first, 8fn + 8.. in the second), regrouped
+    # into 2 words of two 16-bit lanes of 4 nibbles each
+    4: dict(
+        WDECL="""    // weights (4-bit): thread reads words [fn, fn + 2) of each 8-word group of row n0+8i+fm
+    const device uint2* wp[NA];
+""",
+        WPTR="""      wp[i] = (const device uint2*)(w + size_t(r) * (K / 8)) + fn / 2;
+""",
+        WQDECL="""      uint2 wq[NA];
+""",
+        WLOAD="""        {
+          const uint2 a = wp[i][4 * g];
+          wq[i] = uint2(insert_bits(a.x, a.y, 16u, 16u), insert_bits(a.y, a.x >> 16, 0u, 16u));
+        }
+""",
+        WSTEP="""          // A elements (k = 8fn + st, 8fn + 8 + st): nibble st%4 of both lanes of word st/4
+          // -> half2 (0x6400 | q) - 1024 = q, exact
+          const uint q = (wq[i][st / 4] >> uint(4 * (st % 4))) & 0x000f000fu;
+"""),
+}
+
+
+def _src(bits: int) -> str:
+    """The kernel source for a bit width (8: the text it has always had)."""
+    s = _SRC_T
+    for k, v in _WSIDE[bits].items():
+        assert s.count(f"@{k}@") == 1, k
+        s = s.replace(f"@{k}@", v)
+    return s
+
+
+_SRC = _src(BITS)             # the 8-bit kernel's source
+
+
 # Batch-invariant mode (set_invariant): one K split for every row count, 1..16
 # rows and any N take the kernel. Off = the speed rules above, bit for bit.
 INVARIANT = False
 INVARIANT_KS = 8
 INVARIANT_NA16 = 2            # NA at 9..16 rows (placement only: free to retune)
 
-_KERNELS = {}                 # (K, N, MB, NA, KS) -> compiled metal_kernel
+_KERNELS = {}                 # (K, N, MB, NA, KS, bits) -> compiled metal_kernel
 _CALLS = {}                   # (x.shape, x.dtype, w.shape, cfg) -> (kernel, kwargs, m0 array)
 _LOCK = threading.Lock()      # cache misses only (warm-up at load vs the scheduler thread)
 
 
-def _config(K: int, N: int, MB: int) -> tuple[int, int]:
+def _config(K: int, N: int, MB: int, bits: int = BITS) -> tuple[int, int]:
     """(NA, KS): A fragments (8 output features each) per simdgroup and
     simdgroups splitting K, per row bucket. Measured on M1 Max (results/mrqmm.md):
     8 rows -> 2 x 8, 16 rows -> 4 x 4 (more MMAs per x fragment); a narrow
-    layer keeps NA 2 so that it still spreads over enough simdgroups."""
+    layer keeps NA 2 so that it still spreads over enough simdgroups.
+    5 / 4 bits (27B shapes, 2026-11-10): 8 rows -> 4 x 8 (4-11 % under 2 x 8;
+    the kernel is MMA-bound there, ~4.7 TFLOPS), 16 rows -> 2 x 8 (within 1 %
+    of 4 x 4), so KS is 8 in both buckets and a row's bits are the same at
+    every row count 3..16. 2 x 16 at 8 rows is another 6-7 % faster for
+    K <= 6144 (slower at K = 17408), but 512 threads per threadgroup is over
+    some of these pipelines' limit (448 with NA 4): not taken."""
     na, ks = (2, 8) if MB == 1 else (4, 4)
+    if bits != BITS:
+        na, ks = (4, 8) if MB == 1 else (2, 8)
     if INVARIANT:
         # the sum order of (n, m) depends on KS (and K) alone, NA / MB only
         # place it: KS 8 as the 1..8-row bucket (unchanged there), NA 2 at
@@ -222,58 +360,73 @@ def _config(K: int, N: int, MB: int) -> tuple[int, int]:
     return na, ks
 
 
-def _get_kernel(K, N, MB, na, ks):
+def _get_kernel(K, N, MB, na, ks, bits=BITS):
     """One metal_kernel per shape/config with the constants baked into the
     source: template arguments cost ~6 us of host time per call (mlx 0.31),
     a plain call ~1.5 us."""
-    key = (K, N, MB, na, ks)
+    key = (K, N, MB, na, ks, bits)
     k = _KERNELS.get(key)
     if k is None:
         consts = (f"using T = half;\n    constexpr int K = {K}, N = {N}, MB = {MB}, NA = {na}, "
                   f"KS = {ks};\n")
         k = _KERNELS[key] = mx.fast.metal_kernel(
-            name=f"mrqmm8_g64_k{K}_n{N}_mb{MB}_a{na}_s{ks}",
+            name=f"mrqmm{bits}_g64_k{K}_n{N}_mb{MB}_a{na}_s{ks}",
             input_names=["x", "w", "scales", "biases", "m0"], output_names=["y"],
-            source=consts + _SRC, header=_HEADER)
+            source=consts + _src(bits), header=_HEADER)
     return k
 
 
-def _call(K, N, rows, cfg=None):
+def _call(K, N, rows, cfg=None, bits=BITS):
     MB = 1 if rows <= 8 else 2
-    na, ks = cfg or _config(K, N, MB)
+    na, ks = cfg or _config(K, N, MB, bits)
     tiles = -(-N // (8 * na))
     kw = dict(grid=(32 * ks * tiles, 1, 1), threadgroup=(32 * ks, 1, 1),
               output_shapes=[(rows, N)], output_dtypes=[mx.float16])
-    return _get_kernel(K, N, MB, na, ks), kw
+    return _get_kernel(K, N, MB, na, ks, bits), kw
+
+
+def _bits_of(K: int, words: int):
+    """The bit width of a packed weight row of `words` uint32 holding K
+    values (the kernel's widths only), else None."""
+    for bits in KERNEL_BITS:
+        if words * 32 == K * bits:
+            return bits
+    return None
 
 
 def supported(w: mx.array, scales: mx.array, biases, bits: int, group_size: int, mode="affine") -> bool:
-    """Weights the kernel can take (any row count)."""
-    if bits != BITS or group_size != GROUP or mode != "affine" or biases is None:
+    """Weights the kernel can take (any row count): 8-bit, and 5-bit with
+    QWEN_MRQMM5=1 (`_bits_on`)."""
+    if not _bits_on(bits) or group_size != GROUP or mode != "affine" or biases is None:
         return False
     if w.dtype != mx.uint32 or w.ndim != 2 or scales.dtype != mx.float16 or biases.dtype != mx.float16:
         return False
-    N, K = w.shape[0], w.shape[1] * 4
-    return N % 8 == 0 and K % GROUP == 0 and scales.shape == (N, K // GROUP)
+    N, K = w.shape[0], w.shape[1] * 32 // bits
+    return (N % 8 == 0 and K % GROUP == 0 and w.shape[1] * 32 == K * bits
+            and scales.shape == (N, K // GROUP))
 
 
 def mrqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, cfg=None) -> mx.array:
-    """x[..., K] (fp16, 1..16 rows) @ dequant(w)^T for 8-bit g64 affine weights
-    -> [..., N]. Checks only the x side (rows, dtype, K) once per x / w shape: call
-    `supported` on the weights first. x is made row-contiguous by metal_kernel
-    (a strided x is copied); a contiguous view starts on a row, so its 16-byte
-    loads stay aligned (K % 64 == 0)."""
+    """x[..., K] (fp16, 1..16 rows) @ dequant(w)^T for 8-bit (or 5-bit) g64
+    affine weights -> [..., N]. The bit width is the packed row's: w.shape[1]
+    words for x's K values (8: K / 4, 5: K * 5 / 32; whatever QWEN_MRQMM5 says:
+    the knob is the dispatch's, `supported`). Checks only the x side (rows,
+    dtype, K) once per x / w shape: call `supported` on the weights first. x
+    is made row-contiguous by metal_kernel (a strided x is copied); a
+    contiguous view starts on a row, so its 16-byte loads stay aligned
+    (K % 64 == 0)."""
     N = w.shape[0]
     key = (x.shape, x.dtype, w.shape, cfg)      # w.shape: a hit skips the K check below
     c = _CALLS.get(key)
     if c is None:
         K = x.shape[-1]
         rows = x.size // K
-        if not (1 <= rows <= MAX_ROWS and x.dtype == mx.float16 and K == w.shape[1] * 4
-                and K % GROUP == 0):
+        bits = _bits_of(K, w.shape[1])
+        if not (1 <= rows <= MAX_ROWS and x.dtype == mx.float16 and bits is not None
+                and K % GROUP == 0 and scales.shape[-1] * GROUP == K):
             raise ValueError(f"mrqmm: x {x.shape} {x.dtype} vs w {w.shape}")
         with _LOCK:
-            kernel, kw = _call(K, N, rows, cfg)
+            kernel, kw = _call(K, N, rows, cfg, bits)
             kw["output_shapes"] = [(*x.shape[:-1], N)]
             c = _CALLS[key] = (kernel, kw, mx.array([rows], dtype=mx.int32))
     kernel, kw, m0 = c
@@ -317,7 +470,8 @@ class MRQuantizedLinear(nn.QuantizedLinear):
 
 
 def _module_ok(m) -> bool:
-    """Weights the kernel takes (8-bit affine g64, fp16 scales and biases)."""
+    """Weights the kernel takes (8-bit, or 5-bit with QWEN_MRQMM5=1; affine
+    g64, fp16 scales and biases)."""
     return (type(m) in (nn.QuantizedLinear, MRQuantizedLinear)
             and supported(m["weight"], m["scales"], m.get("biases"), m.bits, m.group_size,
                           getattr(m, "mode", "affine")))
@@ -328,7 +482,8 @@ def enabled() -> bool:
 
 
 def install(model, warmup: bool = True) -> int:
-    """Swap every supported nn.QuantizedLinear of `model` (8-bit, g64, fp16
+    """Swap every supported nn.QuantizedLinear of `model` (8-bit, with
+    QWEN_MRQMM5=1 and not batch-invariant also 5-bit; g64, fp16
     scales/biases, N >= MIN_N; any N in batch-invariant mode) to
     MRQuantizedLinear; every other module is left alone. Logs the coverage
     once. Returns the number of modules covered (0 = no-op). The GDN decode
@@ -345,7 +500,7 @@ def install(model, warmup: bool = True) -> int:
             m.__class__ = MRQuantizedLinear
             covered.append((name, m))
         elif type(m) is nn.QuantizedLinear:
-            why = "" if (m.bits, m.group_size) != (BITS, GROUP) else (
+            why = "" if not _bits_on(m.bits) or m.group_size != GROUP else (
                 " N % 8" if m.weight.shape[0] % 8 else " not fp16" if m.scales.dtype != mx.float16
                 else f" N < {MIN_N}" if m.weight.shape[0] < MIN_N else "")
             k = f"{m.bits}-bit g{m.group_size}{why}"
@@ -360,14 +515,17 @@ def install(model, warmup: bool = True) -> int:
         for pre in ("language_model.", "model.layers.", "layers."):
             k = k[len(pre):] if k.startswith(pre) else k
         kinds[k] = kinds.get(k, 0) + 1
-    log.info("mrqmm: %d modules on the multi-row kernel for %d..%d decode rows (%s); "
-             "left on quantized_matmul: %s", len(covered), 1 if INVARIANT else MIN_ROWS, MAX_ROWS,
+    widths = sorted({m.bits for _, m in covered})
+    log.info("mrqmm: %d modules on the multi-row kernel%s for %d..%d decode rows (%s); "
+             "left on quantized_matmul: %s", len(covered),
+             "" if widths == [BITS] else f" ({'/'.join(map(str, widths))}-bit, QWEN_MRQMM5)",
+             1 if INVARIANT else MIN_ROWS, MAX_ROWS,
              ", ".join(f"{k} x{v}" for k, v in sorted(kinds.items())),
              ", ".join(f"{k} x{v}" for k, v in skipped.items()) or "none")
     if warmup:
         shapes = {}
         for _, m in covered:
-            shapes.setdefault((m.weight.shape[1] * 4, m.weight.shape[0]), (m.weight, m.scales, m.biases))
+            shapes.setdefault((m.bits, m.weight.shape), (m.weight, m.scales, m.biases))
         for w in shapes.values():
             warm(*w)
     return len(covered)
@@ -411,8 +569,8 @@ def warm(w: mx.array, scales: mx.array, biases: mx.array):
     """Compile the kernels of this weight shape for both row buckets (3..8 and
     9..16 rows) now, not on the first batched decode step (~60 ms of Metal
     compile each, on the scheduler thread). Zero inputs: only the shapes
-    matter."""
-    K = w.shape[1] * 4
+    matter (K from the scales: one per 64 values, whatever the bit width)."""
+    K = scales.shape[-1] * GROUP
     with mx.stream(mx.gpu):
         mx.eval([mrqmm(mx.zeros((rows, 1, K), mx.float16), w, scales, biases)
                  for rows in (MIN_ROWS, MAX_ROWS)])
