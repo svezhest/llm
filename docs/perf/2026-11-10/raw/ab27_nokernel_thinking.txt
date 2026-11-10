@@ -1,0 +1,20 @@
+loaded in 12 s; active 20.80 GB; max_batch 1; drafter DFlash2DraftModel block 8 runtime 5 window 2048 layers [5, 19, 33, 47, 61]; draft bits 4; verify exact max T 8; VERIFY_MR True
+warm plain: n=21 ok
+warm e8/3: n=21 ok
+warm e0/8: n=21 ok
+r0 code0 plain    n=192 tps= 12.73 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code0 e8/3     n=192 tps= 14.48 accept= 73.5% per_round=1.46 round_ms= 169.1 hist={0: 12, 1: 18, 2: 48}
+r0 code0 e0/8     n=192 tps=  8.57 accept= 33.4% per_round=2.31 round_ms= 384.1 hist={0: 15, 1: 11, 2: 12, 3: 7, 4: 3, 5: 2, 7: 8}
+r0 code1 e0/8     n=192 tps=  7.84 accept= 29.4% per_round=2.03 round_ms= 386.5 hist={0: 21, 1: 14, 2: 7, 3: 5, 4: 7, 5: 3, 7: 6}
+r0 code1 e8/3     n=192 tps= 13.20 accept= 62.0% per_round=1.23 round_ms= 168.3 hist={0: 23, 1: 20, 2: 43}
+r0 code1 plain    n=192 tps= 12.87 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2 plain    n=192 tps= 12.97 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2 e8/3     n=192 tps= 12.40 accept= 54.9% per_round=1.10 round_ms= 169.2 hist={0: 32, 1: 18, 2: 41}
+r0 code2 e0/8     n=192 tps=  6.39 accept= 21.8% per_round=1.51 round_ms= 393.5 hist={0: 29, 1: 21, 2: 10, 3: 4, 4: 6, 5: 2, 7: 4}
+
+== speed: median decode tok/s (median over tasks of per-task medians over rounds) ==
+plain    tps  12.87  per task  12.7  12.9  13.0  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 3/3
+e8/3     tps  13.20  per task  14.5  13.2  12.4  accept  62.0%  drafts/round 1.23  round  169.1 ms  == plain 3/3
+e0/8     tps   7.84  per task   8.6   7.8   6.4  accept  29.4%  drafts/round 2.03  round  386.5 ms  == plain 1/3
+peak 23.17 GB, active 20.80 GB
+wrote /Users/user/Projects/llm/docs/perf/2026-11-10/raw/ab27_nokernel_thinking.json

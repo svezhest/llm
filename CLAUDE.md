@@ -320,6 +320,20 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   AppWorld lever of the day (×2.3 req/min at a 3 GB RAM cache: evictions become 0.3 s loads
   instead of 50–200 s re-prefills); off by default only because it needs a directory.
 
+- **DFlash2 on the 27B (2026-11-10/11, `docs/perf/2026-11-10/dflash2_27b.md`)**: `QWEN_DRAFT=weights/qwen38-27b-dflash2`
+  (z-lab/Qwen3.8-27B-DFlash2, 5 layers, block 8, target layers 5/19/33/47/61) + `QWEN_KV_BITS=0` + `QWEN_MRQMM5=1` +
+  wired-limit dance. Decode, in-run A/B, greedy: code without thinking 13.3 → 23.4 tok/s (×1.77, 3.9 tokens / 164 ms
+  round), with thinking 13.4 → 19.0–19.3 (×1.41–1.44, 3.2 tokens / round at block 8; blocks 4 / 5 / 8 equal, adaptive
+  worse: the verify cost is flat over 3..8 rows). Without the 5-bit kernel ×0.81–1.10 (a block-8 verify through
+  `quantized_matmul` = 4.4 steps; mlx-vlm's exact verify kernels on 5 bits: 1.6 s at block 8). The drafter must run fp32
+  activations (`QWEN_DRAFT_FP32`, auto: fp16 overflows → 0 % accepted); its block is 36 ms at 4 bits. Not bit-equal to
+  plain greedy with the kernel (15/16 answers without thinking, 12/16 with; 4 of the 5 divergences at a top-2 logit gap
+  ≤ 0.016, one at 0.25). mlx-vlm's default runtime block for DFlash2 is 5 (adaptive 3..5); `_setup_verify_mrqmm` fixes 8.
+  A thinking budget no longer turns DFlash off (`_spec`: the block is cut where the budget forces the next token,
+  `\n</think>` go through plain steps; 27B 8/8 == plain with the budget). Prompt cache + drafter: hits work, output ==
+  cold; a hit that leaves the drafter ~460 tokens of tail loses nothing, an exact repeat (1 token of context) accepts
+  5–20 % fewer drafts. Peak 23.2 GB (25.7 with four 0.7 GB cache entries).
+
 ## Implementation notes worth keeping
 
 - **Context = 128K** (`MAX_CONTEXT=131072`, prompt + generation). **KV cache is
@@ -555,7 +569,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   - Step-ahead (`async_eval`) as before; a grammar or multi-token bad-words row
     puts the whole batch in sync mode while it is there. Thinking budget forces the
     row's next input. Vision: prefill serialized, decode batched with its delta.
-    DFlash only for a request admitted with nothing else running or waiting;
+    DFlash only for a request admitted with nothing else running or waiting
+    (a thinking budget is honoured inside its rounds since 2026-11-11);
     demoted to a batch row at a round boundary when a waiting request would be
     admitted next to it.
   - Generate RPCs beyond `QWEN_GEN_SLOTS` (`max(2·max_batch, 8)`) →
@@ -791,6 +806,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PROMPT_CACHE_REPLY` | worker | `1` — a finished request's entry is extended by its decoded tokens' KV + end state; the next turn resumes after the reply (AppWorld: −21 % prefill tokens); not bit-identical to a cold prefill (batched-decode class: top-1 99.88 %, KL 5.8e-5 on the gate); `0` = off, bit-exact |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
+| `QWEN_DRAFT_FP32` | worker | unset = auto (on for DFlash2 drafters) — the drafter's activations in fp32 (weights stay `QWEN_DRAFT_BITS`): the 27B's DFlash2 overflows fp16 after its first layer (residual 5.7e4 → NaN logits, 0 drafts accepted); fp32 3.16 of 7 accepted at 4 bits vs 3.28 unquantized, block 36 vs 32 ms; `1` / `0` force. `docs/perf/2026-11-10/dflash2_27b.md` |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (fp16 KV + prompt cache + max_batch ≥ 3 only, else off; unset/empty = `1`, anything but `1` off); `0` = today's per-row path bit for bit |
 | `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` (bitwise prefix check per join; a sync) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` |
@@ -799,6 +815,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_BATCH_PREFILL_SHARE` | worker | `0.5` — prefill's time share when the batch is full; with B of max_batch rows it is `1-(1-s)·B/max` |
 | `QWEN_PFQMM` | worker | `1` — prefill matmul (`pfqmm.py`): MLX's own qmm_t code with 64-row tiles (a 32-row last tile when ≤ 32 rows are left), ≥ 64 rows where MLX runs qmm_t; ×1.03–1.28 per matmul (8-bit ×1.10–1.14), bit-identical, self-tested per key at load; `0` = MLX `quantized_matmul`. Needs fp16 scales: `QWEN_FP16=0` leaves it off |
 | `QWEN_MRQMM` | worker | `1` — multi-row 8-bit matmul kernel (`mrqmm.py`) for batched decode with 3..16 rows (8-bit affine g64 fp16 modules with N ≥ 512 only); `0` = MLX `quantized_matmul` |
+| `QWEN_MRQMM5` | worker | `0` — the same multi-row kernel for 5-bit affine g64 modules (the 27B: every linear incl. lm_head and the fused GDN in-projection), 3..16 rows: batched decode, the fused GDN in-projection and the DFlash verify block + drafter lm_head. Linears of one 27B forward at 8 rows 249 → 89 ms (×1.61 of a solo row, stock ×4.5). Off by default: the 27B's batched decode (B ≥ 3) is not gated yet; DFlash2 on the 27B needs it (`docs/perf/2026-11-10/dflash2_27b.md`). Ignored with `QWEN_BATCH_INVARIANT=1` |
 | `QWEN_GDN_FUSE` | worker | `1` — one matmul for a decode step's 4 GDN in-projections (weights concatenated at load, modules hold views); `0` = 4 launches. Needs fp16 scales (`QWEN_FP16=1`): with `QWEN_FP16=0` it fuses nothing |
 | `QWEN_SDPA_FUSED` | worker | `1` — force MLX's fused SDPA for fp16-KV prefill slabs ≥ 512 over ≥ 32K keys (per call ×0.89 at 2048 × 32K, ×0.6–0.7 at 64K+; 64K prefill −3…5%, −1.3 GB peak) |
 | `QWEN_GDN_FAST` | worker | `0` — `mx.fast.gated_delta_update` for prefill slabs (×1.02 per slab; rounds the decay to fp16: KL 0.013 on 8K real tokens — rejected) |

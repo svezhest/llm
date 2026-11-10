@@ -1,0 +1,20 @@
+{
+ "source": "../../docs/perf/2026-11-10/raw/ab27_kern5.json",
+ "rows": [
+  {
+   "task": 7,
+   "variant": "m8/8",
+   "diverge": 8,
+   "prompt_tokens": 36,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 9.148,
+   "steps_with_smaller_gap": 0,
+   "steps": 8,
+   "token": "\n\n\n"
+  }
+ ],
+ "gap_p1": 0.5465625,
+ "gap_p5": 0.6703125,
+ "gap_p50": 9.1484375
+}

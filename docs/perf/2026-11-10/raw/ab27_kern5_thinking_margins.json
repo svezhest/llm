@@ -1,0 +1,56 @@
+{
+ "source": "../../docs/perf/2026-11-10/raw/ab27_kern5_thinking.json",
+ "rows": [
+  {
+   "task": 1,
+   "variant": "m8/8",
+   "diverge": 89,
+   "prompt_tokens": 78,
+   "prompt_matches_worker": true,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 4.297,
+   "steps_with_smaller_gap": 0,
+   "steps": 89,
+   "token": " ownership"
+  },
+  {
+   "task": 2,
+   "variant": "m8/8",
+   "diverge": 119,
+   "prompt_tokens": 74,
+   "prompt_matches_worker": true,
+   "gap_at_diverge": 0.25,
+   "median_gap_before": 2.297,
+   "steps_with_smaller_gap": 14,
+   "steps": 119,
+   "token": " We"
+  },
+  {
+   "task": 8,
+   "variant": "m8/8",
+   "diverge": 254,
+   "prompt_tokens": 74,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 1.812,
+   "steps_with_smaller_gap": 1,
+   "steps": 254,
+   "token": ".URL"
+  },
+  {
+   "task": 10,
+   "variant": "m8/8",
+   "diverge": 93,
+   "prompt_tokens": 74,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0,
+   "median_gap_before": 2.547,
+   "steps_with_smaller_gap": 1,
+   "steps": 93,
+   "token": " a"
+  }
+ ],
+ "gap_p1": 0.03125,
+ "gap_p5": 0.140625,
+ "gap_p50": 2.296875
+}

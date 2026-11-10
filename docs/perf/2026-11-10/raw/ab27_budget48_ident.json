@@ -1,0 +1,127 @@
+{
+ "variants": "plain,e8/ad,e8/3,e8/5,e8/8,e0/8",
+ "rounds": 3,
+ "thinking": true,
+ "max_tokens": 160,
+ "thinking_budget": 48,
+ "model": "../../weights/qwen38-27b-mlx-5bit",
+ "draft": "../../weights/qwen38-27b-dflash2",
+ "draft_bits": 4,
+ "speed": [],
+ "ident": [
+  {
+   "task": 0,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 0,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 1,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 1,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 2,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 2,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 3,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 3,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 4,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 4,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 5,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 5,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 6,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 6,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 7,
+   "variant": "e8/5",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  },
+  {
+   "task": 7,
+   "variant": "m8/8",
+   "same": true,
+   "diverge": null,
+   "n": 160
+  }
+ ],
+ "peak_gb": 23.150062318,
+ "active_gb": 20.803544298
+}
