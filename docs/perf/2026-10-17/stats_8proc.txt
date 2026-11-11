@@ -1,0 +1,40 @@
+window 00:37:24–00:52:30 = 15.1 min, requests=269 (17.8/min)
+prompt tokens 2938374 (cached 2682073 = 91.3%), prefilled 256301, generated 14703
+aggregate: prefill 283 tok/s wall, decode 16.2 tok/s wall
+cache: hits 253, misses 16
+finish reasons: {'stop': 269}  peak max 21.93 GB
+prompt tokens: n=269 mean=10923 p50=9808 p90=18518 max=35067
+prefilled tokens/request: n=269 mean=953 p50=451 p90=2762 max=21313
+gen tokens/request: n=269 mean=55 p50=46 p90=104 max=136
+latency s (Generate→finish): n=269 mean=26.0 p50=17.7 p90=57.0 max=131.3
+queue s: n=269 mean=8.8 p50=2.6 p90=25.0 max=95.4
+ttft s: n=269 mean=4.0 p50=2.6 p90=7.5 max=82.1
+decode s (gen/tps): n=269 mean=13.2 p50=10.4 p90=24.2 max=68.4
+decode tok/s per request: n=269 mean=4.8 p50=4.6 p90=7.0 max=11.6
+latency share: queue 34%, ttft 15%, decode 51%  (ttft may include queue)
+prefill rate on requests with >=1500 new tokens: 320 tok/s (prefill/ttft, n=36)
+
+decode tok/s per request by prompt length:
+   0–5K: n=20 mean=4.1 p50=3.1
+   5–10K: n=119 mean=5.5 p50=5.2
+  10–15K: n=85 mean=4.3 p50=4.0
+  15–20K: n=24 mean=4.3 p50=4.2
+  20–30K: n=15 mean=3.8 p50=3.7
+  30–∞K: n=6 mean=3.0 p50=3.1
+
+scheduler (10 s ticks): steps/s by rows, with/without a prefill in progress:
+  rows= 0 prefilling=y: ticks=7 steps/s mean=0.11
+  rows= 1 prefilling=n: ticks=1 steps/s mean=0.50
+  rows= 1 prefilling=y: ticks=10 steps/s mean=1.24
+  rows= 2 prefilling=y: ticks=11 steps/s mean=2.25
+  rows= 3 prefilling=n: ticks=1 steps/s mean=2.70
+  rows= 3 prefilling=y: ticks=7 steps/s mean=2.51
+  rows= 4 prefilling=y: ticks=12 steps/s mean=3.37
+  rows= 5 prefilling=y: ticks=10 steps/s mean=4.08
+  rows= 6 prefilling=n: ticks=3 steps/s mean=4.53
+  rows= 6 prefilling=y: ticks=12 steps/s mean=4.28
+  rows= 7 prefilling=n: ticks=1 steps/s mean=7.60
+  rows= 7 prefilling=y: ticks=11 steps/s mean=4.56
+  rows= 8 prefilling=n: ticks=3 steps/s mean=5.90
+ticks with prefill in progress: 90%;  waiting>0: 83%;  mean rows 3.97
+pcache GiB max 5.98, active GiB max 18.58

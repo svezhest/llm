@@ -1,0 +1,39 @@
+window 02:00:16–04:06:52 = 126.6 min, requests=238 (1.9/min)
+prompt tokens 5165149 (cached 3978232 = 77.0%), prefilled 1186917, generated 17385
+aggregate: prefill 156 tok/s wall, decode 2.3 tok/s wall
+cache: hits 200, misses 38
+finish reasons: {'stop': 238}  peak max 23.92 GB
+prompt tokens: n=238 mean=21702 p50=13650 p90=35127 max=118244
+prefilled tokens/request: n=238 mean=4987 p50=543 p90=11666 max=110760
+gen tokens/request: n=238 mean=73 p50=51 p90=124 max=158
+latency s (Generate→finish): n=238 mean=123.3 p50=50.6 p90=334.9 max=599.4
+queue s: n=238 mean=75.1 p50=10.1 p90=258.6 max=580.4
+ttft s: n=238 mean=20.3 p50=3.5 p90=44.3 max=482.3
+decode s (gen/tps): n=238 mean=28.0 p50=21.0 p90=65.2 max=109.1
+decode tok/s per request: n=238 mean=3.9 p50=3.1 p90=7.7 max=16.7
+latency share: queue 61%, ttft 16%, decode 23%  (ttft may include queue)
+prefill rate on requests with >=1500 new tokens: 234 tok/s (prefill/ttft, n=73)
+
+decode tok/s per request by prompt length:
+   0–5K: n=4 mean=2.5 p50=3.2
+   5–10K: n=54 mean=4.1 p50=3.3
+  10–15K: n=71 mean=3.8 p50=2.4
+  15–20K: n=19 mean=5.0 p50=5.2
+  20–30K: n=48 mean=3.9 p50=3.0
+  30–∞K: n=42 mean=3.3 p50=2.5
+
+scheduler (10 s ticks): steps/s by rows, with/without a prefill in progress:
+  rows= 0 prefilling=y: ticks=326 steps/s mean=0.05
+  rows= 1 prefilling=n: ticks=2 steps/s mean=0.55
+  rows= 1 prefilling=y: ticks=88 steps/s mean=1.15
+  rows= 2 prefilling=n: ticks=4 steps/s mean=3.90
+  rows= 2 prefilling=y: ticks=61 steps/s mean=1.50
+  rows= 3 prefilling=n: ticks=4 steps/s mean=2.17
+  rows= 3 prefilling=y: ticks=56 steps/s mean=1.91
+  rows= 4 prefilling=n: ticks=1 steps/s mean=8.30
+  rows= 4 prefilling=y: ticks=28 steps/s mean=2.85
+  rows= 5 prefilling=n: ticks=6 steps/s mean=5.97
+  rows= 5 prefilling=y: ticks=15 steps/s mean=2.69
+  rows= 6 prefilling=n: ticks=7 steps/s mean=4.76
+ticks with prefill in progress: 96%;  waiting>0: 93%;  mean rows 1.11
+pcache GiB max 5.99, active GiB max 20.54
