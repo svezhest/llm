@@ -683,7 +683,7 @@ def test_reply_cache_gates(caplog):
     class Row:
         why, spec, group, cache = "stop", False, None, []
         req = type("Q", (), {"images": [], "id": "x"})()
-    for attr, val in [("why", "cancelled"), ("why", None), ("spec", True), ("group", object())]:
+    for attr, val in [("why", "cancelled"), ("why", None), ("group", object())]:
         r = Row()
         setattr(r, attr, val)
         assert s._reply_cache(r, 0) is None

@@ -886,8 +886,9 @@ CACHE_LIMIT_GB = float(os.environ.get("QWEN_CACHE_LIMIT_GB", "3"))
 # state at pos as the end state, the checkpoints taken so far, through the same
 # store (budget, absorb, chain policy). A retry of that prompt resumes at pos
 # (the 2026-10-17 AppWorld run lost 2 x 8 min re-prefilling a 114K prompt the
-# client had cancelled). Not for DFlash prefills nor vision (no store there
-# either); quantized KV as a full store (resumable from quantized_kv_start on).
+# client had cancelled). DFlash prefills too (since 2026-11-11), not vision
+# (no store there either); quantized KV as a full store (resumable from
+# quantized_kv_start on).
 # Entries share their KV: an entry is a chain of immutable segments (buffers of
 # their own, per full-attention layer); a store copies only the tokens past
 # the resume point out of the row and reuses the parent's segments below it,
@@ -993,6 +994,31 @@ DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
 # With QWEN_DRAFT_BITS=0 the weights stay as loaded (bf16: correct, but ~10x
 # slower per block on M1/M2; fp32 weights would be 2x the memory).
 DRAFT_FP32 = os.environ.get("QWEN_DRAFT_FP32", "")
+# QWEN_DRAFT_TAIL: with the prompt cache, every checkpoint a DFlash row
+# stores (the entry's end: QWEN_DRAFT_TAIL_END) carries the drafter's context there:
+# the target's hidden states (the drafter's layers) of the last N positions.
+# A row that resumes from the state starts its drafter with them; without, the
+# drafter saw only the positions the hit left to prefill (1 on an exact
+# repeat: 2.0 instead of 7.0 drafts accepted in the first rounds). 27B /
+# DFlash2, 4 answers of 192 tokens replayed per context length
+# (scripts/perf/dflash2/ctx_len.py): rounds 245 / 226 / 217 / 218 / 221 and
+# drafts accepted in the first 8 rounds 2.3 / 3.5 / 5.3 / 5.3 / 5.4 at N = 1 /
+# 16 / 32 / 128 / 2047 (the drafter's whole window = a cold run): 32 positions
+# are a cold start, 128 is the margin. N x layers x hidden x 2 B per state
+# (27B: 51 KiB per position, 6.6 MB at 128 beside its recurrent state). 0 = off.
+DRAFT_TAIL = int(os.environ.get("QWEN_DRAFT_TAIL", "128"))
+# QWEN_DRAFT_TAIL_END: the same for an entry's END state (the prompt's end: an
+# exact repeat / regenerate; a reply's end: the next turn), where what comes
+# next often copies from what is right before it (edit the previous answer):
+# 27B, the next turn resuming at the reply's end with 128 positions there
+# accepted 3.9 drafts per round where the cold run accepts 5.7 (52 rounds vs
+# 38 for the same 256 tokens: the answer re-emits the previous one's code,
+# half of it out of the drafter's sight); with the window kept, the cold
+# run's rounds exactly (raw/cache_hit_reply*.txt). 27B: <= 105 MB.
+# At most the drafter's window - 1 positions are kept (all it looks at: then
+# a hit at the end starts the drafter exactly as a cold run). One end state
+# per entry. 0 = off.
+DRAFT_TAIL_END = int(os.environ.get("QWEN_DRAFT_TAIL_END", "2048"))
 # Sampling / presence-penalty requests can take the speculative path too
 # (QWEN_DRAFT_SAMPLING=1, exact "sample-match" acceptance, see _Scheduler._spec), but a
 # round (draft ~15 ms + a 4..16-row verify, flat ~2.6x a 1-row step on M1: the
@@ -1096,6 +1122,68 @@ def _copy_cache(caches, upto=None, states=None):
 
 def _recurrent_states(caches):
     return [list(c.cache) for c in caches if hasattr(c, "cache")]
+
+
+def _with_tail(states, tail):
+    """A recurrent state with the drafter's context at its position
+    (QWEN_DRAFT_TAIL / _END: `tail`, (1, n, layers x hidden), the target's hidden
+    states of the n positions before it) as one more item after the recurrent
+    layers. It rides wherever the state goes (inherited, absorbed, thinned,
+    counted in the entry's bytes, written to the disk tier); restore reads
+    the recurrent layers only."""
+    return states + [[tail]] if tail is not None else states
+
+
+def _tail_copy(chunks, n, whole=None):
+    """The last `n` positions of the (1, t, D) `chunks` (in order) as one
+    array in a buffer of its own: a slice would keep its chunk's whole buffer
+    alive in the cache entry. `whole`: a chunk that already is such an array
+    (returned as it is when it is all there is)."""
+    if n <= 0 or not chunks:
+        return None
+    if len(chunks) == 1 and chunks[0] is whole and whole.shape[1] <= n:
+        return whole
+    parts, k = [], 0
+    for t in reversed(chunks):
+        m = min(t.shape[1], n - k)
+        parts.insert(0, t[:, t.shape[1] - m:])
+        k += m
+        if k >= n:
+            break
+    # (a concatenate of several parts writes a new buffer)
+    t = mx.concatenate(parts, axis=1) if len(parts) > 1 else _own_slice(parts[0], 0, k)
+    mx.eval(t)
+    return t
+
+
+def _state_tail(states, layout):
+    """The drafter's context stored with a state (_with_tail), or None."""
+    n = sum(1 for lay in layout if lay[0] == "arr")
+    return states[n][0] if states is not None and len(states) > n else None
+
+
+def _resume_tail(entry, at):
+    """The drafter's context for a DFlash row resuming at `at` of `entry`
+    (None: no entry): what the state there carries, or, when that is more,
+    the part before `at` of the entry's END context (QWEN_DRAFT_TAIL_END: the
+    positions [L - n, L); hidden states are causal and the entry's slabs up to
+    `at` are the new prompt's, so its positions before `at` are what a cold
+    run of the new prompt computes there). So the checkpoints inside the end
+    state's window, the last message starts (where the next turn resumes when
+    the reply is not stored: thinking on), start the drafter with nearly the
+    cold run's context; a checkpoint's own shorter one (QWEN_DRAFT_TAIL) is
+    for those further back. An array of its own (a slice would keep the
+    entry's buffer alive in the row's next entry)."""
+    if entry is None:
+        return None
+    L = len(entry.ids)
+    tail = _state_tail(entry.end if at == L else entry.ckpts[at], entry.layout)
+    if at < L:
+        end = _state_tail(entry.end, entry.layout)
+        k = end.shape[1] - (L - at) if end is not None else 0
+        if k > (tail.shape[1] if tail is not None else 0):
+            tail = _tail_copy([end[:, :k]], k)
+    return tail
 
 
 def _cache_arrays(caches):
@@ -1237,7 +1325,9 @@ class _Entry:
     a chain of pieces (seg, lo, hi) (absolute positions, [lo, hi) within
     [seg.a, seg.b), contiguous from 0 to len(ids)), recurrent-state
     checkpoints and the end state. Pieces and checkpoints are shared objects
-    between entries. `reply` (QWEN_PROMPT_CACHE_REPLY): the entry was
+    between entries. A state stored by a DFlash row has one more item after
+    its recurrent layers: the drafter's context there (_with_tail). `reply`
+    (QWEN_PROMPT_CACHE_REPLY): the entry was
     extended past its prompt by a request's decoded tokens; `reply` is where
     they start (the prompt entry's length) and the end is resumable although
     it is no slab end of the next prompt. `partial`: stored for a cancelled
@@ -1523,7 +1613,7 @@ class _PrefixCache:
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
               kv_start=None, chain=None, wanted=(), reply=None, tick=True, sync=True, spare=(),
-              clock=None, fresh=None, partial=False, seg=None):
+              clock=None, fresh=None, partial=False, seg=None, tail=None):
         """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
         and checkpoints -> (entry or None when it was not kept, the older
         entries it absorbed). A reply store (_Scheduler._store_reply)
@@ -1547,6 +1637,7 @@ class _PrefixCache:
         for an entry that absorbs no chain (a long fresh prompt:
         QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS; None: the cap policy);
         `partial`: it is a cancelled prefill's prefix (_Entry.partial);
+        `tail`: the drafter's context at the entry's end (_with_tail);
         `limit`: the
         bytes the whole cache may hold beside the batch (entries go in
         `victim` order, `wanted` as there; when the new one alone is over, sized from the row's shapes
@@ -1629,8 +1720,8 @@ class _PrefixCache:
         ckpts.pop(L, None)
         _thin(ckpts, PROMPT_CACHE_CKPTS, protect)
         # the chain without its own segment yet: nbytes + extra = its size
-        new = _Entry(ids, pieces, ckpts, _recurrent_states(cache), _layout(cache), quantized,
-                     kv_start if quantized else 0, reply, partial)
+        new = _Entry(ids, pieces, ckpts, _with_tail(_recurrent_states(cache), tail),
+                     _layout(cache), quantized, kv_start if quantized else 0, reply, partial)
         new.chained = chained
         new.seq = self.seq
         if clock is not None:                         # before any eviction can see it
@@ -4125,15 +4216,18 @@ class _Scheduler:
                 # (QWEN_PREEMPT: the generated tokens make the resumed prompt)
                 row.fed, row.plan = [], (set(bounds), protect)
 
-        def checkpoint(pos, cache):
+        def checkpoint(pos, cache, tail=None):
+            """`tail` (DFlash rows): a callable giving the drafter's context
+            at `pos` (QWEN_DRAFT_TAIL), asked only for a position that is kept."""
             if pos in keep:
-                ckpts[pos] = _recurrent_states(cache)
+                ckpts[pos] = _with_tail(_recurrent_states(cache), tail() if tail else None)
 
-        def snapshot(cache, upto=None, why=None):
+        def snapshot(cache, upto=None, why=None, tail=None):
             """Store the entry for prompt[:-1] (the prefill's end), or with
             `upto` for the prefix prompt[:upto] a cancelled / failed prefill
             holds (`why`), when it prefilled at least a slab past `reused`.
-            Either way the prefill ends here."""
+            Either way the prefill ends here. `tail` (DFlash rows): the
+            drafter's context at the stored end (QWEN_DRAFT_TAIL_END)."""
             nonlocal inherit
             row.parent = None
             try:
@@ -4144,7 +4238,7 @@ class _Scheduler:
                                  "" if upto is None else f", {why} at {upto}/{len(ids)}")
                 elif ((upto is None or upto > reused)
                         and all(getattr(c, "keys", 1) is not None for c in cache)):
-                    store(cache, upto, why)
+                    store(cache, upto, why, tail)
             finally:
                 # The caller's frame keeps this closure (a DFlash run: for its
                 # whole decode): let go of the parent's pieces and of the
@@ -4153,7 +4247,7 @@ class _Scheduler:
                 inherit = None
                 ckpts.clear()
 
-        def store(cache, upto=None, why=None):
+        def store(cache, upto=None, why=None, tail=None):
             pc = eng._pcache
             L = len(ids) - 1 if upto is None else upto
             # what the entry claims: the row's KV holds exactly ids[:L] (a
@@ -4170,7 +4264,7 @@ class _Scheduler:
                                       limit=self.budget + self.prefill_reserve - self.reserved,
                                       kv_start=self.kv["quantized_kv_start"], chain=chain,
                                       wanted=self._wanted, fresh=fresh, partial=partial,
-                                      spare=self._parents(but=row))
+                                      spare=self._parents(but=row), tail=tail)
             except Exception:  # noqa: BLE001 — the prefill succeeded: the request goes on uncached
                 log.exception("id=%s prompt cache store failed (the request goes on)", req.id)
                 return
@@ -4326,12 +4420,14 @@ class _Scheduler:
         # first token of the rows that just joined) until it drains.
         self._slab_done(time.time() - seg)
 
-    def _store_prefix(self, row, on_prefilled, cache, pos, why):
+    def _store_prefix(self, row, on_prefilled, cache, pos, why, tail=None):
         """The early-stop store (a cancelled / failed prefill's prefix): a
         failure here is logged and never changes how the request ends (a
-        cancel stays a cancel, a failure keeps its own error)."""
+        cancel stays a cancel, a failure keeps its own error). `tail`: a
+        DFlash row's callable for the drafter's context at `pos`."""
         try:
-            on_prefilled(cache, pos, why)
+            t = tail() if tail else None
+            on_prefilled(cache, pos, why, **({} if t is None else {"tail": t}))
         except Exception:  # noqa: BLE001 — costs the prefix entry only
             log.exception("id=%s prompt cache: storing the %s prefill's prefix failed",
                           row.req.id, why)
@@ -4405,28 +4501,61 @@ class _Scheduler:
         lm._rope_deltas = mx.zeros((1, 1), dtype=mx.int32)
         lm._position_ids = None
         ctx = input_ids[:, :-1]
-        hidden = []
-        while ctx.shape[1] > 0:
-            if req.cancel.is_set():
-                self._finish(row, "cancelled")
-                return
-            n = _slab(pos, ctx.shape[1], cuts)
-            sink = []
-            lm.model(ctx[:, :n], cache=cache, capture_layer_ids=layers, hidden_sink=sink)
-            h = mx.concatenate(sink, axis=-1)
-            hidden.append(h)
-            while sum(t.shape[1] for t in hidden[:-1]) >= win:
-                hidden.pop(0)
-            mx.eval(h, [c.state for c in cache])
-            pos += n
-            if pos in cuts:
-                on_ckpt(pos, cache)
-            ctx = ctx[:, n:]
-            if CLEAR_CACHE:
-                mx.clear_cache()
-            if ctx.shape[1] > 0:
-                yield
-        on_prefilled(cache)
+        # the drafter's context so far: what the entry the row resumed from
+        # holds for the resume point (QWEN_DRAFT_TAIL), then every prefilled
+        # position
+        tail0 = _resume_tail(row.parent, pos)
+        hidden = [tail0] if tail0 is not None else []
+
+        def tail(n=DRAFT_TAIL):
+            """The drafter's context at the cache's end, for a state stored
+            there: the last n positions' hidden states (a checkpoint:
+            QWEN_DRAFT_TAIL)."""
+            return _tail_copy(hidden, n, tail0)
+
+        def tail_end():                         # an entry's end: QWEN_DRAFT_TAIL_END
+            return tail(min(DRAFT_TAIL_END, win))
+
+        # A prefill that stops early stores the prefix it holds, as _prefill
+        # (the partial store: prompt[:pos], pos the last completed slab's end)
+        start, intact, cancelled = pos, True, False
+        try:
+            while ctx.shape[1] > 0:
+                if req.cancel.is_set():
+                    cancelled = True
+                    break
+                n = _slab(pos, ctx.shape[1], cuts)
+                sink = []
+                intact = False                  # the forward moves every cache's offset
+                lm.model(ctx[:, :n], cache=cache, capture_layer_ids=layers, hidden_sink=sink)
+                h = mx.concatenate(sink, axis=-1)
+                hidden.append(h)
+                # drop the oldest chunk while the rest still covers the window
+                # (until 2026-11-11 this tested hidden[:-1], all but the NEWEST:
+                # a short last slab after a full one left the drafter that
+                # short slab alone, e.g. slabs 2048 + 2048 + 40 -> 40 positions)
+                while sum(t.shape[1] for t in hidden[1:]) >= win:
+                    hidden.pop(0)
+                mx.eval(h, [c.state for c in cache])
+                pos += n
+                intact = True
+                if pos in cuts:
+                    on_ckpt(pos, cache, tail)
+                ctx = ctx[:, n:]
+                if CLEAR_CACHE:
+                    mx.clear_cache()
+                if ctx.shape[1] > 0:
+                    yield
+        except Exception:
+            if intact and pos > start:
+                self._store_prefix(row, on_prefilled, cache, pos, "failed", tail_end)
+            raise
+        if cancelled:
+            if pos > start:
+                self._store_prefix(row, on_prefilled, cache, pos, "cancelled", tail_end)
+            self._finish(row, "cancelled")
+            return
+        on_prefilled(cache, tail=tail_end())
         on_ckpt = on_prefilled = None           # nothing of the prefill outlives it here
         out = lm(input_ids[:, -1:], cache=cache, capture_layer_ids=layers)
         hidden.append(mx.concatenate(out.hidden_states, axis=-1))
@@ -4435,8 +4564,31 @@ class _Scheduler:
         mx.eval(first, hidden)
         first = first.item()
         req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
+        # Reply KV (QWEN_PROMPT_CACHE_REPLY): row.fed takes every generated
+        # token in order (as _iterate: the stop token too), `recent` the
+        # hidden states of the last DRAFT_TAIL_END positions in the target
+        # cache (the reply entry's end state carries them: the next turn's
+        # drafter), in chunks
+        gen = row.fed
+        recent, keep = None, min(DRAFT_TAIL_END, win)
+        if gen is not None and PROMPT_CACHE_REPLY and keep > 0:
+            recent = [_tail_copy([hidden], keep)]
+
+        def seen(h):
+            """`h`: the hidden states of the positions the cache just took."""
+            if recent is None:
+                return
+            recent.append(h)
+            while sum(t.shape[1] for t in recent[1:]) >= keep:
+                recent.pop(0)
+            if len(recent) > 32:
+                # a chunk is a view of its verify block's buffer (the whole
+                # block stays allocated): one array of their own now and then
+                recent[:] = [_tail_copy(recent, keep)]
 
         def emit(tok):
+            if gen is not None:
+                gen.append(tok)
             if self.eng.stopping(tok):
                 return False
             if pen.active:
@@ -4471,6 +4623,7 @@ class _Scheduler:
                     h = mx.concatenate(o.hidden_states, axis=-1)
                     mx.eval(h, [c.state for c in cache])
                     ctx.append(h)
+                    seen(h)
                     req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
                 last, cached = f, False
                 if not emit(last):
@@ -4551,6 +4704,9 @@ class _Scheduler:
                 _record_speculative_round(draft, hit, bs - 1)
                 acc, drafted = acc + hit, drafted + bs - 1
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
+                if accepted < bs - 1:           # the positions the commit kept
+                    hidden = hidden[:, : accepted + 1, :]
+                seen(hidden)
                 stopped, f = False, None
                 for j, tok in enumerate(new):
                     if not emit(tok):
@@ -4564,8 +4720,6 @@ class _Scheduler:
                 if stopped or not new:
                     break
                 b = new[-1]
-                if accepted < bs - 1:
-                    hidden = hidden[:, : accepted + 1, :]
                 if f is not None:
                     # new[-1] is a draft the commit kept (the block was cut
                     # there) or the target's own token (not in the cache yet)
@@ -4584,6 +4738,7 @@ class _Scheduler:
                 log.warning("dflash: none of %d drafts accepted: the drafter's output is "
                             "unusable (NaN from an fp16 overflow? try QWEN_DRAFT_FP32=1)", drafted)
         self._finish(row, finish)
+        self._spec_reply(row, recent)
 
     def fit_max_batch(self):
         """max_batch, or 1 when the budget cannot hold two typical rows (a
@@ -4672,14 +4827,15 @@ class _Scheduler:
         """The cache list a finished row `i` of the batch ends with (its KV
         objects, its recurrent state in ArraysCaches of its own) -> None when
         it is not stored: ended otherwise than stop / length, still in a
-        cascade group (its KV is in the group's stack; logged), DFlash, vision.
+        cascade group (its KV is in the group's stack; logged), vision.
         Builds lazy arrays only. Its state is always a gather into a buffer
         of its own, never a view: at B >= 2 out of the stacked state (a
         slice would keep the batch's whole stack alive in the entry), at
         B = 1 too (right after the batch shrank to it, its arrays are still
         _gdn_split's views of the old stack)."""
         try:
-            if row.why not in ("stop", "length", "preempted") or row.spec or row.req.images:
+            # (a demoted DFlash row: row.fed holds its rounds' tokens too)
+            if row.why not in ("stop", "length", "preempted") or row.req.images:
                 return None
             if row.group is not None:
                 log.info("id=%s prompt cache reply skipped: in a cascade group (P=%s) when it "
@@ -4705,7 +4861,47 @@ class _Scheduler:
             log.exception("id=%s prompt cache reply: state not taken", row.req.id)
             return None
 
-    def _store_reply(self, row, cache):
+    def _spec_reply(self, row, recent):
+        """The reply KV of a DFlash row that ended in its rounds (stop /
+        length): as a batch row's (_reply_cache + _store_reply; row.fed = its
+        generated tokens, of which the cache holds the first pos - len(prompt):
+        a stop token among accepted drafts with more drafts after it is
+        "a fed token never read", nothing stored), evaluated here (no decode
+        step is in flight). `recent`: chunks of the last positions' hidden
+        states, the end state's drafter context (QWEN_DRAFT_TAIL_END). Never
+        raises: the request already ended."""
+        if row.fed is None or not PROMPT_CACHE_REPLY or row.why not in ("stop", "length"):
+            row.fed = None
+            return
+        pc = self.eng._pcache
+        new, covered = None, []
+        try:
+            from mlx_vlm.models.cache import ArraysCache
+            idx = mx.array([0], dtype=mx.int32)
+            cache = []
+            for c in row.cache:
+                if hasattr(c, "cache"):         # a gather: never a view of a verify block's states
+                    n = ArraysCache(size=len(c.cache))
+                    n.cache = [a[idx] if a is not None else None for a in c.cache]
+                    cache.append(n)
+                else:
+                    cache.append(c)
+            row.pos = row.cache[self.lm.model.fa_idx].offset
+            k = row.pos - len(row.req.ids)
+            tail = (_tail_copy(recent, DRAFT_TAIL_END)
+                    if recent and 1 <= k <= len(row.fed) else None)
+            new, covered = self._store_reply(row, cache, tail)
+            if new is not None:
+                mx.eval(new.arrays)
+        except Exception:  # noqa: BLE001
+            if new is not None:                 # as a failed store: it goes, the absorbed come back
+                pc.entries = [x for x in pc.entries if x is not new]
+                pc.entries += [c for c in covered if not any(c is x for x in pc.entries)]
+                pc.evictions += 1
+                pc._recount()
+            log.exception("id=%s prompt cache reply store failed (DFlash row)", row.req.id)
+
+    def _store_reply(self, row, cache, tail=None):
         """Extend the entry the row's prefill stored by the tokens the model
         consumed while it decoded (prompt + generated[:k]: the step-ahead fed
         the EOS a row stops on, a sync row did not, a "length" row fed every
@@ -4719,6 +4915,7 @@ class _Scheduler:
         The entry keeps its prompt entry's recency (`clock`). Never evicts
         the entry the running prefill resumed from (task_row.parent: its
         pieces stay allocated until that prefill stores, as in _regrow).
+        `tail`: a DFlash row's drafter context at the end (_with_tail).
         Nothing when the entry is gone (evicted / absorbed while it decoded:
         the victim order had decided its next turn is the furthest away),
         nor for a reply that generated a reasoning section (thinking on, as
@@ -4770,7 +4967,7 @@ class _Scheduler:
                                     limit=self.budget + self.prefill_reserve - self.reserved,
                                     kv_start=self.kv["quantized_kv_start"], wanted=self._wanted,
                                     reply=L, tick=False, sync=False, spare=spare,
-                                    clock=(e.used, e.seq))
+                                    clock=(e.used, e.seq), tail=tail)
         except Exception:  # noqa: BLE001 — the request already ended
             log.exception("id=%s prompt cache reply store failed", req.id)
             return None, []

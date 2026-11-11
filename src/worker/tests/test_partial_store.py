@@ -211,13 +211,15 @@ def test_partial_store_beside_decoding_rows(dense, small, monkeypatch):
     assert run(sched, [y])["y"] == cold(dense, ids, 6, "y") and y.reused == target
 
 
-def test_dflash_prefill_cancel_stores_nothing(dense, small, monkeypatch):
-    """A DFlash run (_spec) cancelled mid-prefill stores nothing (as before);
-    the same plain prefill would."""
+def test_dflash_prefill_cancel_stores_the_prefix_too(dense, small, monkeypatch):
+    """A DFlash run (_spec) cancelled mid-prefill stores the prefix it holds
+    as the same plain prefill does (since 2026-11-11; the drafter's context
+    at the stored end: tests/test_draft_tail.py), and its retry resumes there."""
     from test_scheduler import FakeDraft, no_metal_verify
     no_metal_verify(monkeypatch)
     ids = prompt(340)
     plain = cold(dense, ids, 20, "x")
+    pos = slab_ends(ids)[2]
     sched = scheduler(dense, max_batch=1)
     sched.eng.draft = FakeDraft(plain[0])
     specs = []
@@ -229,11 +231,16 @@ def test_dflash_prefill_cancel_stores_nothing(dense, small, monkeypatch):
     sched._spec = spec
     x = request(ids, 20, "x")
     assert run(sched, [x], on_tick=cancel_after(x, 3))["x"] == ([], [], ("done", "cancelled"))
-    assert specs and sched.eng._pcache.entries == []
-    sched.eng.draft = None
+    (e,) = sched.eng._pcache.entries
+    assert specs and e.partial and e.ids == ids[:pos]
+    assert check_cold(sched.eng._pcache, Cold(dense))
+    sched.eng.draft = FakeDraft(plain[0])
+    y = request(ids, 20, "y")
+    assert run(sched, [y])["y"] == plain and y.reused == pos and len(specs) == 2
+    plain_sched = scheduler(dense, max_batch=1)
     x = request(ids, 20, "x")
-    run(sched, [x], on_tick=cancel_after(x, 3))
-    assert [e.ids for e in sched.eng._pcache.entries] == [ids[:slab_ends(ids)[2]]]
+    run(plain_sched, [x], on_tick=cancel_after(x, 3))
+    assert [e.ids for e in plain_sched.eng._pcache.entries] == [ids[:pos]]
 
 
 def test_failure_outside_the_forward_stores_the_prefix(dense, small, monkeypatch, caplog):
