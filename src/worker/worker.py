@@ -957,6 +957,17 @@ PROMPT_CACHE_KEEP_WAIT_S = float(os.environ.get("QWEN_PROMPT_CACHE_KEEP_WAIT_S",
 # the string and the next turn falls back (harmless). A regenerate of the same prompt resumes at
 # the last message start (the prompt-end state is dropped with the extension).
 PROMPT_CACHE_REPLY = os.environ.get("QWEN_PROMPT_CACHE_REPLY", "1") == "1"
+# QWEN_PROMPT_CACHE_MOVE=1 (single stream: QWEN_MAX_BATCH=1, fp16 KV): one copy
+# of a conversation's KV instead of two (the row's + the entry's). A hit moves
+# the entry's KV into the row, layer by layer (the entry leaves the cache);
+# nothing is copied at the prefill's end; when the row ends its own buffers
+# become the entry (prompt, or prompt + reply). KV fp16 is 64 KiB/token on the
+# 27B: 64K tokens = 4 GiB once instead of 8 (the cache refused such entries:
+# "not kept"). Same bits as the copies. The price: while a request runs, the
+# cache holds nothing of its conversation (a concurrent sibling / a regenerate
+# sent before it ends is a miss), and a request that fails mid-forward loses
+# the entry. Off: today's code path, untouched.
+PROMPT_CACHE_MOVE = os.environ.get("QWEN_PROMPT_CACHE_MOVE", "0") == "1"
 
 # Compute dtype (QWEN_FP16=1): cast every bfloat16 parameter (quant scales/
 # biases, norms, embeddings, A_log...) to float16 after load. M1/M2-class GPUs
@@ -1124,6 +1135,24 @@ def _recurrent_states(caches):
     return [list(c.cache) for c in caches if hasattr(c, "cache")]
 
 
+def _own_states(caches):
+    """After a DFlash round: every recurrent layer's state in a buffer of its
+    own (a gather; queued, not waited for). A block of T tokens that is not
+    wholly accepted leaves each layer's state as a slice of the block's
+    per-token states (mlx-vlm `_select_speculative_states`:
+    `intermediate[:, keep - 1]`), which keeps all T - 1 of them alive until the
+    next partly accepted block — on the 27B at block 8, 7 x 147 MiB = 1.0 GiB
+    held between rounds on top of the next block's own T states. Same values."""
+    idx, out = mx.array([0], dtype=mx.int32), []
+    for c in caches:
+        if hasattr(c, "cache"):
+            for i, x in enumerate(c.cache):
+                if x is not None:
+                    c.cache[i] = x[idx]
+                    out.append(c.cache[i])
+    mx.async_eval(out)
+
+
 def _with_tail(states, tail):
     """A recurrent state with the drafter's context at its position
     (QWEN_DRAFT_TAIL / _END: `tail`, (1, n, layers x hidden), the target's hidden
@@ -1274,15 +1303,58 @@ class _Seg:
         return seg
 
     @classmethod
-    def adopt(cls, cache, b):
-        """[0, b) of a DYING row's caches without a copy (QWEN_PREEMPT): the
-        segment's arrays are views of the row's own buffers, which nothing
-        writes again (the row is dropped right after; its next decode never
-        runs). The buffers keep their capacity tail (< one 256-token KVCache
-        step) that `nbytes` does not count."""
+    def adopt(cls, cache, b, a=0):
+        """[a, b) of a DYING row's caches without a copy (QWEN_PREEMPT,
+        QWEN_PROMPT_CACHE_MOVE): the segment's arrays are views of the row's
+        own buffers, which nothing writes again (the row is dropped right
+        after; its next decode never runs). The buffers keep their capacity
+        tail (< one 256-token KVCache step) that `nbytes` does not count."""
+        def view(x):
+            return tuple(y[..., a:b, :] for y in x) if isinstance(x, (tuple, list)) else x[..., a:b, :]
+        return cls(a, b, [(view(c.keys), view(c.values)) for c in cache if not hasattr(c, "cache")])
+
+    @classmethod
+    def take(cls, cache, b, a=0):
+        """[a, b) of a DYING row's caches with one copy of the KV alive at
+        any time (QWEN_PROMPT_CACHE_MOVE). The row's buffers as they are
+        (views, as `adopt`) when the segment is all they hold: a = 0 and less
+        than a KVCache step past b. Else (an entry that ends before the
+        buffers do: the prompt of a reply that is not stored; a = the part a
+        sibling's entry already holds) each layer is copied out, evaluated
+        and the row's buffer released at once (its cache object is emptied:
+        the row is dead) — the transient is one layer's KV, and the entry
+        pins nothing it does not count."""
+        def own(x):
+            return tuple(_own_slice(y, a, b) for y in x) if isinstance(x, (tuple, list)) \
+                else _own_slice(x, a, b)
+
         def view(x):
             return tuple(y[..., :b, :] for y in x) if isinstance(x, (tuple, list)) else x[..., :b, :]
-        return cls(0, b, [(view(c.keys), view(c.values)) for c in cache if not hasattr(c, "cache")])
+        kv = []
+        for c in cache:
+            if hasattr(c, "cache"):
+                continue
+            k0 = c.keys[0] if isinstance(c.keys, (tuple, list)) else c.keys
+            if a == 0 and k0.shape[-2] - b < getattr(type(c), "step", 256):
+                kv.append((view(c.keys), view(c.values)))
+                continue
+            k, v = own(c.keys), own(c.values)
+            mx.eval(k, v)
+            c.keys = c.values = None            # the old buffer goes before the next layer's copy
+            kv.append((k, v))
+        return cls(a, b, kv)
+
+    def sub(self, a, b):
+        """[a, b) of this segment as a segment of views of its buffers (no
+        copy): a prompt entry and its reply over one taken buffer."""
+        if (a, b) == (self.a, self.b):
+            return self
+        lo, hi = a - self.a, b - self.a
+
+        def view(x):
+            return tuple(y[..., lo:hi, :] for y in x) if isinstance(x, (tuple, list)) \
+                else x[..., lo:hi, :]
+        return _Seg(a, b, [(view(k), view(v)) for k, v in self.kv])
 
     @staticmethod
     def estimate(cache, a, b):
@@ -1453,7 +1525,7 @@ class _PrefixCache:
             self.misses += 1
         return hit, at, split
 
-    def restore(self, entry, at, first=1):
+    def restore(self, entry, at, first=1, move=False):
         """Caches for a row resuming at `at`. Each full-attention layer: one
         concatenate of the entry's pieces over [0, at) and a zeros tail of
         round_up(first, step) tokens, `first` being the first update's token
@@ -1462,10 +1534,29 @@ class _PrefixCache:
         shape, same bits), so it writes in place, and the row never holds a
         view of a segment. Recurrent layers: the end state at len(ids), else
         the checkpoint at `at` (fresh lists, shared arrays: the model
-        replaces them whole)."""
+        replaces them whole).
+
+        `move` (QWEN_PROMPT_CACHE_MOVE): the entry's KV becomes the row's
+        instead of being copied beside it. The entry leaves the cache and
+        keeps its ids and states only (a husk: what the row's store inherits
+        when it ends, _Scheduler._settle); each layer is built, evaluated,
+        and the entry's buffers of that layer released before the next one
+        (the segments no other entry's chain holds; a shared one stays with
+        its other holders) — the transient is one layer's KV, never a second
+        copy of it all. Same buffers, same bits as without."""
         pieces = entry.cut(at)
         states = iter(entry.end if at == len(entry.ids) else entry.ckpts[at])
         out, j = [], 0
+        own = []
+        if move:
+            self.entries = [e for e in self.entries if e is not entry]
+            held = {id(s) for e in self.entries for s, _, _ in e.chain}
+            own = [s for s in {id(s): s for s, _, _ in entry.chain}.values() if id(s) not in held]
+            entry.chain = []
+            entry.index()                             # its states only from here on
+            for s in own:                             # (kv holds the buffers until its layer is built)
+                s.arrays, s.nbytes = [], 0
+            self._recount(added=False)
 
         def build(parts, tail):
             x = parts[0]
@@ -1492,9 +1583,28 @@ class _PrefixCache:
                 n.values = build([x[1][..., a:b, :] for x, a, b in sl], tail)
             n.offset = at
             out.append(n)
+            if move:
+                mx.eval(_cache_arrays([n]))
+                sl = None
+                for s in own:
+                    s.kv[j] = None
             j += 1
         mx.eval(_cache_arrays(out))
         return out
+
+    def unmove(self, entry, seg, limit=None, wanted=()):
+        """Put a moved entry (restore move=True: a husk) back as it was, its
+        KV now `seg` = [0, len) of the row's caches (the row prefilled
+        nothing past it and ends: a cancel before its first slab; taken out
+        of the buffers restore pre-sized for the first slab) -> False
+        when it was not kept (`insert`'s rules)."""
+        entry.chain = [(seg, 0, len(entry.ids))]
+        entry.index()
+        if self.insert(entry, limit=limit, wanted=wanted):
+            return True
+        entry.chain = []
+        entry.index()
+        return False
 
     def victim(self, left, wanted=()):
         """The entry of `left` to evict first. An entry a waiting request
@@ -1613,7 +1723,7 @@ class _PrefixCache:
 
     def store(self, ids, cache, ckpts, inherit=None, at=0, ends=(), protect=(), limit=None,
               kv_start=None, chain=None, wanted=(), reply=None, tick=True, sync=True, spare=(),
-              clock=None, fresh=None, partial=False, seg=None, tail=None):
+              clock=None, fresh=None, partial=False, seg=None, tail=None, moved=None):
         """Add the entry for `ids` (= prompt[:-1]) from the prefill's `cache`
         and checkpoints -> (entry or None when it was not kept, the older
         entries it absorbed). A reply store (_Scheduler._store_reply)
@@ -1638,6 +1748,12 @@ class _PrefixCache:
         QWEN_PROMPT_CACHE_CHAIN_FRESH_TOKENS; None: the cap policy);
         `partial`: it is a cancelled prefill's prefix (_Entry.partial);
         `tail`: the drafter's context at the entry's end (_with_tail);
+        `moved` (QWEN_PROMPT_CACHE_MOVE): the husk of the entry the row
+        resumed from (restore move=True: out of the cache, no KV): it is
+        absorbed as if it were still an entry (its checkpoints move over, it
+        makes a chain) when the new ids cover it; never returned among the
+        absorbed ones (nothing to put back); `inherit` then has no pieces
+        and `seg` covers [0, len);
         `limit`: the
         bytes the whole cache may hold beside the batch (entries go in
         `victim` order, `wanted` as there; when the new one alone is over, sized from the row's shapes
@@ -1667,7 +1783,7 @@ class _PrefixCache:
         ckpts = dict(ckpts)
         pieces, lo = [], 0
         if inherit is not None:                       # inherit the shared part
-            if inherit.quantized == quantized:
+            if inherit.quantized == quantized and inherit.pieces:
                 pieces, lo = list(inherit.pieces), at
             for p, s in inherit.ckpts.items():
                 ckpts.setdefault(p, s)
@@ -1692,7 +1808,7 @@ class _PrefixCache:
         # differently, regenerated), only its checkpoints are of use.
         def prefix(e):
             return len(e.ids) <= L and ids[: len(e.ids)] == e.ids
-        covered = [e for e in self.entries
+        covered = [e for e in (self.entries if moved is None else [*self.entries, moved])
                    if (prefix(e) or (e.reply is not None and e.reply <= L
                                      and ids[: e.reply] == e.ids[: e.reply]))
                    and not (quantized and not e.quantized)
@@ -1709,6 +1825,15 @@ class _PrefixCache:
         # a chain: this conversation's previous turn absorbed (a cancelled
         # prefill's prefix alone is this same turn, not a previous one)
         chained = any(not e.partial or e.chained for e in covered)
+        heir = False
+        if moved is not None:                         # a husk: nothing of it is put back
+            covered = [e for e in covered if e is not moved]
+            # a prefix of the husk itself (a cancelled prefill gives back the
+            # part of it the row held): that entry cut short, a chain when
+            # it was one (the retry's store absorbs it as it would have
+            # absorbed the whole)
+            heir = (L <= len(moved.ids) and moved.ids[:L] == ids
+                    and (not moved.partial or moved.chained))
         policy = chain if chained and chain is not None else fresh
         if policy is not None:
             # its next turn resumes at the last message starts, older turns'
@@ -1722,7 +1847,7 @@ class _PrefixCache:
         # the chain without its own segment yet: nbytes + extra = its size
         new = _Entry(ids, pieces, ckpts, _with_tail(_recurrent_states(cache), tail),
                      _layout(cache), quantized, kv_start if quantized else 0, reply, partial)
-        new.chained = chained
+        new.chained = chained or heir
         new.seq = self.seq
         if clock is not None:                         # before any eviction can see it
             new.used, new.seq = clock
@@ -2629,13 +2754,35 @@ def _install_rows_attention(lm):
 #   drafter's block_size 16; a QWEN_DRAFT_BLOCK above 16 still has longer
 #   blocks on quantized_matmul). An empty value = the default.
 SDPA_FUSED = os.environ.get("QWEN_SDPA_FUSED", "1") != "0"
-SDPA_FUSED_MIN_Q, SDPA_FUSED_MIN_KV = 512, 32768
+# QWEN_SDPA_FUSED_MIN_KV (32768): the fused kernel from this many keys on. Below
+#   it the default path is 5-12 % faster per call but materializes slab x keys
+#   x heads scores (2 B each): 2048 x 31K x 24 heads = 2.8 GiB on the 27B, the
+#   prefill's memory hump (with the drafter, fp16 KV and the prompt cache a
+#   60K prefill ran out of memory there). 8192 with QWEN_PREFILL_BUDGET =
+#   2048 x 8192 = 16777216 caps the scores at 0.75 GiB and the prefill reserve
+#   at 1.15 GiB instead of 3.4. Changes the slab kernels' bits past the
+#   threshold (KL fused vs unfused 7e-6), not the slab cuts at the defaults.
+SDPA_FUSED_MIN_Q = 512
+SDPA_FUSED_MIN_KV = int(os.environ.get("QWEN_SDPA_FUSED_MIN_KV") or "32768")
 GDN_FAST = os.environ.get("QWEN_GDN_FAST", "0") == "1"
 GDN_FAST_MIN_T = 16
 VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
 _SDPA = None                          # the library's qwen3_5 scaled_dot_product_attention
 _GDN_KERNEL = None                    # the library's gated_delta_kernel
 _VERIFY_LINEAR = _VERIFY_LINEARS = None   # Qwen3_5BatchInvariantForward._linear / _linears
+_VERIFY_ATTENTION = None                  # ... ._attention
+# QWEN_VERIFY_ATT: a DFlash verify block's attention through MLX's "vector"
+#   attention kernel, several queries per call. mlx-vlm verifies a block of T
+#   tokens with T one-query calls per full-attention layer (each bit-equal to
+#   a 1-token decode), so a round reads the row's whole KV T times: at 60K keys
+#   (27B) 25 ms a layer for a block of 8 where a decode step's one query takes
+#   2.9. The vector kernel (mx.fast SDPA, mask "causal", queries x GQA factor
+#   <= 32: 5 queries on the 27B, 8 on the 9B) gives the same bits as the
+#   one-query calls (checked at load on random data, _probe_verify_attention:
+#   else off) and reads the KV once: 3.4 / 4.6 ms for 3 / 5 queries. A longer
+#   block goes in chunks. fp16 KV, a lone row. 0 = the library's calls.
+VERIFY_ATT = os.environ.get("QWEN_VERIFY_ATT", "1") == "1"
+_VERIFY_ATT_Q = 0                         # queries per call; 0 = off (set at load)
 
 
 def _fused_sdpa(queries, keys, values, cache, scale, mask, sinks=None):
@@ -2747,6 +2894,91 @@ def _verify_linear(self, linear, x):
     if x.shape[1] > VERIFY_EXACT_MAX_T:
         return linear(x)
     return _VERIFY_LINEAR(self, linear, x)
+
+
+def _block_sdpa(queries, keys, values, scale):
+    """Causal attention of the LAST queries.shape[2] positions over `keys`
+    (query i sees keys [0, n - T + i]) through MLX's vector kernel; raises
+    where there is none for the shape / dtype / device."""
+    return mx.fast.scaled_dot_product_attention(queries, keys, values, scale=scale, mask="causal",
+                                                force_fused=True)
+
+
+def _rows_sdpa(queries, keys, values, scale, a, b):
+    """The library's verify attention for queries [a, b) of a block of T (the
+    last T positions of `keys`): one call per query over the keys up to its
+    own position. -> list of (1, H, 1, D)."""
+    n, T = keys.shape[2], queries.shape[2]
+    return [mx.fast.scaled_dot_product_attention(
+        queries[:, :, i:i + 1], keys[:, :, :n - T + i + 1], values[:, :, :n - T + i + 1],
+        scale=scale, mask=None) for i in range(a, b)]
+
+
+def _block_attention(queries, keys, values, scale, step):
+    """A verify block's attention, `step` queries per vector-kernel call; a
+    call that fails turns QWEN_VERIFY_ATT off and its queries (and the rest)
+    go one by one."""
+    global _VERIFY_ATT_Q
+    n, T, out = keys.shape[2], queries.shape[2], []
+    for a in range(0, T, step):
+        b = min(T, a + step)
+        if _VERIFY_ATT_Q:
+            try:
+                out.append(_block_sdpa(queries[:, :, a:b], keys[:, :, :n - T + b],
+                                       values[:, :, :n - T + b], scale))
+                continue
+            except (ValueError, RuntimeError, TypeError) as e:
+                _VERIFY_ATT_Q = 0
+                log.warning("QWEN_VERIFY_ATT off: %s", e)
+        out += _rows_sdpa(queries, keys, values, scale, a, b)
+    return out[0] if len(out) == 1 else mx.concatenate(out, axis=2)
+
+
+def _probe_verify_attention(lm):
+    """At load with a drafter: -> queries per vector-kernel call (0 = off:
+    QWEN_VERIFY_ATT=0, no kernel, or its output is not bit-equal to the
+    one-query calls' on a random block of this model's heads)."""
+    global _VERIFY_ATT_Q
+    _VERIFY_ATT_Q = 0
+    a = lm.args
+    H, HK, D = a.num_attention_heads, a.num_key_value_heads, a.head_dim
+    T = min(32 // max(1, H // HK), 16)
+    if not VERIFY_ATT or T < 2:
+        return 0
+    try:
+        dt = _act_dtype(lm) or mx.float16
+        key = mx.random.key(0)
+        q, k, v = (mx.random.normal(shape, key=mx.random.split(key, 3)[i]).astype(dt)
+                   for i, shape in enumerate(((1, H, T, D), (1, HK, 700, D), (1, HK, 700, D))))
+        k, v = k[:, :, :600], v[:, :, :600]           # views of longer buffers, as a cache's
+        one = _block_sdpa(q, k, v, D ** -0.5)
+        rows = mx.concatenate(_rows_sdpa(q, k, v, D ** -0.5, 0, T), axis=2)
+        if mx.array_equal(one, rows).item():
+            _VERIFY_ATT_Q = T
+        else:
+            log.warning("QWEN_VERIFY_ATT off: the vector attention kernel's %d-query output differs "
+                        "from the one-query calls'", T)
+    except (ValueError, RuntimeError, TypeError) as e:
+        log.info("QWEN_VERIFY_ATT off (no vector attention kernel): %s", e)
+    return _VERIFY_ATT_Q
+
+
+def _verify_attention(self, attention, x, mask, cache, position_ids, position_embeddings):
+    """Qwen3_5BatchInvariantForward._attention; a verify block (1, T >= 2, K)
+    of a lone row over a plain fp16 KVCache attends _VERIFY_ATT_Q queries per
+    call (QWEN_VERIFY_ATT) instead of one. Decided before the cache is
+    touched; anything else is the library's call."""
+    T = x.shape[1]
+    if not (_VERIFY_ATT_Q and x.shape[0] == 1 and T >= 2
+            and (mask is None or (isinstance(mask, str) and mask == "causal"))
+            and type(cache).__name__ == "KVCache" and not hasattr(cache, "bits")):
+        return _VERIFY_ATTENTION(self, attention, x, mask, cache, position_ids, position_embeddings)
+    q, k, v = self._linears((attention.q_proj, attention.k_proj, attention.v_proj), x)
+    queries, keys, values, gate, _ = attention._prepare_projected_qkv(
+        q, k, v, cache, position_ids, position_embeddings, mask)
+    out = _block_attention(queries, keys, values, attention.scale, _VERIFY_ATT_Q)
+    out = out.transpose(0, 2, 1, 3).reshape(1, T, -1)
+    return self._linear(attention.o_proj, out * mx.sigmoid(gate))
 
 
 def _verify_linears(self, linears, x):
@@ -3028,7 +3260,7 @@ def _install_fast_paths():
     """QWEN_SDPA_FUSED / QWEN_GDN_FAST / QWEN_VERIFY_EXACT_MAX_T as overrides
     of the qwen3_5 module globals / verifier methods (the MoE model uses the
     same modules). Once; -> what is on."""
-    global _SDPA, _GDN_KERNEL, _VERIFY_LINEAR, _VERIFY_LINEARS
+    global _SDPA, _GDN_KERNEL, _VERIFY_LINEAR, _VERIFY_LINEARS, _VERIFY_ATTENTION
     from mlx_vlm.models.qwen3_5 import gated_delta, language as q35, speculative_verifier
     if SDPA_FUSED and _SDPA is None:
         _probe_fused_sdpa()
@@ -3040,6 +3272,8 @@ def _install_fast_paths():
     if _VERIFY_LINEAR is None:
         _VERIFY_LINEAR, _VERIFY_LINEARS = v._linear, v._linears
         v._linear, v._linears = _verify_linear, _verify_linears
+    if _VERIFY_ATTENTION is None:
+        _VERIFY_ATTENTION, v._attention = v._attention, _verify_attention
     return {"sdpa_fused": _SDPA is not None, "gdn_fast": _GDN_KERNEL is not None,
             "verify_exact_max_t": VERIFY_EXACT_MAX_T}
 
@@ -3338,6 +3572,32 @@ class _Req:
         return len(self.prompt_ids)
 
 
+class _Own:
+    """QWEN_PROMPT_CACHE_MOVE: what a row that holds its conversation's only
+    KV copy keeps to hand it to the prompt cache when it ends
+    (_Scheduler._settle / _settle_prefix). `husk`: the entry it resumed from,
+    moved out of the cache (ids + states, no KV; None: a miss, or a hit on
+    an entry that stays: a sibling's); `at`: where it resumed; `lo`: its
+    store's own segment starts there (`at` when the entry it resumed from
+    stays and its pieces are inherited, else 0); `L`: the prompt entry's
+    length (len(prompt) - 1); `end`:
+    (the recurrent states at L, the drafter's context there) once the prefill
+    completed; `store`: _prompt_cache's store for this prompt (checkpoints,
+    policies), taking the segment to keep."""
+    __slots__ = ("husk", "at", "lo", "L", "end", "store")
+
+    def __init__(self, husk, at, lo, L):
+        self.husk, self.at, self.lo, self.L = husk, at, lo, L
+        self.end = self.store = None
+
+    def close(self):
+        """When the row's KV went to the cache (or was lost): `store` is a
+        closure over this object and the row — a reference cycle that would
+        keep the dead row's caches, the saved states and the husk (0.4-1.3 GiB
+        a turn on the 27B) until Python's cyclic collector happens to run."""
+        self.husk = self.end = self.store = None
+
+
 class _Row:
     """Scheduler-side state of an admitted request. `y` is the next input token
     (a lazy (1,) array); unless `first` it is also the newest output token,
@@ -3357,6 +3617,7 @@ class _Row:
         self.done = False
         self.sampler = self.pen = None
         self.parent = None                          # the entry the running prefill resumed from
+        self.own = None                             # _Own: its KV is the cache's only copy (MOVE)
         self.started = False                        # its prefill / DFlash run began
         self.cached = False                         # resumed from the prompt cache or stored an entry
         self.spec = False                           # ran DFlash (_spec): never grouped
@@ -4064,6 +4325,7 @@ class _Scheduler:
         except Exception as e:  # noqa: BLE001 — a failed prefill fails its request only
             log.exception("prefill failed: %s", row.req.id)
             self._fail(row, e)
+            self._lost(row)
             self._task_done(lane)
 
     def _task_done(self, lane):
@@ -4100,23 +4362,81 @@ class _Scheduler:
         else:
             parent, reused, split = None, 0, 0
         inherit = None
+        # QWEN_PROMPT_CACHE_MOVE: the row holds the only copy of its KV (a hit
+        # moves the entry's into it, nothing is copied at the prefill's end,
+        # the row's buffers become the entry when it ends: _settle)
+        move = keeps and self._move_on()
+        taken = covers = False
+
+        def room(keep=(), gone=None):
+            """MOVE: an empty batch always admits, without an admission
+            check, so the cache gives way to this row's reservation here
+            (with one KV copy, the entry the row comes back as fits where
+            the row did). `gone`: the entry about to move into the row (what
+            only it holds is not counted: a segment another entry shares
+            stays, beside the row's copy of it) -> False: still over."""
+            pc, n = eng._pcache, 0
+
+            def over():
+                c = pc.charged()
+                if gone is not None:
+                    c -= pc.bytes - pc.bytes_of([e for e in pc.entries if e is not gone])
+                return self.reserved + c > self.budget + self.prefill_reserve
+            while over() and pc.evict(keep=keep, wanted=self._wanted, spill=False):
+                n += 1
+            if n:
+                log.info("prompt cache: %d entries evicted for the row of id=%s (%.2f GiB left)",
+                         n, req.id, pc.bytes / GIB)
+            return not over()
         if parent is not None:
             # the first update's size: restore pre-sizes the buffer for it
             left = len(ids) - 1 - reused
             first = _slab(reused, left, set(bounds)) if left > 0 else 1
-            cache = eng._pcache.restore(parent, reused, first)
-            inherit = _Inherit(parent.cut(reused),
+            # Only an entry this prompt's store absorbs anyway moves: the
+            # conversation's previous turn (its ids, or a reply entry's
+            # prompt part, a prefix of the prompt: _PrefixCache.store's
+            # `covered`). A sibling's entry (a shared system prompt, an
+            # edited branch) stays whole; the row copies its part, as
+            # without the mode, and its store inherits those pieces.
+            n = len(parent.ids)
+            taken = move and (
+                (n <= len(ids) - 1 and ids[:n] == parent.ids)
+                or (parent.reply is not None and parent.reply <= len(ids) - 1
+                    and ids[:parent.reply] == parent.ids[:parent.reply]))
+            covers = taken
+            if move and not taken and not room(keep=(parent,)):
+                # ... unless the row's copy does not fit beside it even with
+                # every other entry gone: then it moves too, and what it
+                # held past the resume point (the other branch) is given up
+                # instead of the memory
+                taken = True
+                log.info("id=%s prompt cache: the %d-token entry of another branch moves into "
+                         "the row (no room for a copy beside it); its part past %d is dropped",
+                         req.id, n, reused)
+            inherit = _Inherit([] if taken else parent.cut(reused),
                                {p: s for p, s in parent.ckpts.items() if p <= reused},
                                parent.end if reused == len(parent.ids) else None,
                                parent.quantized)
-            row.parent = parent                 # kept while this prefill runs (_regrow)
+            if taken:
+                room(keep=(parent,), gone=parent)
+                # (from here on `parent` is a husk outside the cache)
+                try:
+                    cache = eng._pcache.restore(parent, reused, first, move=True)
+                except Exception:
+                    log.warning("id=%s prompt cache: moving the %d-token entry into the row "
+                                "failed; the entry is lost", req.id, n)
+                    raise
+            else:
+                cache = eng._pcache.restore(parent, reused, first)
+                row.parent = parent             # kept while this prefill runs (_regrow)
             input_ids = mx.array([ids[reused:]])
             # Text-only mRoPE continues from the cache offset with a zero
             # delta; a preceding vision request leaves its own delta here.
             lm._rope_deltas = mx.zeros((1, 1), dtype=mx.int32)
             lm._position_ids = None
             log.info("id=%s prompt cache HIT: %d/%d tokens reused (common prefix %d), "
-                     "prefilling %d", req.id, reused, len(ids), split, len(ids) - reused)
+                     "prefilling %d%s", req.id, reused, len(ids), split, len(ids) - reused,
+                     " (moved: the entry's KV is the row's now)" if taken else "")
         else:
             cache = make_prompt_cache(lm)
             input_ids = _vision_arrays(req.vision)["input_ids"] if req.images else mx.array([ids])
@@ -4129,7 +4449,12 @@ class _Scheduler:
         if not req.preempts:                    # Usage.cached_tokens: the first prefill's
             req.reused = reused
         row.cached = reused > 0
-        keep, protect, ckpts = set(), set(), {}
+        lease = None
+        if move:
+            lease = row.own = _Own(parent if taken else None, reused,
+                                   0 if taken else reused, len(ids) - 1)
+            room(keep=(parent,) if parent is not None and not taken else ())
+        keep, protect, ckpts, live = set(), set(), {}, set()
         if keeps:
             end = len(ids) - 1
 
@@ -4144,11 +4469,13 @@ class _Scheduler:
             # own divergence points carry over (`_Entry.diverge`: the
             # sibling may be gone by the retry).
             pc = eng._pcache
-            own = [e for e in pc.entries if e.partial and len(e.ids) < len(ids)
+            # (MOVE: the entry just moved into the row is one of them still)
+            ents = pc.entries if lease is None or lease.husk is None else [*pc.entries, lease.husk]
+            own = [e for e in ents if e.partial and len(e.ids) < len(ids)
                    and ids[:len(e.ids)] == e.ids]
             other = split
             if own:
-                other = max((min(_lcp(e.ids, ids), end) for e in pc.entries
+                other = max((min(_lcp(e.ids, ids), end) for e in ents
                              if not any(e is o for o in own)), default=0)
                 want.add(other)
             diverge = {b for b in [below(other)] if b is not None}
@@ -4173,6 +4500,8 @@ class _Scheduler:
             # tokens and in the first user message (see PROMPT_CACHE_CHAIN_*;
             # the end state is kept apart).
             chain = fresh = None
+            # (MOVE: what the thinning during the prefill never drops)
+            live = protect | diverge
             if PROMPT_CACHE_CHAIN_MARKS >= 0:
                 last = starts[-PROMPT_CACHE_CHAIN_MARKS:] if PROMPT_CACHE_CHAIN_MARKS else []
                 want.update(last)
@@ -4191,6 +4520,7 @@ class _Scheduler:
                 u0, u1 = (starts[k], starts[k + 1]) if k is not None else (0, 0)
                 doc = {b for b in strides if u0 <= b < u1}
                 chain = (fixed | tail | doc, fixed)     # thinning drops the strides first
+                live |= fixed | tail
                 # a long fresh entry (absorbs no chain: a MISS, a new
                 # episode) takes it too, with the divergence point from the
                 # closest other entry (where a sibling would diverge again)
@@ -4205,6 +4535,15 @@ class _Scheduler:
                     fresh = (chain[0] | diverge | sysb, fixed)
             # checkpoints only at slab ends
             keep = {b for b in map(below, want) if b is not None and b > reused}
+            if move and chain is not None:
+                # MOVE: the states stay with the row until it ends (the store
+                # is deferred), so only those the store's policy can keep are
+                # taken: the chain's when the entry it took makes this a
+                # chain for sure, else (a long prompt) either policy's
+                if taken and covers and (not parent.partial or parent.chained):
+                    keep &= chain[0]
+                elif fresh is not None:
+                    keep &= chain[0] | fresh[0]
             start = self.kv["quantized_kv_start"]
             if self.kv["kv_bits"] and end >= start:
                 # the entry will be quantized: nothing below the start is
@@ -4221,6 +4560,15 @@ class _Scheduler:
             at `pos` (QWEN_DRAFT_TAIL), asked only for a position that is kept."""
             if pos in keep:
                 ckpts[pos] = _with_tail(_recurrent_states(cache), tail() if tail else None)
+                if lease is not None and len(ckpts) > PROMPT_CACHE_CKPTS:
+                    # MOVE (long single-stream prompts): the states taken so
+                    # far are thinned to the cap as the prefill goes, not
+                    # only at the store — a 60K prefill held 29 of them (27B:
+                    # 147 MiB each, 4.3 GiB beside 3.75 GiB of KV). The
+                    # message starts, the chain's tail and the divergence
+                    # point stay; which strides survive may differ from the
+                    # store-time thinning (any subset is valid).
+                    _thin(ckpts, PROMPT_CACHE_CKPTS, live)
 
         def snapshot(cache, upto=None, why=None, tail=None):
             """Store the entry for prompt[:-1] (the prefill's end), or with
@@ -4229,6 +4577,14 @@ class _Scheduler:
             Either way the prefill ends here. `tail` (DFlash rows): the
             drafter's context at the stored end (QWEN_DRAFT_TAIL_END)."""
             nonlocal inherit
+            if lease is not None:
+                if upto is None:
+                    # stored when the row ends (_settle): its buffers, no copy
+                    lease.end = (_recurrent_states(cache), tail)
+                    row.parent = None
+                else:                           # the row ends here
+                    self._settle_prefix(row, cache, upto, why, tail)
+                return
             row.parent = None
             try:
                 if not keeps:
@@ -4247,7 +4603,11 @@ class _Scheduler:
                 inherit = None
                 ckpts.clear()
 
-        def store(cache, upto=None, why=None, tail=None):
+        def store(cache, upto=None, why=None, tail=None, seg=None):
+            """-> the entry, or None (not kept / failed). `seg`
+            (QWEN_PROMPT_CACHE_MOVE): the entry's KV over [0, L), the dying
+            row's own buffers; the limit then leaves the row's reservation
+            out while it is still counted (the entry holds what it did)."""
             pc = eng._pcache
             L = len(ids) - 1 if upto is None else upto
             # what the entry claims: the row's KV holds exactly ids[:L] (a
@@ -4258,21 +4618,25 @@ class _Scheduler:
                     c.offset != L for c in cache if not hasattr(c, "cache"))):
                 log.warning("id=%s prompt cache: the %s prefill's prefix is not stored: the "
                             "cache does not hold a slab end (%d/%d)", req.id, why, L, len(ids))
-                return
+                return None
+            held = self.reserved
+            if seg is not None and not row.done:
+                held -= row.reserved
             try:
                 e, covered = pc.store(ids[:L], cache, ckpts, inherit, reused, ends, protect,
-                                      limit=self.budget + self.prefill_reserve - self.reserved,
+                                      limit=self.budget + self.prefill_reserve - held,
                                       kv_start=self.kv["quantized_kv_start"], chain=chain,
                                       wanted=self._wanted, fresh=fresh, partial=partial,
-                                      spare=self._parents(but=row), tail=tail)
+                                      spare=self._parents(but=row), tail=tail, seg=seg,
+                                      moved=lease.husk if lease is not None else None)
             except Exception:  # noqa: BLE001 — the prefill succeeded: the request goes on uncached
                 log.exception("id=%s prompt cache store failed (the request goes on)", req.id)
-                return
+                return None
             if e is None:
                 if partial:
                     log.info("id=%s prompt cache: the %s prefill's prefix (%d/%d tokens) was "
                              "not kept", req.id, why, L, len(ids))
-                return
+                return None
             row.cached = True
             if partial:                         # for its retry (see `diverge` above)
                 e.diverge = frozenset(diverge)
@@ -4286,10 +4650,22 @@ class _Scheduler:
             # match "prompt cache store: N tokens") + "(cancelled at L/len)"
             log.info("id=%s prompt cache store: %d tokens, %d checkpoints, %.1f MB "
                      "(%d entries, %.1f MB total) reused=%d gap=%d absorbed=%d pieces=%d "
-                     "states=%.1f MB%s", req.id, len(e.ids), len(e.ckpts), e.nbytes / 1e6,
+                     "states=%.1f MB%s%s", req.id, len(e.ids), len(e.ckpts), e.nbytes / 1e6,
                      len(pc.entries), pc.bytes / 1e6, reused, split - reused, len(covered),
                      len(e.chain), e.state_bytes() / 1e6,
-                     "" if upto is None else f" ({why} at {L}/{len(ids)})")
+                     "" if upto is None else f" ({why} at {L}/{len(ids)})",
+                     "" if seg is None else " (moved: the row's own buffers)")
+            return e
+
+        if lease is not None:
+            def final(cache, upto=None, why=None, tail=None, seg=None):
+                nonlocal inherit
+                try:
+                    return store(cache, upto, why, tail, seg)
+                finally:                        # as snapshot: nothing of the prefill outlives it
+                    inherit = None
+                    ckpts.clear()
+            lease.store = final
 
         return input_ids, cache, reused, set(bounds), checkpoint, snapshot
 
@@ -4389,11 +4765,12 @@ class _Scheduler:
         except Exception:
             # (GeneratorExit is no Exception: a scheduler closing drops the
             # generator at its yield, nothing is stored then)
-            if intact and pos > start and pixel_values is None:
+            if intact and (pos > start or row.own is not None) and pixel_values is None:
                 self._store_prefix(row, on_prefilled, cache, pos, "failed")
             raise
         if cancelled:
-            if pos > start and pixel_values is None:
+            # (MOVE: also with nothing prefilled: the entry it took goes back)
+            if (pos > start or row.own is not None) and pixel_values is None:
                 self._store_prefix(row, on_prefilled, cache, pos, "cancelled")
             self._finish(row, "cancelled")
             return
@@ -4408,6 +4785,7 @@ class _Scheduler:
             # batch (no GDN restack, no cascade group, no reply KV); the
             # entry was stored above as a generation's would be
             self._finish(row, "length")
+            self._settle(row)
             self._slab_done(time.time() - seg)
             return
         if deltas is not None:
@@ -4426,7 +4804,12 @@ class _Scheduler:
         cancel stays a cancel, a failure keeps its own error). `tail`: a
         DFlash row's callable for the drafter's context at `pos`."""
         try:
-            t = tail() if tail else None
+            t = None
+            try:
+                t = tail() if tail else None
+            except Exception:  # noqa: BLE001 — the prefix without the drafter's context
+                log.exception("id=%s prompt cache: the drafter's context at %d was not taken",
+                              row.req.id, pos)
             on_prefilled(cache, pos, why, **({} if t is None else {"tail": t}))
         except Exception:  # noqa: BLE001 — costs the prefix entry only
             log.exception("id=%s prompt cache: storing the %s prefill's prefix failed",
@@ -4504,7 +4887,7 @@ class _Scheduler:
         # the drafter's context so far: what the entry the row resumed from
         # holds for the resume point (QWEN_DRAFT_TAIL), then every prefilled
         # position
-        tail0 = _resume_tail(row.parent, pos)
+        tail0 = _resume_tail(row.parent or (row.own.husk if row.own is not None else None), pos)
         hidden = [tail0] if tail0 is not None else []
 
         def tail(n=DRAFT_TAIL):
@@ -4547,11 +4930,11 @@ class _Scheduler:
                 if ctx.shape[1] > 0:
                     yield
         except Exception:
-            if intact and pos > start:
+            if intact and (pos > start or row.own is not None):
                 self._store_prefix(row, on_prefilled, cache, pos, "failed", tail_end)
             raise
         if cancelled:
-            if pos > start:
+            if pos > start or row.own is not None:
                 self._store_prefix(row, on_prefilled, cache, pos, "cancelled", tail_end)
             self._finish(row, "cancelled")
             return
@@ -4698,6 +5081,8 @@ class _Scheduler:
                             # token leave the cache with the commit
                             accepted, new = cut + 1, new[:cut + 1]
                     commit_speculative_round(lm, cache, txn, accepted, bs)
+                    if accepted + 1 < bs:       # the kept state is a view of the block's
+                        _own_states(cache)
                 except BaseException:
                     abort_speculative_round(txn)
                     raise
@@ -4785,7 +5170,10 @@ class _Scheduler:
             # reply KV: the finished rows' caches, taken before the batch's
             # stacked state is cut (lazy; _store_reply queues the copies)
             replies = [(r, self._reply_cache(r, i)) for i, r in enumerate(self.rows)
-                       if r.done and r.fed is not None and PROMPT_CACHE_REPLY]
+                       if r.done and r.fed is not None and PROMPT_CACHE_REPLY and r.own is None]
+            # QWEN_PROMPT_CACHE_MOVE: the finished row's buffers become its entry
+            owned = [(r, self._reply_cache(r, i) if r.fed is not None and PROMPT_CACHE_REPLY
+                      else None) for i, r in enumerate(self.rows) if r.done and r.own is not None]
             if self.gdn is not None:
                 if len(keep) == 1:              # back to the plain library call
                     _gdn_split(self.gdn, keep[0], self.rows[keep[0]].cache)
@@ -4793,6 +5181,8 @@ class _Scheduler:
                 else:
                     self.gdn = _gdn_take(self.gdn, keep) if keep else None
             self.rows = [self.rows[i] for i in keep]
+            for r, cache in owned:
+                self._settle(r, cache)
             kept, absorbed = [], []
             for r, cache in replies:
                 try:
@@ -4871,6 +5261,7 @@ class _Scheduler:
         states, the end state's drafter context (QWEN_DRAFT_TAIL_END). Never
         raises: the request already ended."""
         if row.fed is None or not PROMPT_CACHE_REPLY or row.why not in ("stop", "length"):
+            self._settle(row)                   # (MOVE: the prompt entry, the row's buffers)
             row.fed = None
             return
         pc = self.eng._pcache
@@ -4890,6 +5281,9 @@ class _Scheduler:
             k = row.pos - len(row.req.ids)
             tail = (_tail_copy(recent, DRAFT_TAIL_END)
                     if recent and 1 <= k <= len(row.fed) else None)
+            if row.own is not None:             # MOVE: prompt + reply, the row's buffers
+                self._settle(row, cache, tail)
+                return
             new, covered = self._store_reply(row, cache, tail)
             if new is not None:
                 mx.eval(new.arrays)
@@ -4900,8 +5294,183 @@ class _Scheduler:
                 pc.evictions += 1
                 pc._recount()
             log.exception("id=%s prompt cache reply store failed (DFlash row)", row.req.id)
+            self._settle(row)                   # (MOVE: at least the prompt entry)
 
-    def _store_reply(self, row, cache, tail=None):
+    # --- one KV copy (QWEN_PROMPT_CACHE_MOVE) -------------------------------------
+    def _move_on(self):
+        """Single stream only: with other rows around, an entry moved into a
+        row would be a miss for its siblings, and a cascade group's rows hold
+        no KV of their own to give back. fp16 KV only (the quantized entries'
+        resume rules below quantized_kv_start are not handled). Not with the
+        disk tier (QWEN_PROMPT_CACHE_DISK: an evicted entry's RAM stays held
+        until written, and its pending write may share a segment the move
+        empties; not built)."""
+        return bool(PROMPT_CACHE_MOVE and PROMPT_CACHE and self.max_batch == 1
+                    and self.kv["kv_bits"] is None and self.eng._pcache.disk is None)
+
+    def move_state(self):
+        if self._move_on():
+            return "on (a hit moves the entry's KV into the row; a row's buffers become its entry)"
+        if not PROMPT_CACHE_MOVE:
+            return "off"
+        return "off: needs " + ", ".join(
+            x for x, ok in (("QWEN_PROMPT_CACHE=1", PROMPT_CACHE),
+                            ("QWEN_MAX_BATCH=1 (max_batch is %d)" % self.max_batch,
+                             self.max_batch == 1),
+                            ("fp16 KV (QWEN_KV_BITS=0)", self.kv["kv_bits"] is None),
+                            ("no QWEN_PROMPT_CACHE_DISK", self.eng._pcache.disk is None))
+            if not ok)
+
+    def _lost(self, row):
+        """MOVE: a row that failed in a forward (a prefill slab, a decode
+        step, a DFlash round) stores nothing: its KV arrays may hang on the
+        failed graph (evaluating them would run it again — after an
+        out-of-memory, into the same wall). The copies would have left the
+        entry in the cache; here the conversation's next turn is a miss."""
+        own, row.own = row.own, None
+        if own is None:
+            return
+        row.fed = row.entry = None
+        log.warning("id=%s prompt cache: the row failed, its KV is not stored%s "
+                    "(QWEN_PROMPT_CACHE_MOVE)", row.req.id,
+                    "; the entry moved into it is lost" if own.husk is not None else "")
+        own.close()
+
+    def _settle_prefix(self, row, cache, pos, why, tail):
+        """MOVE: a prefill that stops early (cancelled / failed, the caches
+        holding exactly prompt[:pos], a slab end) gives the row's buffers to
+        the cache: the entry it took comes back as it was when nothing was
+        prefilled past its end (unmove), else the prefix prompt[:pos] is
+        stored as a cancelled prefill's (the partial store, `tail`: a DFlash
+        row's context there). The row ends right after (its reservation is
+        still counted: left out of the limit)."""
+        own, row.own = row.own, None
+        if own is None:
+            return
+        try:
+            self._settle_prefix_(row, own, cache, pos, why, tail)
+        finally:
+            own.close()
+
+    def _settle_prefix_(self, row, own, cache, pos, why, tail):
+        req, pc, husk = row.req, self.eng._pcache, own.husk
+        if husk is None and pos <= own.at:
+            return                              # a miss that prefilled nothing
+        if any(c.keys is None or c.offset != pos for c in cache if not hasattr(c, "cache")):
+            log.warning("id=%s prompt cache: the %s prefill's KV is not stored: the cache does "
+                        "not hold prompt[:%d]%s", req.id, why, pos,
+                        "; the entry moved into the row is lost" if husk is not None else "")
+            return
+        if husk is not None and pos == own.at == len(husk.ids):
+            limit = self.budget + self.prefill_reserve - (
+                self.reserved - (0 if row.done else row.reserved))
+            ok = pc.unmove(husk, _Seg.take(cache, pos), limit=limit, wanted=self._wanted)
+            if ok:
+                mx.eval(husk.arrays)
+            log.info("id=%s prompt cache: the %s prefill gives its entry back (%d tokens, "
+                     "%.1f MB; %d entries, %.1f MB total)%s", req.id, why, pos, husk.nbytes / 1e6,
+                     len(pc.entries), pc.bytes / 1e6, "" if ok else ": NOT kept")
+            return
+        e = own.store(cache, pos, why, tail, _Seg.take(cache, pos, own.lo))
+        if e is not None:
+            mx.eval(e.arrays)
+        elif husk is not None:
+            log.warning("id=%s prompt cache: the %s prefill's prefix was not kept; the entry "
+                        "moved into the row is lost", req.id, why)
+
+    def _settle(self, row, rc=None, tail=None):
+        """MOVE: a row that ended after its prefill (any reason) gives its
+        own KV buffers to the prompt cache — the store the prefill's end
+        deferred, then the reply store, with nothing copied beside the row:
+        the prompt entry prompt[:-1] (the states saved at the prefill's end),
+        and for a reply that is stored (`rc`: _reply_cache's list, `tail`: a
+        DFlash row's context at its end; _reply_plan) its extension over the
+        same buffers. A prompt entry alone takes [0, L) out of the buffers
+        when they hold a KVCache step or more past it (_Seg.take: reasoning,
+        a cancel after thousands of tokens). No-op for other rows. Never
+        raises: the request already ended."""
+        own, row.own = row.own, None
+        if own is None:
+            return
+        req, pc = row.req, self.eng._pcache
+        try:
+            cache, L = row.cache, own.L
+            if own.end is None or cache is None or any(
+                    getattr(cache[j], "keys", None) is None or cache[j].offset < L
+                    for j in self.fa_layers):
+                if own.husk is not None:
+                    log.warning("id=%s prompt cache: the entry moved into the row is lost (the "
+                                "row ended before its prefill did, its KV is not a prefix's)",
+                                req.id)
+                return
+            from mlx_vlm.models.cache import ArraysCache
+            states, ptail = own.end
+            it, pcache = iter(states), []
+            for c in cache:                     # the row's cache as it was at the prefill's end
+                if hasattr(c, "cache"):
+                    n = ArraysCache(size=len(c.cache))
+                    n.cache = list(next(it))
+                    pcache.append(n)
+                else:
+                    pcache.append(c)
+            plan = None
+            if rc is not None and row.fed is not None and all(
+                    cache[j].offset == row.pos for j in self.fa_layers):
+                plan = self._reply_plan(row, row.fed)
+            # one buffer per layer for the prompt entry and its reply: the
+            # row's own (views), or [lo, end) taken out of it (_Seg.take)
+            whole = _Seg.take(cache, row.pos if plan is not None else L, own.lo)
+            e = own.store(pcache, None, None, ptail, whole.sub(own.lo, L))
+            if e is None:
+                # (the row's buffers were the only copy: unlike a refused
+                # copy, the cache does not stay as it was)
+                log.warning("id=%s prompt cache: the row's KV was not kept%s", req.id,
+                            "; the entry moved into it is lost" if own.husk is not None else "")
+                return
+            new = None
+            if plan is not None:
+                new, _ = self._store_reply(row, rc, tail, seg=whole.sub(L, row.pos))
+            try:
+                mx.eval((new or e).arrays)
+            except Exception:
+                pc.entries = [x for x in pc.entries if x is not e and x is not new]
+                pc.evictions += 1
+                pc._recount()
+                raise
+        except Exception:  # noqa: BLE001 — costs the entry only
+            log.exception("id=%s prompt cache: storing the row's KV failed "
+                          "(QWEN_PROMPT_CACHE_MOVE)", req.id)
+        finally:
+            row.fed = row.entry = None
+            own.close()
+
+    def _reply_plan(self, row, fed):
+        """-> (the ids a reply entry of the row holds, the decoded tokens n
+        among them) or None: nothing decoded, a fed token never read, or a
+        reply that generated a reasoning section (logged)."""
+        req = row.req
+        n = row.pos - len(req.ids)
+        if n < 1 or len(fed) < n:
+            return None                         # nothing decoded, or a fed token never read
+        # a reasoning section = what the handler's _GenState splits off as
+        # reasoning: generation started inside an open <think> (thinking on;
+        # it runs until </think> / <tool_call>). With thinking off a <think> /
+        # </think> id inside the content is content (_GenState: plain text /
+        # dropped), so it does not skip the store.
+        think = getattr(self.eng, "_think", None)
+        # (a resumed preempted row: its reply began at the prompt as sent;
+        # the tokens before the preemption are in req.ids)
+        state = _GenState.for_prompt(req.prompt_ids, think)
+        if state.in_thinking:
+            tags = getattr(self.eng, "_tool_tags", None)
+            for t in req.ids[len(req.prompt_ids):] + fed[:n]:
+                state.token(t, think[1], tags[0] if tags else -1)
+            log.info("id=%s prompt cache reply not kept: reasoning in the reply (thinking on, "
+                     "%d of %d generated tokens)", req.id, state.reasoning_tokens, n)
+            return None
+        return req.ids + fed[:n], n
+
+    def _store_reply(self, row, cache, tail=None, seg=None):
         """Extend the entry the row's prefill stored by the tokens the model
         consumed while it decoded (prompt + generated[:k]: the step-ahead fed
         the EOS a row stops on, a sync row did not, a "length" row fed every
@@ -4915,7 +5484,8 @@ class _Scheduler:
         The entry keeps its prompt entry's recency (`clock`). Never evicts
         the entry the running prefill resumed from (task_row.parent: its
         pieces stay allocated until that prefill stores, as in _regrow).
-        `tail`: a DFlash row's drafter context at the end (_with_tail).
+        `tail`: a DFlash row's drafter context at the end (_with_tail);
+        `seg` (MOVE, _settle): the reply's KV, views of the row's own buffers.
         Nothing when the entry is gone (evicted / absorbed while it decoded:
         the victim order had decided its next turn is the furthest away),
         nor for a reply that generated a reasoning section (thinking on, as
@@ -4935,25 +5505,10 @@ class _Scheduler:
             log.info("id=%s prompt cache reply not kept: its prompt entry is gone (evicted, "
                      "absorbed or never kept)", req.id)
             return None, []
-        if n < 1 or len(fed) < n:
-            return None, []                     # nothing decoded, or a fed token never read
-        # a reasoning section = what the handler's _GenState splits off as
-        # reasoning: generation started inside an open <think> (thinking on;
-        # it runs until </think> / <tool_call>). With thinking off a <think> /
-        # </think> id inside the content is content (_GenState: plain text /
-        # dropped), so it does not skip the store.
-        think = getattr(self.eng, "_think", None)
-        # (a resumed preempted row: its reply began at the prompt as sent;
-        # the tokens before the preemption are in req.ids)
-        state = _GenState.for_prompt(req.prompt_ids, think)
-        if state.in_thinking:
-            tags = getattr(self.eng, "_tool_tags", None)
-            for t in req.ids[len(req.prompt_ids):] + fed[:n]:
-                state.token(t, think[1], tags[0] if tags else -1)
-            log.info("id=%s prompt cache reply not kept: reasoning in the reply (thinking on, "
-                     "%d of %d generated tokens)", req.id, state.reasoning_tokens, n)
+        plan = self._reply_plan(row, fed)
+        if plan is None:
             return None, []
-        ids = req.ids + fed[:n]
+        ids = plan[0]
         L = len(e.ids)
         if e.ids != ids[:L] or any(row.cache[j].offset != row.pos for j in self.fa_layers):
             log.warning("id=%s prompt cache reply not kept: the row's cache does not match "
@@ -4967,7 +5522,7 @@ class _Scheduler:
                                     limit=self.budget + self.prefill_reserve - self.reserved,
                                     kv_start=self.kv["quantized_kv_start"], wanted=self._wanted,
                                     reply=L, tick=False, sync=False, spare=spare,
-                                    clock=(e.used, e.seq), tail=tail)
+                                    clock=(e.used, e.seq), tail=tail, seg=seg)
         except Exception:  # noqa: BLE001 — the request already ended
             log.exception("id=%s prompt cache reply store failed", req.id)
             return None, []
@@ -5676,6 +6231,7 @@ class _Scheduler:
         (its caches are its own)."""
         for r in self.rows:
             self._fail(r, e)
+            self._lost(r)
         self.rows, self.gdn = [], None
         self._drop_groups()                         # the arrays go with the rows
         self.reserved = sum(r.reserved for r in self._tasks())
@@ -6221,6 +6777,11 @@ class Engine:
             # never with QWEN_BATCH_INVARIANT (it loads no drafter)
             how = _setup_verify_mrqmm(lm, self.draft)
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
+        if self.draft is not None:
+            nq = _probe_verify_attention(lm)
+            log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",
+                     f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)" if nq
+                     else "the library's one-query calls")
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
         reserve = _prefill_reserve(lm.args.num_attention_heads)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
@@ -6237,6 +6798,7 @@ class Engine:
                  f"{self._pcache.bytes / GIB:.2f} GiB live inside the budget (soft cap "
                  f"{PROMPT_CACHE_GB:.1f} GiB, evicted on demand)" if PROMPT_CACHE else "off")
         log.info("cascade attention (QWEN_CASCADE): %s", self.sched.cascade_state())
+        log.info("prompt cache move (QWEN_PROMPT_CACHE_MOVE): %s", self.sched.move_state())
         if self.sched.cascade_kernel:   # also when cascade is off now: set_cascade(True) later
             lm = self.model.language_model
             a = lm.args

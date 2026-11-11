@@ -177,3 +177,83 @@ def test_dflash_exact_with_verify_cap(dense, monkeypatch, cap):
     sched.eng.draft = FakeDraft(plain[0])
     assert run(sched, [request(p, 30, "a")])["a"] == plain
     assert len(sched.eng.draft.accept_lens) > 3
+
+
+def test_dflash_verify_attention_in_chunks(dense, monkeypatch):
+    """QWEN_VERIFY_ATT: a verify block attends `_VERIFY_ATT_Q` queries per
+    call (causal over the block's own positions) instead of the library's one
+    query per call: the same logits (here the CPU's unfused graph stands in for
+    the vector kernel: to rounding), the same greedy answer; a failing kernel
+    turns the path off and its queries go one by one (the library's bits)."""
+    from mlx_vlm.models.qwen3_5 import speculative_verifier as sv
+    from mlx_vlm.speculative.cache_state import abort_speculative_round
+    from conftest import prompts, request, run, scheduler
+    from test_scheduler import FakeDraft, no_metal_verify
+    no_metal_verify(monkeypatch)
+    v = sv.Qwen3_5BatchInvariantForward
+    lib, calls, blocks = v._attention, [], []
+    monkeypatch.setattr(worker, "_VERIFY_ATTENTION", lambda *a: calls.append(a[2].shape[1]) or lib(*a))
+    monkeypatch.setattr(v, "_attention", worker._verify_attention)
+
+    def unfused(q, k, v, scale):
+        blocks.append(q.shape[2])
+        return mx.fast.scaled_dot_product_attention(q, k, v, scale=scale, mask="causal")
+
+    def broken(q, k, v, scale):
+        raise ValueError("no kernel")
+    p = prompts([40], 30)[0]
+
+    logits = {}
+    for nq, fn in ((0, unfused), (4, unfused), (16, unfused), (3, broken)):
+        monkeypatch.setattr(worker, "_VERIFY_ATT_Q", nq)
+        monkeypatch.setattr(worker, "_block_sdpa", fn)
+        calls.clear(), blocks.clear()
+        c = dense.make_cache()
+        dense(mx.array([p[:30]]), cache=c)
+        out = dense(mx.array([p[30:36]]), cache=c, speculative_verify=True)
+        logits[nq] = out.logits.astype(mx.float32)
+        mx.eval(logits[nq])
+        abort_speculative_round(out.gdn_states)
+        n_fa = sum(1 for x in dense.model.layers if not x.is_linear)
+        # the library's call or ours (broken: ours in the first layer, then off)
+        assert len(calls) == {0: n_fa, 4: 0, 16: 0, 3: n_fa - 1}[nq], (nq, calls)
+        assert blocks == {0: [], 4: [4, 2] * n_fa, 16: [6] * n_fa, 3: []}[nq]
+        if fn is broken:
+            assert worker._VERIFY_ATT_Q == 0                     # off after the first failure
+    assert mx.array_equal(logits[3], logits[0]).item()           # one by one = the library's bits
+    for nq in (4, 16):
+        assert mx.abs(logits[nq] - logits[0]).max().item() < 1e-3
+        assert mx.array_equal(mx.argmax(logits[nq], -1), mx.argmax(logits[0], -1)).item()
+
+    monkeypatch.setattr(worker, "_block_sdpa", unfused)
+    plain = run(scheduler(dense, max_batch=1), [request(p, 30, "a")])["a"]
+    for nq in (0, 3):
+        monkeypatch.setattr(worker, "_VERIFY_ATT_Q", nq)
+        calls.clear(), blocks.clear()
+        sched = scheduler(dense, max_batch=1)
+        sched.eng.draft = FakeDraft(plain[0])
+        assert run(sched, [request(p, 30, "a")])["a"] == plain
+        assert len(sched.eng.draft.accept_lens) > 3
+        assert bool(blocks) == (nq == 3) and any(T >= 3 for T in calls) == (nq == 0)
+
+
+def test_probe_verify_attention(dense, monkeypatch):
+    """The load-time check: on only where the kernel's block output is
+    bit-equal to the one-query calls'; QWEN_VERIFY_ATT=0 and a missing kernel
+    leave it off."""
+    a = dense.args
+    want = min(32 // max(1, a.num_attention_heads // a.num_key_value_heads), 16)
+    exact = lambda q, k, v, scale: mx.concatenate(  # noqa: E731
+        worker._rows_sdpa(q, k, v, scale, 0, q.shape[2]), axis=2)
+    monkeypatch.setattr(worker, "_block_sdpa", exact)
+    assert worker._probe_verify_attention(dense) == want == worker._VERIFY_ATT_Q
+    monkeypatch.setattr(worker, "_block_sdpa", lambda q, k, v, scale: exact(q, k, v, scale) + 1e-3)
+    assert worker._probe_verify_attention(dense) == 0 == worker._VERIFY_ATT_Q
+
+    def missing(q, k, v, scale):
+        raise ValueError("no kernel")
+    monkeypatch.setattr(worker, "_block_sdpa", missing)
+    assert worker._probe_verify_attention(dense) == 0
+    monkeypatch.setattr(worker, "_block_sdpa", exact)
+    monkeypatch.setattr(worker, "VERIFY_ATT", False)
+    assert worker._probe_verify_attention(dense) == 0
