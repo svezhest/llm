@@ -1,0 +1,238 @@
+{
+ "args": {
+  "tokens": 24000,
+  "turns": 1,
+  "max_tokens": 128,
+  "no_thinking": false,
+  "cold_ref": false,
+  "ab": 2,
+  "json": "/tmp/scratch/out/scale_24000.json"
+ },
+ "env": {
+  "QWEN_MODEL": "../../weights/qwen38-27b-mlx-5bit",
+  "QWEN_KV_BITS": "0",
+  "QWEN_MRQMM5": "1",
+  "QWEN_DRAFT": "../../weights/qwen38-27b-dflash2",
+  "QWEN_PROMPT_CACHE": "1",
+  "QWEN_PROMPT_CACHE_MOVE": "1",
+  "QWEN_PROMPT_CACHE_GB": "6",
+  "QWEN_PROMPT_CACHE_CKPTS": "8",
+  "QWEN_MAX_BATCH": "1",
+  "QWEN_WIRED_LIMIT_GB": "27",
+  "QWEN_CACHE_LIMIT_GB": "1",
+  "QWEN_SDPA_FUSED_MIN_KV": "8192",
+  "QWEN_PREFILL_BUDGET": "16777216",
+  "QWEN_PRESENCE_PENALTY": "0",
+  "QWEN_MAX_CONTEXT": "65536"
+ },
+ "runs": [
+  {
+   "id": "turn1",
+   "prompt": 24104,
+   "reused": 0,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 172.61,
+   "tps": 17.86,
+   "rounds": 37,
+   "accepted": 2.46,
+   "peak_gib": 24.75,
+   "prefill_peak_gib": 24.75,
+   "decode_peak_gib": 23.94,
+   "active_first_gib": 22.72,
+   "round_ms": 192.1,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=turn1 prompt cache MISS (common prefix 0, 0 entries)",
+    "dflash: 128 tokens, accept rate 37% (91/249 drafts)",
+    "id=turn1 prompt cache reply not kept: reasoning in the reply (thinking on, 128 of 128 generated tokens)",
+    "id=turn1 prompt cache store: 24103 tokens, 8 checkpoints, 3122.3 MB (1 entries, 3122.3 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=1542.7 MB (moved: the row's own buffers)"
+   ]
+  },
+  {
+   "id": "plain1",
+   "prompt": 24104,
+   "reused": 24103,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.19,
+   "tps": 14.11,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 24.09,
+   "prefill_peak_gib": 24.09,
+   "decode_peak_gib": 24.09,
+   "active_first_gib": 24.07,
+   "round_ms": null,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=plain1 prompt cache HIT: 24103/24104 tokens reused (common prefix 24103), prefilling 1",
+    "id=plain1 prompt cache: read-only (prompt_cache=read), nothing stored (reused=24103)"
+   ],
+   "same": true
+  },
+  {
+   "id": "rows1",
+   "prompt": 24104,
+   "reused": 24103,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.14,
+   "tps": 16.15,
+   "rounds": 37,
+   "accepted": 2.46,
+   "peak_gib": 25.4,
+   "prefill_peak_gib": 24.17,
+   "decode_peak_gib": 25.4,
+   "active_first_gib": 24.16,
+   "round_ms": 212.6,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=rows1 prompt cache HIT: 24103/24104 tokens reused (common prefix 24103), prefilling 1",
+    "id=rows1 prompt cache: read-only (prompt_cache=read), nothing stored (reused=24103)",
+    "dflash: 128 tokens, accept rate 37% (91/249 drafts)"
+   ],
+   "same": true
+  },
+  {
+   "id": "vector1",
+   "prompt": 24104,
+   "reused": 24103,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.13,
+   "tps": 17.04,
+   "rounds": 37,
+   "accepted": 2.46,
+   "peak_gib": 25.38,
+   "prefill_peak_gib": 24.17,
+   "decode_peak_gib": 25.38,
+   "active_first_gib": 24.16,
+   "round_ms": 201.4,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=vector1 prompt cache HIT: 24103/24104 tokens reused (common prefix 24103), prefilling 1",
+    "id=vector1 prompt cache: read-only (prompt_cache=read), nothing stored (reused=24103)",
+    "dflash: 128 tokens, accept rate 37% (91/249 drafts)"
+   ],
+   "same": true
+  },
+  {
+   "id": "plain2",
+   "prompt": 24104,
+   "reused": 24103,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.2,
+   "tps": 14.07,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 24.09,
+   "prefill_peak_gib": 24.09,
+   "decode_peak_gib": 24.09,
+   "active_first_gib": 24.07,
+   "round_ms": null,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=plain2 prompt cache HIT: 24103/24104 tokens reused (common prefix 24103), prefilling 1",
+    "id=plain2 prompt cache: read-only (prompt_cache=read), nothing stored (reused=24103)"
+   ],
+   "same": true
+  },
+  {
+   "id": "rows2",
+   "prompt": 24104,
+   "reused": 24103,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.13,
+   "tps": 16.5,
+   "rounds": 37,
+   "accepted": 2.46,
+   "peak_gib": 25.38,
+   "prefill_peak_gib": 24.17,
+   "decode_peak_gib": 25.38,
+   "active_first_gib": 24.16,
+   "round_ms": 208.1,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=rows2 prompt cache HIT: 24103/24104 tokens reused (common prefix 24103), prefilling 1",
+    "id=rows2 prompt cache: read-only (prompt_cache=read), nothing stored (reused=24103)",
+    "dflash: 128 tokens, accept rate 37% (91/249 drafts)"
+   ],
+   "same": true
+  },
+  {
+   "id": "vector2",
+   "prompt": 24104,
+   "reused": 24103,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.13,
+   "tps": 16.98,
+   "rounds": 37,
+   "accepted": 2.46,
+   "peak_gib": 25.38,
+   "prefill_peak_gib": 24.17,
+   "decode_peak_gib": 25.38,
+   "active_first_gib": 24.16,
+   "round_ms": 202.1,
+   "active_gib": 22.43,
+   "cache_gib": 2.91,
+   "entries": [
+    24103
+   ],
+   "log": [
+    "id=vector2 prompt cache HIT: 24103/24104 tokens reused (common prefix 24103), prefilling 1",
+    "id=vector2 prompt cache: read-only (prompt_cache=read), nothing stored (reused=24103)",
+    "dflash: 128 tokens, accept rate 37% (91/249 drafts)"
+   ],
+   "same": true
+  }
+ ]
+}

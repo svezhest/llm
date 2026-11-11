@@ -1,0 +1,22 @@
+loaded; drafter on, move: on (a hit moves the entry's KV into the row; a row's buffers become its entry); active 19.37 GiB
+turn1   prompt   8104 reused      0 ttft   56.06s tps 21.17 n  256 rounds  74 accepted/round 2.46 round 162.8 ms peak 23.74 GiB (prefill 23.74, decode 22.34, active at the first token 21.07) active 20.86 GiB cache 1.33 GiB entries [8103] end ['done', 'length']
+       id=turn1 prompt cache MISS (common prefix 0, 0 entries)
+       dflash: 256 tokens, accept rate 36% (182/512 drafts)
+       id=turn1 prompt cache reply not kept: reasoning in the reply (thinking on, 256 of 256 generated tokens)
+       id=turn1 prompt cache store: 8103 tokens, 4 checkpoints, 1431.8 MB (1 entries, 1431.8 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=900.7 MB (moved: the row's own buffers)
+turn2   prompt   8138 reused   8060 ttft    0.87s tps 23.28 n  256 rounds  70 accepted/round 2.66 round 156.5 ms peak 22.82 GiB (prefill 21.55, decode 22.82, active at the first token 21.55) active 21.25 GiB cache 1.19 GiB entries [8137] end ['done', 'length']
+       id=turn2 prompt cache HIT: 8060/8138 tokens reused (common prefix 8103), prefilling 78 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 38% (186/486 drafts)
+       id=turn2 prompt cache reply not kept: reasoning in the reply (thinking on, 256 of 256 generated tokens)
+       id=turn2 prompt cache store: 8137 tokens, 3 checkpoints, 1273.5 MB (1 entries, 1273.5 MB total) reused=8060 gap=43 absorbed=0 pieces=1 states=740.2 MB (moved: the row's own buffers)
+turn3   prompt   8165 reused   8060 ttft    1.05s tps 25.30 n  256 rounds  64 accepted/round 3.0 round 157.5 ms peak 23.22 GiB (prefill 21.94, decode 23.22, active at the first token 21.94) active 21.64 GiB cache 1.19 GiB entries [8164] end ['done', 'length']
+       id=turn3 prompt cache HIT: 8060/8165 tokens reused (common prefix 8137), prefilling 105 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 43% (192/448 drafts)
+       id=turn3 prompt cache reply not kept: reasoning in the reply (thinking on, 256 of 256 generated tokens)
+       id=turn3 prompt cache store: 8164 tokens, 3 checkpoints, 1275.3 MB (1 entries, 1275.3 MB total) reused=8060 gap=77 absorbed=0 pieces=1 states=740.2 MB (moved: the row's own buffers)
+cold    prompt   8165 reused      0 ttft   53.80s tps 23.41 n  256 rounds  64 accepted/round 3.0 round 170.2 ms peak 26.01 GiB (prefill 26.01, decode 24.61, active at the first token 23.34) active 22.48 GiB cache 1.19 GiB entries [8164] end ['done', 'length'] same=True
+       id=cold prompt cache lookup skipped (prompt_cache=off; common prefix 8164, 1 entries)
+       dflash: 256 tokens, accept rate 43% (192/448 drafts)
+       id=cold prompt cache reply not kept: reasoning in the reply (thinking on, 256 of 256 generated tokens)
+       id=cold prompt cache store: 8164 tokens, 3 checkpoints, 1275.3 MB (1 entries, 1275.3 MB total) reused=0 gap=8164 absorbed=1 pieces=1 states=740.2 MB (moved: the row's own buffers)
+process peak 26.01 GiB

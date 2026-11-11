@@ -1,0 +1,158 @@
+{
+ "args": {
+  "tokens": 60000,
+  "turns": 4,
+  "max_tokens": 256,
+  "no_thinking": true,
+  "cold_ref": false,
+  "ab": 0,
+  "alt": "plain",
+  "gc": false,
+  "json": "/tmp/scratch/out/gate_60k_nothink.json"
+ },
+ "env": {
+  "QWEN_MODEL": "../../weights/qwen38-27b-mlx-5bit",
+  "QWEN_KV_BITS": "0",
+  "QWEN_MRQMM5": "1",
+  "QWEN_DRAFT": "../../weights/qwen38-27b-dflash2",
+  "QWEN_PROMPT_CACHE": "1",
+  "QWEN_PROMPT_CACHE_MOVE": "1",
+  "QWEN_PROMPT_CACHE_GB": "6",
+  "QWEN_PROMPT_CACHE_CKPTS": "4",
+  "QWEN_MAX_BATCH": "1",
+  "QWEN_WIRED_LIMIT_GB": "27",
+  "QWEN_CACHE_LIMIT_GB": "1",
+  "QWEN_SDPA_FUSED_MIN_KV": "8192",
+  "QWEN_PREFILL_BUDGET": "16777216",
+  "QWEN_PRESENCE_PENALTY": "0",
+  "QWEN_MAX_CONTEXT": "65536"
+ },
+ "runs": [
+  {
+   "id": "turn1",
+   "prompt": 60068,
+   "reused": 0,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 515.01,
+   "tps": 16.02,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 26.4,
+   "prefill_peak_gib": 26.4,
+   "decode_peak_gib": 25.66,
+   "active_first_gib": 24.3,
+   "round_ms": 284.2,
+   "active_gib": 23.91,
+   "cache_gib": 4.52,
+   "entries": [
+    60324
+   ],
+   "log": [
+    "id=turn1 prompt cache MISS (common prefix 0, 0 entries)",
+    "dflash: 256 tokens, accept rate 52% (200/387 drafts)",
+    "id=turn1 prompt cache store: 60067 tokens, 4 checkpoints, 4837.3 MB (1 entries, 4837.3 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=900.7 MB (moved: the row's own buffers)",
+    "id=turn1 prompt cache reply kept: 60324 tokens (+256 generated), 4 checkpoints, 4854.2 MB (1 entries, 4854.2 MB total) absorbed=1 pieces=2"
+   ],
+   "verify_att_q": 5,
+   "drafter": true
+  },
+  {
+   "id": "turn2",
+   "prompt": 60354,
+   "reused": 60324,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 1.02,
+   "tps": 9.61,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 24.71,
+   "prefill_peak_gib": 24.4,
+   "decode_peak_gib": 24.71,
+   "active_first_gib": 24.35,
+   "round_ms": null,
+   "active_gib": 23.82,
+   "cache_gib": 4.43,
+   "entries": [
+    60610
+   ],
+   "log": [
+    "id=turn2 prompt cache HIT: 60324/60354 tokens reused (common prefix 60324), prefilling 30 (moved: the entry's KV is the row's now)",
+    "id=turn2 prompt cache store: 60353 tokens, 4 checkpoints, 4744.7 MB (1 entries, 4744.7 MB total) reused=60324 gap=0 absorbed=0 pieces=1 states=789.4 MB (moved: the row's own buffers)",
+    "id=turn2 prompt cache reply kept: 60610 tokens (+256 generated), 4 checkpoints, 4761.5 MB (1 entries, 4761.5 MB total) absorbed=1 pieces=2"
+   ],
+   "verify_att_q": 5,
+   "drafter": false
+  },
+  {
+   "id": "turn3",
+   "prompt": 60633,
+   "reused": 60610,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.91,
+   "tps": 14.29,
+   "rounds": 64,
+   "accepted": 3.0,
+   "peak_gib": 25.7,
+   "prefill_peak_gib": 24.28,
+   "decode_peak_gib": 25.7,
+   "active_first_gib": 24.26,
+   "round_ms": 278.9,
+   "active_gib": 23.85,
+   "cache_gib": 4.46,
+   "entries": [
+    60889
+   ],
+   "log": [
+    "id=turn3 prompt cache HIT: 60610/60633 tokens reused (common prefix 60610), prefilling 23 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 43% (192/445 drafts)",
+    "id=turn3 prompt cache store: 60632 tokens, 4 checkpoints, 4757.6 MB (1 entries, 4757.6 MB total) reused=60610 gap=0 absorbed=0 pieces=1 states=784.1 MB (moved: the row's own buffers)",
+    "id=turn3 prompt cache reply kept: 60889 tokens (+256 generated), 4 checkpoints, 4787.6 MB (1 entries, 4787.6 MB total) absorbed=1 pieces=2"
+   ],
+   "verify_att_q": 5,
+   "drafter": true
+  },
+  {
+   "id": "turn4",
+   "prompt": 60913,
+   "reused": 60889,
+   "n": 233,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.01,
+   "tps": 9.61,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 24.66,
+   "prefill_peak_gib": 24.31,
+   "decode_peak_gib": 24.66,
+   "active_first_gib": 24.29,
+   "round_ms": null,
+   "active_gib": 23.7,
+   "cache_gib": 4.31,
+   "entries": [
+    61147
+   ],
+   "log": [
+    "id=turn4 prompt cache HIT: 60889/60913 tokens reused (common prefix 60889), prefilling 24 (moved: the entry's KV is the row's now)",
+    "id=turn4 prompt cache store: 60912 tokens, 3 checkpoints, 4614.4 MB (1 entries, 4614.4 MB total) reused=60889 gap=0 absorbed=0 pieces=1 states=622.4 MB (moved: the row's own buffers)",
+    "id=turn4 prompt cache reply kept: 61147 tokens (+234 generated), 3 checkpoints, 4629.8 MB (1 entries, 4629.8 MB total) absorbed=1 pieces=2"
+   ],
+   "verify_att_q": 5,
+   "drafter": false
+  }
+ ]
+}

@@ -1,0 +1,59 @@
+{
+ "args": {
+  "tokens": 16000,
+  "turns": 1,
+  "max_tokens": 128,
+  "no_thinking": false,
+  "cold_ref": false,
+  "json": "/tmp/scratch/out/scale_16000.json"
+ },
+ "env": {
+  "QWEN_MODEL": "../../weights/qwen38-27b-mlx-5bit",
+  "QWEN_KV_BITS": "0",
+  "QWEN_MRQMM5": "1",
+  "QWEN_DRAFT": "../../weights/qwen38-27b-dflash2",
+  "QWEN_PROMPT_CACHE": "1",
+  "QWEN_PROMPT_CACHE_MOVE": "1",
+  "QWEN_PROMPT_CACHE_GB": "6",
+  "QWEN_PROMPT_CACHE_CKPTS": "8",
+  "QWEN_MAX_BATCH": "1",
+  "QWEN_WIRED_LIMIT_GB": "27",
+  "QWEN_CACHE_LIMIT_GB": "1",
+  "QWEN_SDPA_FUSED_MIN_KV": "8192",
+  "QWEN_PREFILL_BUDGET": "16777216",
+  "QWEN_PRESENCE_PENALTY": "0",
+  "QWEN_MAX_CONTEXT": "65536"
+ },
+ "runs": [
+  {
+   "id": "turn1",
+   "prompt": 16104,
+   "reused": 0,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 107.46,
+   "tps": 21.19,
+   "rounds": 34,
+   "accepted": 2.74,
+   "peak_gib": 24.19,
+   "prefill_peak_gib": 24.03,
+   "decode_peak_gib": 24.19,
+   "active_first_gib": 22.24,
+   "round_ms": 176.3,
+   "active_gib": 22.09,
+   "cache_gib": 2.42,
+   "entries": [
+    16103
+   ],
+   "log": [
+    "id=turn1 prompt cache MISS (common prefix 0, 0 entries)",
+    "dflash: 128 tokens, accept rate 40% (93/232 drafts)",
+    "id=turn1 prompt cache reply not kept: reasoning in the reply (thinking on, 127 of 127 generated tokens)",
+    "id=turn1 prompt cache store: 16103 tokens, 8 checkpoints, 2598.1 MB (1 entries, 2598.1 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=1542.7 MB (moved: the row's own buffers)"
+   ]
+  }
+ ]
+}
