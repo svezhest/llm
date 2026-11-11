@@ -1,0 +1,59 @@
+loaded; block 8, VERIFY_MR True
+t0 cold1  prompt  3854 ttft  29.81s tps 23.01 rounds  62 accepted/round first4 1.75 first8 1.88 first16 2.56 all 3.13 same=None first16=[0, 6, 1, 0, 0, 7, 0, 1, 0, 1, 1, 3, 0, 7, 7, 7]
+       id=warm prompt cache reply kept: 17 tokens (+2 generated), 0 checkpoints, 155.9 MB (1 entries, 155.9 MB total) absorbed=1 pieces=2
+       id=t0-cold1 prompt cache lookup skipped (prompt_cache=off; common prefix 1, 1 entries)
+       id=t0-cold1 prompt cache store: 3853 tokens, 2 checkpoints, 734.0 MB (2 entries, 889.9 MB total) reused=0 gap=1 absorbed=0 pieces=1 states=481.5 MB
+       dflash: 256 tokens, accept rate 47% (194/416 drafts)
+t0 repeat prompt  3854 ttft   0.69s tps 23.24 rounds  61 accepted/round first4 1.75 first8 2.0 first16 3.06 all 3.2 same=True first16=[0, 6, 1, 0, 0, 6, 3, 0, 1, 1, 3, 0, 7, 7, 7, 7]
+       id=t0-cold1 prompt cache reply kept: 4110 tokens (+256 generated), 2 checkpoints, 750.8 MB (2 entries, 906.8 MB total) absorbed=1 pieces=2
+       id=t0-repeat prompt cache HIT: 3808/3854 tokens reused (common prefix 3853), prefilling 46
+       id=t0-repeat prompt cache store: 3853 tokens, 2 checkpoints, 737.0 MB (2 entries, 892.9 MB total) reused=3808 gap=45 absorbed=1 pieces=2 states=481.5 MB
+       dflash: 256 tokens, accept rate 48% (195/409 drafts)
+t0 hit2   prompt  4147 ttft   1.14s tps 28.34 rounds  52 accepted/round first4 1.75 first8 2.62 first16 3.38 all 3.92 same=True first16=[0, 1, 6, 0, 5, 3, 1, 5, 3, 6, 7, 7, 5, 5, 0, 0]
+       id=t0-hit2 prompt cache HIT: 4110/4147 tokens reused (common prefix 4110), prefilling 37
+       id=t0-hit2 prompt cache store: 4146 tokens, 3 checkpoints, 916.7 MB (2 entries, 1072.6 MB total) reused=4110 gap=0 absorbed=1 pieces=4 states=642.0 MB
+       dflash: 256 tokens, accept rate 56% (204/364 drafts)
+t0 cold2  prompt  4147 ttft  31.88s tps 39.27 rounds  38 accepted/round first4 3.25 first8 4.62 first16 5.75 all 5.74 same=None first16=[0, 7, 1, 5, 7, 3, 7, 7, 7, 7, 7, 7, 7, 7, 6, 7]
+       id=t0-hit2 prompt cache reply kept: 4403 tokens (+256 generated), 3 checkpoints, 933.5 MB (2 entries, 1089.4 MB total) absorbed=1 pieces=5
+       id=t0-cold2 prompt cache lookup skipped (prompt_cache=off; common prefix 4146, 2 entries)
+       id=t0-cold2 prompt cache store: 4146 tokens, 3 checkpoints, 913.7 MB (2 entries, 1069.6 MB total) reused=0 gap=4146 absorbed=1 pieces=1 states=642.0 MB
+       dflash: 256 tokens, accept rate 82% (218/266 drafts)
+t1 cold1  prompt  3846 ttft  30.55s tps 19.11 rounds  66 accepted/round first4 2.25 first8 1.88 first16 1.62 all 2.86 same=None first16=[5, 0, 3, 1, 1, 0, 0, 5, 0, 0, 1, 1, 1, 2, 4, 2]
+       id=t0-cold2 prompt cache reply kept: 4403 tokens (+256 generated), 3 checkpoints, 930.5 MB (2 entries, 1086.5 MB total) absorbed=1 pieces=2
+       id=t1-cold1 prompt cache lookup skipped (prompt_cache=off; common prefix 3811, 2 entries)
+       id=t1-cold1 prompt cache store: 3845 tokens, 2 checkpoints, 733.5 MB (3 entries, 1820.0 MB total) reused=0 gap=3811 absorbed=0 pieces=1 states=481.5 MB
+       dflash: 256 tokens, accept rate 41% (189/459 drafts)
+t1 repeat prompt  3846 ttft   0.82s tps 21.17 rounds  66 accepted/round first4 1.5 first8 1.88 first16 1.62 all 2.86 same=True first16=[5, 0, 1, 0, 4, 0, 0, 5, 0, 0, 1, 1, 1, 2, 4, 2]
+       id=t1-cold1 prompt cache reply kept: 4101 tokens (+255 generated), 2 checkpoints, 750.3 MB (3 entries, 1836.7 MB total) absorbed=1 pieces=2
+       id=t1-repeat prompt cache HIT: 3808/3846 tokens reused (common prefix 3845), prefilling 38
+       id=t1-repeat prompt cache store: 3845 tokens, 2 checkpoints, 755.6 MB (3 entries, 1249.4 MB total) reused=3808 gap=37 absorbed=1 pieces=2 states=481.5 MB
+       dflash: 256 tokens, accept rate 41% (189/459 drafts)
+t1 hit2   prompt  4139 ttft   0.85s tps 18.03 rounds  67 accepted/round first4 0.0 first8 0.75 first16 1.56 all 2.25 same=True first16=[0, 0, 0, 0, 2, 1, 1, 2, 1, 4, 0, 1, 4, 0, 4, 5]
+       id=t1-hit2 prompt cache HIT: 4101/4139 tokens reused (common prefix 4101), prefilling 38
+       id=t1-hit2 prompt cache store: 4138 tokens, 3 checkpoints, 935.3 MB (3 entries, 1429.1 MB total) reused=4101 gap=0 absorbed=1 pieces=4 states=642.0 MB
+       dflash: 217 tokens, accept rate 32% (151/469 drafts)
+t1 cold2  prompt  4139 ttft  34.55s tps 17.96 rounds  65 accepted/round first4 0.0 first8 0.75 first16 1.62 all 2.35 same=None first16=[0, 0, 0, 0, 2, 1, 1, 2, 6, 0, 1, 4, 0, 4, 5, 0]
+       id=t1-hit2 prompt cache reply kept: 4357 tokens (+218 generated), 3 checkpoints, 949.7 MB (3 entries, 1443.4 MB total) absorbed=1 pieces=5
+       id=t1-cold2 prompt cache lookup skipped (prompt_cache=off; common prefix 4138, 3 entries)
+       id=t1-cold2 prompt cache store: 4138 tokens, 3 checkpoints, 913.2 MB (3 entries, 1999.7 MB total) reused=0 gap=4138 absorbed=1 pieces=1 states=642.0 MB
+       dflash: 217 tokens, accept rate 34% (153/455 drafts)
+t2 cold1  prompt  3842 ttft  31.72s tps 15.59 rounds  35 accepted/round first4 3.0 first8 3.0 first16 3.12 all 2.91 same=None first16=[3, 6, 0, 3, 7, 2, 2, 1, 1, 7, 7, 2, 3, 0, 2, 4]
+       id=t1-cold2 prompt cache reply kept: 4357 tokens (+218 generated), 3 checkpoints, 927.5 MB (3 entries, 2014.0 MB total) absorbed=1 pieces=2
+       id=t2-cold1 prompt cache lookup skipped (prompt_cache=off; common prefix 3813, 3 entries)
+       id=t2-cold1 prompt cache store: 3841 tokens, 2 checkpoints, 733.2 MB (4 entries, 2747.2 MB total) reused=0 gap=3813 absorbed=0 pieces=1 states=481.5 MB
+       dflash: 136 tokens, accept rate 42% (102/245 drafts)
+t2 repeat prompt  3842 ttft   0.77s tps 19.02 rounds  35 accepted/round first4 2.75 first8 2.75 first16 2.81 all 2.91 same=True first16=[3, 6, 0, 2, 0, 7, 2, 2, 1, 1, 7, 7, 2, 3, 0, 2]
+       id=t2-cold1 prompt cache reply kept: 3979 tokens (+137 generated), 2 checkpoints, 742.3 MB (4 entries, 2756.3 MB total) absorbed=1 pieces=2
+       id=t2-repeat prompt cache HIT: 3808/3842 tokens reused (common prefix 3841), prefilling 34
+       id=t2-repeat prompt cache store: 3841 tokens, 2 checkpoints, 755.4 MB (4 entries, 2176.7 MB total) reused=3808 gap=33 absorbed=1 pieces=2 states=481.5 MB
+       dflash: 136 tokens, accept rate 42% (102/245 drafts)
+t2 hit2   prompt  4015 ttft   0.79s tps 38.84 rounds  13 accepted/round first4 7.0 first8 7.0 first16 6.62 all 6.62 same=True first16=[7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 2]
+       id=t2-hit2 prompt cache HIT: 3979/4015 tokens reused (common prefix 3979), prefilling 36
+       id=t2-hit2 prompt cache store: 4014 tokens, 2 checkpoints, 766.7 MB (4 entries, 2188.0 MB total) reused=3979 gap=0 absorbed=1 pieces=4 states=481.5 MB
+       dflash: 98 tokens, accept rate 95% (86/91 drafts)
+t2 cold2  prompt  4015 ttft  34.39s tps 35.80 rounds  13 accepted/round first4 7.0 first8 7.0 first16 6.62 all 6.62 same=None first16=[7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 2]
+       id=t2-hit2 prompt cache reply kept: 4114 tokens (+99 generated), 2 checkpoints, 773.3 MB (4 entries, 2194.6 MB total) absorbed=1 pieces=5
+       id=t2-cold2 prompt cache lookup skipped (prompt_cache=off; common prefix 4014, 4 entries)
+       id=t2-cold2 prompt cache store: 4014 tokens, 2 checkpoints, 744.6 MB (4 entries, 2758.6 MB total) reused=0 gap=4014 absorbed=1 pieces=1 states=481.5 MB
+       dflash: 98 tokens, accept rate 95% (86/91 drafts)
+peak 26.24 GB

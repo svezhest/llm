@@ -208,8 +208,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   ceiling is an MLX kernel property: 8-bit qmm with 4–16 rows costs ~2.3× a
   1-row qmm on M1 (M=32 drops to 1.7×), so a 16-token verify forward ≈ 70 ms vs
   30 ms decode; the 4-bit drafter block ≈ 15 ms (lm_head over 15 rows alone
-  9 ms). Greedy-only (temperature 0, presence_penalty 0), text-only, no
-  thinking budget, fp16 KV (`QWEN_KV_BITS=0`, else the drafter is ignored).
+  9 ms). Greedy-only (temperature 0, presence_penalty 0), text-only (a
+  thinking budget is honoured inside the rounds since 2026-11-11), fp16 KV (`QWEN_KV_BITS=0`, else the drafter is ignored).
   mlx-vlm 0.7 verifies through exact multi-row qmv kernels (rows bit-identical to a
   1-token decode, so DFlash output == plain greedy, 15/15 corpus); they spill
   registers from ~10 rows, so `QWEN_VERIFY_EXACT_MAX_T=8` keeps them for blocks
@@ -330,9 +330,16 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   plain greedy with the kernel (15/16 answers without thinking, 12/16 with; 4 of the 5 divergences at a top-2 logit gap
   ≤ 0.016, one at 0.25). mlx-vlm's default runtime block for DFlash2 is 5 (adaptive 3..5); `_setup_verify_mrqmm` fixes 8.
   A thinking budget no longer turns DFlash off (`_spec`: the block is cut where the budget forces the next token,
-  `\n</think>` go through plain steps; 27B 8/8 == plain with the budget). Prompt cache + drafter: hits work, output ==
-  cold; a hit that leaves the drafter ~460 tokens of tail loses nothing, an exact repeat (1 token of context) accepts
-  5–20 % fewer drafts. Peak 23.2 GB (25.7 with four 0.7 GB cache entries).
+  `\n</think>` go through plain steps; 27B 8/8 == plain with the budget). Prompt cache + drafter (2026-11-11, report §7):
+  hits work, output == cold (30/30 pairs incl. hits through a reply). The entry keeps the drafter's context
+  (`QWEN_DRAFT_TAIL` / `_END`: hidden states of the last positions before each state), so an exact repeat runs the cold
+  run's rounds (before: 1 token of context, 5–20 % fewer drafts accepted) and so does the next turn; DFlash rows now
+  store reply KV (also demoted ones; `_spec_reply`: `row.fed` = generated tokens, the cache holds the first
+  pos − len(prompt); a stop token among accepted drafts with more after it → nothing stored) and a cancelled prefill's
+  prefix. Next turn without thinking: TTFT 0.75–0.9 s vs 31–36 s cold. `_spec`'s prefill window bug fixed (the oldest
+  chunk was dropped while all but the NEWEST covered the window: slabs 2048 + 2048 + 40 left the drafter 40 positions).
+  States stored by plain rows carry no context. Peak 23.2 GB (26.3–26.7 with a 3 GB cache of four entries at the
+  27 GB wired limit: tight — lower `QWEN_PROMPT_CACHE_GB` or `QWEN_DRAFT_TAIL_END` if needed).
 
 ## Implementation notes worth keeping
 
@@ -475,14 +482,14 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   state, checkpoints so far, same `pc.store` (limit, absorb, chain/fresh, `_Inherit`
   released); `_Entry.partial` (absorbing only partial entries is no chain: `chained` =
   any non-partial or chained covered entry), logged as the normal store line +
-  ` (cancelled at pos/len)`. Runs in `_advance` like the full store. DFlash (`_spec`) and
-  vision: nothing. Retry resumes at pos, bit-identical to cold. A store exception there
+  ` (cancelled at pos/len)`. Runs in `_advance` like the full store. DFlash (`_spec`)
+  prefills too since 2026-11-11; vision: nothing. Retry resumes at pos, bit-identical to cold. A store exception there
   is logged (`_store_prefix`), never changes the outcome. `docs/perf/2026-10-17/
   design/partial_store.md`, `tests/test_partial_store.py`.
   **Reply KV (`QWEN_PROMPT_CACHE_REPLY`, default 1 since the 2026-10-17 GPU gate;
   `0` = off)**: at a row's end
   (`stop`/`length`; not cancel (stop strings usually; a late cancel after stop/length
-  stores, harmlessly), errors, DFlash, vision, rows still in a cascade group (logged
+  stores, harmlessly), errors, vision, rows still in a cascade group (logged
   `id=… prompt cache reply skipped: in a cascade group …`), replies that generated a
   reasoning section — `_GenState.for_prompt(ids, _think)`: the prompt open in `<think>`,
   the handler's own split; a think id inside the content with thinking off is content,
@@ -806,6 +813,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PROMPT_CACHE_REPLY` | worker | `1` — a finished request's entry is extended by its decoded tokens' KV + end state; the next turn resumes after the reply (AppWorld: −21 % prefill tokens); not bit-identical to a cold prefill (batched-decode class: top-1 99.88 %, KL 5.8e-5 on the gate); `0` = off, bit-exact |
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — when only the entry the head of the queue would resume from keeps it out, it waits for a row to end only for a hit this deep and only this long; else the entry is evicted and the head admitted cold (8K ≈ 14 s of 9B prefill > the 10 s wait) |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` |
+| `QWEN_DRAFT_TAIL` / `_END` | worker | `128` / `2048` — every prompt-cache state a DFlash row stores carries the drafter's context there: the target's hidden states of the last N positions (27B: 51 KiB each), as one more item after the state's recurrent layers (`_with_tail`: rides through inherit / absorb / thinning / the disk tier, counted in the entry's bytes). `TAIL`: checkpoints (6.6 MB each); `_END`: the entry's end state — prompt end, cancelled prefix, reply end — capped at the drafter's window − 1 (≤ 105 MB per entry). A DFlash row resuming from a state starts its drafter with them; a checkpoint inside the end state's window takes the part of the end context before it (`_resume_tail`, no extra memory). 27B replay (`ctx_len.py`): rounds for the same 768 tokens 245 / 226 / 217 / 218 / 221 at N = 1 / 16 / 32 / 128 / 2047 (cold); but a turn re-emitting the previous answer's code needs the whole source (128 at the reply end: 52 rounds vs the cold run's 38; window: 38). `0` = off |
 | `QWEN_DRAFT_FP32` | worker | unset = auto (on for DFlash2 drafters) — the drafter's activations in fp32 (weights stay `QWEN_DRAFT_BITS`): the 27B's DFlash2 overflows fp16 after its first layer (residual 5.7e4 → NaN logits, 0 drafts accepted); fp32 3.16 of 7 accepted at 4 bits vs 3.28 unquantized, block 36 vs 32 ms; `1` / `0` force. `docs/perf/2026-11-10/dflash2_27b.md` |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (fp16 KV + prompt cache + max_batch ≥ 3 only, else off; unset/empty = `1`, anything but `1` off); `0` = today's per-row path bit for bit |
 | `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` (bitwise prefix check per join; a sync) |

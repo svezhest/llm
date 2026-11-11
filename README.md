@@ -373,7 +373,7 @@ run — through the same store (budget checks, absorption, chain policy; logged 
 normal store line + `(cancelled at pos/len)`). A retry of the same prompt resumes there
 instead of re-prefilling it (the 2026-10-17 AppWorld run re-prefilled a 114K prompt twice
 for 8 minutes after client timeouts). The retry absorbs it without counting as a chain.
-DFlash prefills and image prompts store nothing when cancelled. `QWEN_PROMPT_CACHE_GB` (3) is a soft cap: past it entries
+Image prompts store nothing when cancelled (DFlash prefills do, as plain ones). `QWEN_PROMPT_CACHE_GB` (3) is a soft cap: past it entries
 go at store (the newest stays, alone if need be) in the **eviction order** below. Entries **share their KV**: an entry is a chain of immutable
 segments, a store copies only the tokens past its resume point out of the request's
 cache and reuses the older entry's segments for the rest, so 16 conversations over
@@ -468,7 +468,9 @@ Nothing extra is stored for:
   would be wasted, and the prompt-end state (a regenerate's full hit) would be lost.
   With thinking off a `<think>` id the model emits inside its content is content: the
   reply is stored;
-* DFlash and vision rows;
+* vision rows (DFlash rows are stored: the tokens their target cache took in the rounds, the
+  entry's end state carrying the drafter's context, `QWEN_DRAFT_TAIL`; not when the stop token
+  was an accepted draft with more accepted drafts after it — the cache ran past the stop);
 * rows still in a cascade group when they end (their KV is in the group's stack; logged);
 * rows whose prompt entry was evicted while they decoded.
 
@@ -703,6 +705,9 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_PROMPT_CACHE_KEEP_TOKENS` / `_KEEP_WAIT_S` | worker | `8192` / `10` — a request kept out only by the cache entry it would resume from waits for a running row to end only for a hit this deep, and only this long; else the entry is evicted and the request starts cold (8K tokens ≈ 14 s of 9B prefill, more than the wait) |
 | `QWEN_CASCADE` | worker | `1` — cascade decode attention for rows sharing a prompt prefix (see *Cascade attention*); only with `QWEN_KV_BITS=0` + `QWEN_PROMPT_CACHE=1` + max_batch ≥ 3, else off; `0` = the per-row path bit for bit |
 | `QWEN_CASCADE_MIN_ROWS` / `_MIN_PREFIX` / `_CHECK` | worker | `8` (1–2 → 3, 0 = off) / `4096` (0 = off) / `0` — rows sharing a prefix before a group forms, its minimum length in tokens, bitwise prefix check per join |
+| `QWEN_DRAFT_FP32` | worker | unset = auto (on for DFlash2 drafters: the 27B's overflows fp16 → no draft accepted) — the drafter's activations in fp32, weights stay `QWEN_DRAFT_BITS`; `1` / `0` force |
+| `QWEN_MRQMM5` | worker | `0` — the multi-row matmul kernel for 5-bit modules (the 27B), 3..16 rows; needed for DFlash2 on the 27B (×1.77 code / ×1.41 thinking vs ×0.8–1.1 without); off by default: the 27B's batched decode through it is not gated |
+| `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | worker | `128` / `2048` — with the prompt cache, every state a DFlash row stores keeps the drafter's context there: the target's hidden states of the last N positions (27B: 51 KiB each); a DFlash row resuming from it starts its drafter with them instead of only the tokens the hit left to prefill. `TAIL`: checkpoints; `TAIL_END`: the entry's end (prompt end, reply end; capped at the drafter's window, ≤ 105 MB per entry on the 27B) — a turn that re-emits the previous answer's code needs the whole source in the drafter's sight. `0` = off |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `QWEN_MAX_BATCH` | worker | `16` — requests decoded together (continuous batching); `1` = one at a time, as before. Reported to the gateway (Health) as its in-flight limit |

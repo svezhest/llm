@@ -1,0 +1,57 @@
+loaded; drafter window 2048, layers [5, 19, 33, 47, 61]
+t0: turn 2 adds 286 tokens (the answer + the follow-up)
+t0: prompt 4140, generated 256
+t0 N=   32 rounds  68 accepted/round first4 3.25 first8 1.75 first16 1.75 all 2.75
+t0 N=   64 rounds  67 accepted/round first4 3.5 first8 1.88 first16 2.06 all 2.81
+t0 N=  128 rounds  65 accepted/round first4 3.5 first8 1.88 first16 2.06 all 2.92
+t0 N=  165 rounds  65 accepted/round first4 3.5 first8 1.88 first16 2.06 all 2.92
+t0 N=  256 rounds  65 accepted/round first4 3.5 first8 1.88 first16 2.06 all 2.92
+t0 N=  384 rounds  65 accepted/round first4 3.75 first8 2.62 first16 2.56 all 2.92
+t0 N=  512 rounds  65 accepted/round first4 3.75 first8 2.62 first16 2.56 all 2.92
+t0 N= 1024 rounds  65 accepted/round first4 3.75 first8 2.62 first16 2.56 all 2.92
+t0 N= 2047 rounds  64 accepted/round first4 3.75 first8 2.62 first16 2.56 all 2.98
+t1: turn 2 adds 286 tokens (the answer + the follow-up)
+t1: prompt 4132, generated 256
+t1 N=   32 rounds  71 accepted/round first4 3.0 first8 3.38 first16 2.44 all 2.55
+t1 N=   64 rounds  72 accepted/round first4 3.0 first8 3.38 first16 2.44 all 2.5
+t1 N=  128 rounds  72 accepted/round first4 3.0 first8 3.38 first16 2.44 all 2.5
+t1 N=  165 rounds  73 accepted/round first4 3.0 first8 2.88 first16 1.94 all 2.45
+t1 N=  256 rounds  71 accepted/round first4 3.0 first8 2.88 first16 2.25 all 2.55
+t1 N=  384 rounds  69 accepted/round first4 3.75 first8 2.88 first16 2.25 all 2.65
+t1 N=  512 rounds  70 accepted/round first4 3.75 first8 2.88 first16 2.25 all 2.6
+t1 N= 1024 rounds  70 accepted/round first4 3.75 first8 2.88 first16 2.25 all 2.6
+t1 N= 2047 rounds  70 accepted/round first4 3.75 first8 2.88 first16 2.25 all 2.6
+t2: turn 2 adds 286 tokens (the answer + the follow-up)
+t2: prompt 4128, generated 256
+t2 N=   32 rounds  66 accepted/round first4 2.0 first8 1.5 first16 2.69 all 2.77
+t2 N=   64 rounds  60 accepted/round first4 2.0 first8 1.5 first16 2.75 all 3.15
+t2 N=  128 rounds  57 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.37
+t2 N=  165 rounds  57 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.37
+t2 N=  256 rounds  57 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.37
+t2 N=  384 rounds  58 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.29
+t2 N=  512 rounds  58 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.29
+t2 N= 1024 rounds  58 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.29
+t2 N= 2047 rounds  59 accepted/round first4 2.0 first8 3.25 first16 2.94 all 3.22
+t3: turn 2 adds 285 tokens (the answer + the follow-up)
+t3: prompt 4132, generated 256
+t3 N=   32 rounds  69 accepted/round first4 3.25 first8 3.25 first16 2.81 all 2.61
+t3 N=   64 rounds  68 accepted/round first4 3.25 first8 3.25 first16 2.81 all 2.66
+t3 N=  128 rounds  69 accepted/round first4 3.25 first8 3.5 first16 3.12 all 2.65
+t3 N=  165 rounds  68 accepted/round first4 3.25 first8 3.5 first16 3.12 all 2.71
+t3 N=  256 rounds  68 accepted/round first4 3.25 first8 3.5 first16 2.81 all 2.71
+t3 N=  384 rounds  67 accepted/round first4 3.25 first8 3.5 first16 3.12 all 2.76
+t3 N=  512 rounds  67 accepted/round first4 3.25 first8 3.5 first16 3.12 all 2.76
+t3 N= 1024 rounds  66 accepted/round first4 3.25 first8 3.5 first16 3.12 all 2.82
+t3 N= 2047 rounds  68 accepted/round first4 3.25 first8 3.12 first16 2.75 all 2.71
+
+== rounds needed for the same tokens (sum over tasks), accepted/round ==
+N=   32 rounds  274 all 2.67 first8 2.47
+N=   64 rounds  267 all 2.76 first8 2.5
+N=  128 rounds  263 all 2.83 first8 3.0
+N=  165 rounds  263 all 2.83 first8 2.88
+N=  256 rounds  261 all 2.86 first8 2.88
+N=  384 rounds  259 all 2.89 first8 3.06
+N=  512 rounds  260 all 2.88 first8 3.06
+N= 1024 rounds  259 all 2.89 first8 3.06
+N= 2047 rounds  261 all 2.86 first8 2.97
+peak 23.81 GB

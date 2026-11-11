@@ -49,7 +49,7 @@ class Grab(logging.Handler):
 
     def emit(self, rec):
         m = rec.getMessage()
-        if "prompt cache" in m:
+        if "prompt cache" in m or "dflash:" in m:
             self.lines.append(m[:200])
 
 
@@ -106,7 +106,7 @@ def run(messages, rid, mode=""):
 
 def answer(toks):
     """The reply's content (after </think>) as the client would send it back."""
-    cut = toks.index(think_close) + 1 if think_close in toks else len(toks)
+    cut = toks.index(think_close) + 1 if think_close in toks else 0 if a.no_thinking else len(toks)
     return tok.decode(toks[cut:]).strip() or "(no answer yet)"
 
 
