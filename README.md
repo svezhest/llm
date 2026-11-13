@@ -49,6 +49,26 @@ never hard-kill (orphans partials). See `CLAUDE.md`. Scripted, resumable:
 - `src/proto/worker.proto` — gRPC contract.
 - `src/gateway/` (Rust) — axum HTTP + tonic gRPC client + queue + metrics + tracing.
 - `src/worker/`  (Python) — grpcio server, mlx 0.32.3 + mlx-vlm 0.7.6 (no mlx-lm); load + generate + reasoning budget.
+  `worker.py` is the entry point and a facade (`import worker` = every name of the package);
+  the code is in `qwen_worker/`:
+
+  | module | what |
+  |---|---|
+  | `config` | `QWEN_*` env knobs and constants |
+  | `chat` | tool-call parsing, images, chat messages, special-token-safe tokenization |
+  | `sampler` | vLLM-order sampler, penalties, grouped per-row draws |
+  | `pcache` | prompt cache: KV segments, entries, the prefix cache |
+  | `sizing` | prefill slab policy, memory budget arithmetic |
+  | `stream` | detokenizer, stop strings, request controls, reasoning split |
+  | `grammar` | structured output / tool-call grammars (llguidance) |
+  | `nosync` | `QWEN_DEBUG_NO_SYNC` |
+  | `rows` | batched decode over per-row caches, stacked GDN state |
+  | `kernels` | mlx-vlm patches: fused SDPA, DFlash verify, fused GDN in-projection |
+  | `logprobs` | log-probabilities, assistant spans |
+  | `request` | request / row objects |
+  | `scheduler` + `sched_*` | `_Scheduler` and its mixins: admit, prefill, spec (DFlash), store, cascade, decode |
+  | `engine` | `Engine`: load, checks, `generate` |
+  | `server` | gRPC servicer, `serve`, `main` |
 - `src/exporter/` (Rust) — `powermetrics` → `/metrics` (GPU/ANE/mem/watts).
 - `deploy/` — docker-compose (prometheus/grafana/loki/promtail) + launchd plists.
 - `Cargo.toml` — Rust workspace (members `src/gateway`, `src/exporter`).
