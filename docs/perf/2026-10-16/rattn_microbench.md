@@ -1,6 +1,6 @@
 # Decode attention at long ragged contexts: profile + ragged multi-row kernel (rattn)
 
-16.10.2026, M1 Max 32 GB, mlx 0.32.3 / mlx-vlm 0.7.6, Ornith-1.5 9B 8-bit, `QWEN_KV_BITS=0`, HEAD 34b4a81.
+16.10.2026, M1 Max 32 GB, mlx 0.32.3 / mlx-vlm 0.7.6, Ornith-1.5 9B 8-bit, `QWEN_KV_BITS=0`, HEAD 8a1625c.
 The question came from `HANDOFF-appworld.md`: on the agentic load (8–16 rows with distinct 5–33K contexts and
 short answers), how much of a decode step is per-row attention, and does a single ragged multi-row kernel pay?
 

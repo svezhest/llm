@@ -3,7 +3,7 @@
 2026-10-12, 16:30–17:12, M1 Max 32 GB, Ornith-1.5 9B 8-bit, fp16 KV (`QWEN_KV_BITS=0`),
 defaults otherwise (max_batch 16, fp16, pfqmm, mrqmm, GDN fuse, no DFlash, 3 GB soft cap).
 
-The code under test is the uncommitted Part A in `src/worker/worker.py` on top of 971a8d5.
+The code under test is the uncommitted Part A in `src/worker/worker.py` on top of b846d85.
 Each entry's KV is now a chain of immutable `_Seg` pieces. A store copies only the tokens
 past the resume point and reuses the parent's segments below it. A restore concatenates
 the pieces once into the row's own buffer. A store also evicts down to the batch's

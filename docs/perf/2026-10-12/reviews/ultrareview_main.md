@@ -1,4 +1,4 @@
-# Cloud review (ultrareview) of main 718d1b5..ca28690 — findings to fix during the optimization work
+# Cloud review (ultrareview) of main fe6d13c..f2bcbdf — findings to fix during the optimization work
 
 1. [normal] gateway api.rs:108-144 — `client.check()` runs for EVERY request BEFORE `pool.try_admit()`;
    a full queue no longer sheds load for free, and Check (template render + tokenizer.encode, GIL) shares

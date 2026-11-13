@@ -1,6 +1,6 @@
 # Re-review: the fixes for cascade B2 + B3 (`reviews/cascade_b2b3.md` findings 1–10)
 
-**Scope.** The uncommitted diff on HEAD 66a7c17, checked against the original review:
+**Scope.** The uncommitted diff on HEAD ee00db4, checked against the original review:
 
 * `src/worker/worker.py`, `src/worker/cascade.py`;
 * `tests/test_cascade_sched.py`, `tests/test_cascade.py`;

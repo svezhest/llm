@@ -796,7 +796,7 @@ def test_insert_failure_drops_the_load(dense, small, tmp_path, monkeypatch):
     assert not disk.busy() and disk.held_bytes() == 0 and disk.stats()["discards"] == 1
 
 
-# --- re-review of ed3b242 ----------------------------------------------------------
+# --- re-review of b37829b ----------------------------------------------------------
 def _release_later(disk, n, after=0.3):
     import threading
     t = threading.Timer(after, disk._release, args=(n,))

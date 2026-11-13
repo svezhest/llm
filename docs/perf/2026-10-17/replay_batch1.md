@@ -45,7 +45,7 @@ prefill-bound load?
 
   `sched_timer` now also logs one `sched_slab:` line per prefill tick (input to `slabs.md`). The lines are
   log-only; the schedule is unchanged.
-- **Code.** HEAD aa2cb9e (worker.py md5 `0f42fb87…`).
+- **Code.** HEAD 778ef6c (worker.py md5 `0f42fb87…`).
   - The worker modules were frozen from HEAD into a scratch copy (`SCHED_WORKER_DIR`). The reason: another
     session's uncommitted `pfqmm.py` change (short-slab tiles) is in the working tree, and it must not leak into
     these numbers.

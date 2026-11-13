@@ -19,7 +19,7 @@ request. Message-boundary cuts split even short hit suffixes. How much would mer
   - The bigger "keep only the chain-policy cuts" change would add ~1 % more. It would break the
     resume-from-checkpoint invariant, so it is not worth it.
 
-Code: HEAD aa2cb9e, the worker modules frozen from HEAD (the uncommitted `pfqmm.py` short-tile change in the working
+Code: HEAD 778ef6c, the worker modules frozen from HEAD (the uncommitted `pfqmm.py` short-tile change in the working
 tree was excluded). 9B 8-bit, fp16 KV, the standard env (`replay_batch1.md`).
 
 ## (a) Slab histogram on the replay traces

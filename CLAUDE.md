@@ -240,7 +240,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   | 8 | 31.8 / 58 s | 110.4 / 5.3 s | 142 / 7.0 s |
   | 16 | | 115.9 / 10.4 s | 170 / 12.9 s |
 
-  Pre-change serialized (ca28690, drifting machine): 22.5 tok/s at every c, TTFT p50 80 s
+  Pre-change serialized (f2bcbdf, drifting machine): 22.5 tok/s at every c, TTFT p50 80 s
   at c=8 (256) / 315 s (1024). Per-request decode 37 / 30 / 29 / 21 / 12 tok/s at c = 1 /
   2 / 4 / 8 / 16. `QWEN_MRQMM=0`: c=8 64.6, c=16 87.5 tok/s. Prefill TTFT single stream:
   8K 22.1 → 17.2 s, 32K 72.5 s (old: ~82–89 s, in-process). Peak 10.4 → 11.7 GB (c=16,
@@ -902,7 +902,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   decode-share wait in `ttft_ms` (and not in `queue_ms`): `w_ttft_ms` columns from
   before (e.g. `prompt_cache_bench.md`) are not comparable for such requests. The
   gateway's `qwen_ttft_seconds` (its own clock) is unaffected.
-- The old (ca28690) baseline was taken on a drifting machine; "old → new" at c=1
+- The old (f2bcbdf) baseline was taken on a drifting machine; "old → new" at c=1
   (22.5 → 31.9 tok/s) is mostly the machine. The honest batching gain is the
   serialized-vs-batched pair on the same code (`docs/perf/2026-10-12/final_bench.md`).
 - Reports, raw JSON and the tools: `docs/perf/<date>/` + `scripts/perf/` (prof, microbench,

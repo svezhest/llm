@@ -1,5 +1,5 @@
 2026-10-24 03:37:58 WARNING: CPU pytest running (noise accepted): 81994 /Users/user/Projects/llm/src/worker/.venv/bin/python -m pytest -q --ignore tests/test_mrqmm.py -p no:cacheprovider 
-2026-10-24 03:37:58 === start (T M), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 4eecc91+dirty
+2026-10-24 03:37:58 === start (T M), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 1370abc+dirty
 2026-10-24 03:37:58 state: therm  | load { 3.72 4.15 4.56 } | free 12937 MiB | swap 5490.94M
 2026-10-24 03:37:58 phase T start
 2026-10-24 03:38:13 phase T Metal tests rc=0: 130 passed, 2 warnings in 13.34s
@@ -9,7 +9,7 @@
 2026-10-24 03:39:36 phase M end rc=0: 264 lines
 2026-10-24 03:39:36 state: therm  | load { 5.08 4.60 4.70 } | free 16659 MiB | swap 5482.94M
 2026-10-24 03:39:36 === done (T M)
-2026-10-24 03:48:37 === start (T M S), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 95d3508
+2026-10-24 03:48:37 === start (T M S), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 939f5d8
 2026-10-24 03:48:37 state: therm  | load { 3.49 4.61 4.76 } | free 17989 MiB | swap 3419.44M
 2026-10-24 03:48:37 phase T start
 2026-10-24 03:48:44 phase T Metal tests rc=0: 130 passed, 2 warnings in 6.10s
@@ -22,7 +22,7 @@
 2026-10-24 03:54:29 phase S end rc=0: 03:50:58 P=7946 B=8: medians ms/step: fp32 40.8, mma 38.7, stub 35.9, attn_fp32 5.3, attn_mma 4.0, control 44.4 03:50:58 P=7946 B=8: fp32 attention in the model 4.9 ms (step 40.8 - rest 35.9) vs isolated 5.3 ms 03:50:58 P=7946 B=8: mma attention in the model 2.7 ms (step 38.7 - rest 35.9) vs isolated 4.0 ms 03:50:58 P=7946 B=8: mma step x1.055 vs fp32 03:51:57 P=7946 B=16: medians ms/step: fp32 53.5, mma 52.8, stub 46.8, attn_fp32 6.2, attn_mma 6.7, control 64.0 03:51:57 P=7946 B=16: fp32 attention in the model 6.8 ms (step 53.5 - rest 46.8) vs isolated 6.2 ms 03:51:57 P=7946 B=16: mma attenti
 2026-10-24 03:54:29 state: therm  | load { 2.97 3.72 4.29 } | free 22992 MiB | swap 3845.44M
 2026-10-24 03:54:29 === done (T M S)
-2026-10-24 03:55:03 === start (A E), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 95d3508+dirty
+2026-10-24 03:55:03 === start (A E), tree /Users/user/Projects/llm/.claude/worktrees/agent-ade441fa1626097bc, git 939f5d8+dirty
 2026-10-24 03:55:03 state: therm  | load { 3.14 3.66 4.24 } | free 22645 MiB | swap 3837.44M
 2026-10-24 03:55:03 phase A start (agree_mma.py)
 2026-10-24 04:00:31 phase A end rc=0: P=7975 B= 8 fp32_vs_solo      : top-1 99.80% (1022/1024), KL mean 1.45e-05 p99 1.23e-04 max 7.62e-04 P=7975 B= 8 mma_vs_solo       : top-1 99.80% (1022/1024), KL mean 1.45e-05 p99 1.17e-04 max 4.14e-04 P=7975 B= 8 control_vs_solo   : top-1 99.80% (1022/1024), KL mean 1.39e-05 p99 1.23e-04 max 2.60e-04 P=7975 B= 8 mma_vs_fp32       : top-1 100.00% (1024/1024), KL mean 9.95e-06 p99 7.73e-05 max 3.35e-04 P=7975 B=16 fp32_vs_solo      : top-1 99.71% (2042/2048), KL mean 1.69e-05 p99 1.29e-04 max 3.61e-03 P=7975 B=16 mma_vs_solo       : top-1 99.80% (2044/2048), KL mean 2.07e-05 p99 1.31e-04 max 7.59e-03 P=7975 B=16 control_vs_solo   : top-1 99.76% (2043/2048), KL mean 1.56e-05 p99 1.25e-04 max 2.42e-03 P=7975 B=16 mma_vs_fp32       : top-1 99.80% (2044/2048), KL mean 1.21e-05 p99 9.36e-05 max 1.10e-03 P=31969 B= 8 fp32_vs_solo      : top-1 100.00% (1024/1024), KL mean 1.35e-05 p99 9.86e-05 m

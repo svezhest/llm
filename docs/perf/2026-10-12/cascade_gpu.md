@@ -10,7 +10,7 @@
 | other settings | defaults: fp16, pfqmm, mrqmm, GDN fuse, max_batch 16, 3 GB prompt-cache soft cap, no DFlash |
 | gateway | 127.0.0.1:8090 (pid 27313, untouched) |
 
-**Code under test.** The uncommitted B2/B3 `src/worker/worker.py` + `cascade.py` on top of 66a7c17:
+**Code under test.** The uncommitted B2/B3 `src/worker/worker.py` + `cascade.py` on top of ee00db4:
 
 - G1 first ran at 17:47–17:59, before the review fixes.
 - Everything else ran on the **fixed** code (`_GroupRef` by weakref, no cycles; `_group_wins` on real lengths + budget guard; eager suffix copy in `add`; staged releases; members in batch order). G1 was re-run on the fixed code at 19:21: **bit-identical numbers** (same KL to every printed digit).

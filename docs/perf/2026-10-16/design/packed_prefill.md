@@ -1,7 +1,7 @@
 # Packed prefill (several waiting requests' suffixes in one forward): feasibility
 
 Date 2026-10-16. CPU only: no GPU, no worker, nothing in `src/` changed. Line numbers are worker.py at HEAD
-34b4a81 and mlx-vlm 0.7.6 / mlx 0.32.3 in `src/worker/.venv`. Load model: `docs/perf/2026-10-16/HANDOFF-appworld.md`
+8a1625c and mlx-vlm 0.7.6 / mlx 0.32.3 in `src/worker/.venv`. Load model: `docs/perf/2026-10-16/HANDOFF-appworld.md`
 (8 AppWorld episodes, 94 % prompt-cache hits, prefilled tokens per request p50 379 / mean 693 / p90 2.8K /
 max 4.7K, each at a cache offset of 5–33K; 76 % of scheduler ticks have a prefill running, 66 % have a queue).
 

@@ -1,6 +1,6 @@
 # Review: cascade B2 + B3 (scheduler wiring, `QWEN_CASCADE`, default off)
 
-**Scope.** The uncommitted diff on HEAD 66a7c17:
+**Scope.** The uncommitted diff on HEAD ee00db4:
 
 * `src/worker/worker.py` (+495 lines), `src/proto/worker.proto`, `src/gateway/src/worker_client.rs`;
 * CLAUDE.md, README, BACKLOG, and `cascade_plan.md` "As built";

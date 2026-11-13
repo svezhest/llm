@@ -1,4 +1,4 @@
-# Baseline: concurrency on Ornith-1.5 9B (serialized worker, commit ca28690)
+# Baseline: concurrency on Ornith-1.5 9B (serialized worker, commit f2bcbdf)
 
 Date 2026-10-11, M1 Max 32 GB, macOS 27. mlx 0.31.2 / mlx-vlm 0.6.2.
 Benchmark: `scripts/bench_concurrency.py` (new, stdlib-only, in the repo).
@@ -79,7 +79,7 @@ Aggregate tok/s includes prefill time: 256 / (2.3 s prefill + 256/28.6 s decode)
 
 ## First sweeps (worker accidentally at nice 5; kept for the drift picture)
 
-Sweep 1, machine cold, pristine ca28690 worker and gateway (`baseline_256.json`):
+Sweep 1, machine cold, pristine f2bcbdf worker and gateway (`baseline_256.json`):
 
 | conc | reqs | wall s | agg tok/s | TTFT mean s | TTFT p95 s | lat mean s | lat p95 s | decode tok/s/req | peak GB |
 |---|---|---|---|---|---|---|---|---|---|
@@ -149,14 +149,14 @@ the request, pool ≤ 0.08 GB); 14.77 GB at 4K, 15.23 GB at 8K. No growth over
 ## Caveat: code under test
 
 Another agent edited the repo during this run (gateway pool/journal, proto, worker
-batching). Sweep 1 (19:51) ran the pristine ca28690 worker and gateway. At 20:29
+batching). Sweep 1 (19:51) ran the pristine f2bcbdf worker and gateway. At 20:29
 I restarted both at nice 0: the gateway binary had been rebuilt by someone else at
 20:26 (new pool.rs, `GATEWAY_MAX_INFLIGHT` / Health `max_batch`); it logged
 `in-flight capacity capacity=1 worker_max_batch=0` and `queue_ms=0 batch_mean=0.0`
 for every request, so the worker it talked to had no batching (Health.max_batch
 unset) and the gateway serialized as before. The results are the same
 serialized behaviour, but the nice-0 worker's worker.py is the file as of 20:29,
-not guaranteed byte-identical to ca28690.
+not guaranteed byte-identical to f2bcbdf.
 
 ## Files
 

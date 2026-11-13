@@ -1,7 +1,7 @@
 # Prompt cache under batching: second review (what `prompt_cache_opt.md` missed)
 
 Date 2026-10-12. Read-only, CPU only: no MLX, no GPU, no worker. Line numbers are for
-`src/worker/worker.py` at 13dd6dc and mlx-vlm 0.7.6 in `src/worker/.venv`. The checkpoint and thinning
+`src/worker/worker.py` at b5cccb7 and mlx-vlm 0.7.6 in `src/worker/.venv`. The checkpoint and thinning
 claims were checked with a pure-Python re-implementation of `_bounds` / `_prompt_cache` keep set /
 `_PrefixCache.store` thinning + covered rule (no budget), driven with synthetic token streams that
 follow the 9B chat template (`weights/ornith15-9b-mlx-8bit/chat_template.jinja`).

@@ -1,7 +1,7 @@
 # Prompt cache under continuous batching: what to optimize
 
 Date 2026-10-12. Read-only analysis, CPU only (nothing ran on the GPU). Line numbers refer to
-`src/worker/worker.py` at 13dd6dc, and to mlx-vlm 0.7.6 / mlx 0.32.3 in `src/worker/.venv`.
+`src/worker/worker.py` at b5cccb7, and to mlx-vlm 0.7.6 / mlx 0.32.3 in `src/worker/.venv`.
 Model numbers are for the 9B (Ornith-1.5, fp16 KV): 8 full-attention layers × 4 KV heads × head_dim
 256 → **32 KiB/token**, so an 8K prefix is **268 MB** of KV. One GDN state (24 layers × fp32
 32×128×128 + conv) is **51.5 MB**.

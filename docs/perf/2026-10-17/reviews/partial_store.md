@@ -1,6 +1,6 @@
 # Review: partial store on cancel (A) + chain policy for long fresh entries (B)
 
-2026-10-17. Patch = `git diff f91a207` in worktree `agent-a38526f89553f2b05`
+2026-10-17. Patch = `git diff 3ef5031` in worktree `agent-a38526f89553f2b05`
 (src/worker/worker.py, tests/test_partial_store.py, README, CLAUDE.md, chain_ckpts_sim.py,
 design/partial_store.md). CPU only. Line numbers are the worktree's worker.py.
 

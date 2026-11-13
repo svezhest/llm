@@ -1,6 +1,6 @@
 # pcdisk GPU run 2026-10-24 (QWEN_PROMPT_CACHE_GB=3, 8 episodes x 10 min)
 
-on_a_v1 = before commit c09ef8d (the fix); off_b/on_b and off_c/on_c = the pairs on the fixed code.
+on_a_v1 = before commit 87961b3 (the fix); off_b/on_b and off_c/on_c = the pairs on the fixed code.
 
 ## io_bench
 medians over rounds:

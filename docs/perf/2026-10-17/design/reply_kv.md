@@ -1,6 +1,6 @@
 # Reply KV in the prompt cache (`QWEN_PROMPT_CACHE_REPLY`)
 
-Date 2026-10-17. CPU only: no GPU, no worker started (a benchmark held the GPU). worker.py at HEAD 589b3f8 +
+Date 2026-10-17. CPU only: no GPU, no worker started (a benchmark held the GPU). worker.py at HEAD 545d2b4 +
 this change; mlx-vlm 0.7.6 / mlx 0.32.3 in `src/worker/.venv`. Load: `docs/perf/2026-10-16/HANDOFF-appworld.md`
 (AppWorld ReAct agent, 8 episodes; 94 % prompt-cache hits; prefill is 75–80 % of the scheduler's time).
 

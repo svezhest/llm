@@ -394,7 +394,7 @@ normal row.
 * **No batched prefill.** Prefill is compute-bound (2048-row GEMMs at ~8 TFLOPS), so
   batching two prompts buys nothing. mlx-vlm's B>1 prefill is per-row internally anyway
   (language.py:1812-1867). Slab cuts must stay a function of the prompt alone (exactness,
-  commit 7643918), so nothing about prefill depends on concurrency.
+  commit bde7931), so nothing about prefill depends on concurrency.
 * **Interleave policy** `QWEN_BATCH_PREFILL_SHARE` = s ∈ (0, 1], default 0.5. After a slab
   that took `t` seconds, the scheduler runs decode steps for at least `t·(1-s)/s` seconds
   before the next slab.

@@ -24,7 +24,7 @@ from mlx_vlm.speculative.ops import linear as vlinear
 import worker
 
 MRQMM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mrqmm.py")
-# sha256 of the 8-bit kernel source as of d976b57 (before the bit-width split)
+# sha256 of the 8-bit kernel source as of 20aa33f (before the bit-width split)
 PIN8 = "1c42e9884a2f2823ac0639e11d072d7aa565fb5a21455e66dbad77113012483b"
 
 

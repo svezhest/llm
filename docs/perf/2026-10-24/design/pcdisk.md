@@ -408,7 +408,7 @@ mean a gateway change as well; that is left to the integrator.
 The test file takes ~25 s (41 tests).
 
 Full suite (`pytest -q --ignore tests/test_mrqmm.py`, 2026-10-24): 359 passed, 49 skipped,
-9.5 min before the review fixes; after them (ed3b242) 367 passed; after the re-review fixes 372 passed, 49 skipped, 8.4 min; after the final-review fixes 381 passed, 49 skipped, 7.2 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
+9.5 min before the review fixes; after them (b37829b) 367 passed; after the re-review fixes 372 passed, 49 skipped, 8.4 min; after the final-review fixes 381 passed, 49 skipped, 7.2 min. A light Metal correctness check, `io_bench.py --sizes-gb 0.4 --rounds 1` on the GPU
 device, came back bit-exact (zero-copy views and loader-thread `mx.array` on Metal); it was not
 a speed measurement.
 
@@ -554,14 +554,14 @@ Medians of 3 interleaved rounds. `F_NOCACHE` on.
   last call is 68K.
 - The scored teacher-forced positions start right after the resume point, so the `==` covers
   only the last 7–221 tokens of each prompt. The 64-token generation covers the rest.
-- Rerun on the fixed code (commit `c09ef8d`): again 3/3, the same resume points, one disk load per hit, peak 18.9 GB (`exact.txt`; the first run is `exact_v1.txt`).
+- Rerun on the fixed code (commit `87961b3`): again 3/3, the same resume points, one disk load per hit, peak 18.9 GB (`exact.txt`; the first run is `exact_v1.txt`).
 
 ### 3. AppWorld replay: req/min ×2.3
 
 Settings: `QWEN_PROMPT_CACHE_GB=3`, 8 episodes × 10 min, order
 `off_a, on_a_v1 | off_b, on_b, off_c, on_c`.
 
-- `on_a_v1` ran before the fix. The worker was then fixed (commit `c09ef8d`), and the pairs
+- `on_a_v1` ran before the fix. The worker was then fixed (commit `87961b3`), and the pairs
   `(off_b, on_b)` and `(off_c, on_c)` ran interleaved on the fixed code.
 - The off path is unchanged by the fix: the new victim order applies only with the tier.
 
@@ -611,7 +611,7 @@ Criteria, pairs b and c:
 5. **Load p50 < 1.5 s: PASS.** 322 / 319 ms. The max is 749 ms.
 6. **Warm probes within ±15 %: PASS.** 8K TTFT 14.4–15.6 s across all six runs (±4 %).
 
-**The fix the gate found** (commit `c09ef8d`; tests `test_victim_wanted_in_queue_order_with_the_tier`,
+**The fix the gate found** (commit `87961b3`; tests `test_victim_wanted_in_queue_order_with_the_tier`,
 `test_no_load_that_the_requests_ahead_would_evict`,
 `test_reload_when_the_loaded_entry_left_before_its_turn`):
 

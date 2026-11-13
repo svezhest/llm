@@ -15,7 +15,7 @@ logged. One performance observation on the stale rule (outputs unaffected), belo
 
 - M1 Max 32 GB (MacBookPro18,2), macOS 27.0, `iogpu.wired_limit_mb=28672`; mlx 0.32.3,
   mlx-vlm 0.7.6. Nothing else on the GPU (lock held); worker at nice 0 (`NO_BG_NICE`).
-- Code: HEAD 34b4a81 + uncommitted `src/worker/worker.py` (md5 `63dfea4df52b9a4ae060a18f2801c3ad`,
+- Code: HEAD 8a1625c + uncommitted `src/worker/worker.py` (md5 `63dfea4df52b9a4ae060a18f2801c3ad`,
   +237/−53 vs HEAD) — the final code, not the 03:22 snapshot.
 - Model `ornith15-9b-mlx-8bit` (absolute path), every worker: `QWEN_KV_BITS=0
   QWEN_PRESENCE_PENALTY=0 QWEN_BATCH_RESERVE_TOKENS=1024`, plus the per-run env below.

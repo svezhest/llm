@@ -1,6 +1,6 @@
 # Review: reply-KV default flip + F1/F2/F3 (2026-10-17)
 
-Patch: worktree `.claude/worktrees/agent-aee3fec962d4a9caa`, `git diff` vs 744f9e3. CPU only,
+Patch: worktree `.claude/worktrees/agent-aee3fec962d4a9caa`, `git diff` vs 3b5c1ab. CPU only,
 nothing edited. Line numbers below are the worktree's `src/worker/worker.py` / tests.
 
 **Verdict: nothing above LOW.** CPU suite (`--ignore test_mrqmm/test_pfqmm/test_rattn`), one

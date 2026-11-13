@@ -23,7 +23,7 @@ prompt cache on, max_batch 16. Gateway :8090 (thinking off). Measured on a GPU f
   stores, events and ms/step by rows. `compare.py` prints the tables below.
 - Every run gets a fresh worker. A probe (one cold ~8K prompt + 128 decode tokens through the
   gateway) runs on a fresh worker before the run (**cool**) and right after it (**warm**).
-- Code: **R0** = HEAD 34b4a81 `worker.py` (the user's run). **R0', R1, R2, R3** = the working tree
+- Code: **R0** = HEAD 8a1625c `worker.py` (the user's run). **R0', R1, R2, R3** = the working tree
   frozen at 03:22, with the other agent's chain-checkpoint policy and the eviction order
   (stale → MRU, waiting entries spared). Its diff: `raw/replay_worker_wt0322_vs_head.diff`.
   `r0new` is an extra run of an intermediate working-tree version (02:35); it is not in the

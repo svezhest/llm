@@ -212,7 +212,7 @@ two reasons that have nothing to do with the lane:
 Lowering the client TTFT further is a decode-share policy question (a floor for decode while a long
 prefill runs) or a detokenizer one (also flushing on newline-led tokens). Both are outside this item.
 
-**Fix made at the gate** (`_lane_first`, commit 2644022). After a lane row
+**Fix made at the gate** (`_lane_first`, commit a9f8110). After a lane row
 joins, decode runs until that row has read its first token, and only then does the main prefill take its
 next slab. Its first token needs two decode steps (step-ahead), and at a ~3 % decode share the next main
 slab used to fit between them. The cost is 2 decode steps per lane request, and the main slabs are

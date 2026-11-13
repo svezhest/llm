@@ -15,7 +15,7 @@ max(8, 2N) requests per level, 30 s idle + a 64-token single-stream probe before
 256 tokens, ~610-token prompts. agg = aggregate tok/s (all completion tokens / level wall time,
 prefill included); TTFT p50 includes the queue wait.
 
-| conc | old serialized (ca28690) agg / TTFT p50 | final serialized (`QWEN_MAX_BATCH=1`) agg / TTFT p50 | **final batched (defaults)** agg / TTFT p50 | batched vs final serialized | batched vs old |
+| conc | old serialized (f2bcbdf) agg / TTFT p50 | final serialized (`QWEN_MAX_BATCH=1`) agg / TTFT p50 | **final batched (defaults)** agg / TTFT p50 | batched vs final serialized | batched vs old |
 |---|---|---|---|---|---|
 | 1 | 22.5 / 2.39 s | 31.9 / 1.22 s | 31.2 / 1.25 s | ×0.98 | ×1.39 |
 | 2 | 23.0 / 13.1 s | 31.6 / 9.28 s | 48.7 / 2.41 s | ×1.54 | ×2.1 |
@@ -141,7 +141,7 @@ bench_concurrency.py); the tables here join the worker logs post hoc the same wa
 | 4 | 2 | 31.4 (31.8, 31.0) | 25.37 | 26.45 | 32.18 | 33.30 | 37.5 | 1.00 | 8 | 10.43 |
 | 8 | 2 | 31.8 (31.8, 31.8) | 57.52 | 57.67 | 64.33 | 64.52 | 37.5 | 1.00 | 8 | 10.42 |
 
-**Old serialized baseline (ca28690, mlx 0.31.2 / mlx-vlm 0.6.2), 256 tokens** (baseline_256_nice0, 2 reps; percentiles recomputed over all requests, so they differ slightly from baseline.md's per-rep averages):
+**Old serialized baseline (f2bcbdf, mlx 0.31.2 / mlx-vlm 0.6.2), 256 tokens** (baseline_256_nice0, 2 reps; percentiles recomputed over all requests, so they differ slightly from baseline.md's per-rep averages):
 
 | conc | runs | agg tok/s (runs) | TTFT p50 s | TTFT p95 s | lat p50 s | lat p95 s | decode tok/s/req | batch_mean | queue_ms mean | peak GB |
 |---|---|---|---|---|---|---|---|---|---|---|

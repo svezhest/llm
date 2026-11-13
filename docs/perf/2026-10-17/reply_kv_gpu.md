@@ -1,6 +1,6 @@
 # GPU gate: reply KV in the prompt cache (`QWEN_PROMPT_CACHE_REPLY`), 2026-10-17
 
-Gate for commit f91a207 (design: `design/reply_kv.md`). Method follows the 16.10 gate
+Gate for commit 3ef5031 (design: `design/reply_kv.md`). Method follows the 16.10 gate
 (`../2026-10-16/chain_evict_gpu.md`): through our gateway on :8090, fresh workers per run,
 plus one in-process teacher-forced comparison.
 
@@ -24,9 +24,9 @@ sub-item did not pass.
 - **Machine:** M1 Max 32 GB (MacBookPro18,2), `iogpu.wired_limit_mb=28672`; mlx 0.32.3, mlx-vlm 0.7.6.
 - **GPU lock:** held 04:20–05:43. Only one model process ran at a time.
 - **Workers:** at nice 0 (`setopt NO_BG_NICE` in the launchers).
-- **Code:** every gate ran on HEAD **f91a207**, `worker.py` md5 `aeddd4a1fc524057344cdbc492dada5a`, clean tree.
-  - At 05:41:48 another session committed 43e976c (`worker.py` changed). The last gate worker had started at 05:29, before that commit.
-  - The standard worker left on :50051 (05:42) runs 43e976c, which is what HEAD is now.
+- **Code:** every gate ran on HEAD **3ef5031**, `worker.py` md5 `aeddd4a1fc524057344cdbc492dada5a`, clean tree.
+  - At 05:41:48 another session committed cec38cb (`worker.py` changed). The last gate worker had started at 05:29, before that commit.
+  - The standard worker left on :50051 (05:42) runs cec38cb, which is what HEAD is now.
 - **Model and base env:** `ornith15-9b-mlx-8bit` (absolute path). Every worker had `QWEN_KV_BITS=0 QWEN_PRESENCE_PENALTY=0 QWEN_BATCH_RESERVE_TOKENS=1024`, plus the per-run env below.
 - **Gateway:** our :8090 (pid 55417, `GATEWAY_THINKING=off`), reused.
   - Requests: temperature 0, presence_penalty 0, `chat_template_kwargs.enable_thinking=false`, non-streaming.
@@ -359,7 +359,7 @@ gets its log line. The numbers:
 Keep `0` documented as the bit-exact `_bounds`-determinism mode. Optionally fix F2 and correct the
 design table (F3).
 
-**State left:** the standard worker on :50051, pid 35865, started 05:42:39 from HEAD 43e976c:
+**State left:** the standard worker on :50051, pid 35865, started 05:42:39 from HEAD cec38cb:
 
 ```
 QWEN_MODEL=/Users/user/Projects/llm/weights/ornith15-9b-mlx-8bit QWEN_KV_BITS=0 QWEN_PROMPT_CACHE=1
