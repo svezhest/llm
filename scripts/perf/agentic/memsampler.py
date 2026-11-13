@@ -90,9 +90,6 @@ def main() -> int:
         rec["worker_pid"] = pid
         if pid:
             rec.update(top_pid(pid))
-        # the biggest memory users (other agents' processes, the browser...) explain outside pressure
-        tops = [ln.split(None, 3) for ln in sh("top", "-l1", "-o", "mem", "-n", "6", "-stats", "pid,mem,cmprs,command").splitlines()]
-        rec["top_mem"] = [[int(f[0]), f[1], f[2], f[3].strip()] for f in tops if len(f) == 4 and f[0].isdigit()]
         pg = vm["page"]
         rec["free_mb"] = vm.get("free", 0) * pg / 2**20
         rec["compressor_mb"] = vm.get("comp_occupied", 0) * pg / 2**20

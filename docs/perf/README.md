@@ -5,6 +5,12 @@ One directory per measurement campaign. Each holds the reports an agent wrote at
 bug-review notes of that round and the design docs. CLAUDE.md "Performance notes" is the
 distilled version; these are the evidence.
 
+Redacted for publication (2026-11-13): the agents' scratch paths read `/tmp/scratch`,
+the memory samples (`*mem*.jsonl`) no longer list the machine's other processes, and a
+few phrases about the download link were reworded, also inside the documents used as
+benchmark prompts in `raw/` (so those prompts are a few tokens off the measured ones).
+Numbers are unchanged.
+
 - `2026-10-12/` — continuous batching + `mrqmm.py` (multi-row 8-bit decode matmul) +
   mlx 0.32.3 / mlx-vlm 0.7.6 bump + `pfqmm.py` (prefill GEMM tiles) + fixed 2048 fp16 slab
   on Ornith-1.5 9B. Start with `final_bench.md` (end-to-end, c = 1..16), then

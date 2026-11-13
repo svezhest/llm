@@ -15,6 +15,15 @@ only where MLX must load. Process isolation, no PyO3. The `.proto` is the single
 source of truth. Inference stays native on the host (Metal is not in Docker);
 only the observability stack is containerized.
 
+**Status: a research project, published as is.** Built and measured on one machine
+(M1 Max, 32 GB) against pinned library versions (mlx 0.32.3, mlx-vlm 0.7.6, whose
+classes the worker patches at run time); no support, no stability promises. The
+interesting parts are probably the prompt cache for hybrid (Gated DeltaNet) models,
+the M1 matmul kernels (`pfqmm.py`, `mrqmm.py`), DFlash speculative decoding with the
+prompt cache, and `docs/perf/` — every change's measurements, raw data and the dead
+ends. Much of the code and the reports were written with AI coding agents (Claude
+Code); `CLAUDE.md` is the project memory they worked from.
+
 ## Models (`weights/`)
 
 | dir | model | quant | size | arch |
@@ -788,3 +797,8 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_GDN_FAST` | worker | `0` — `mx.fast.gated_delta_update` for prefill slabs (×1.02 per slab, but it rounds the decay to fp16: KL 0.013 on 8K tokens; off) |
 | `QWEN_GEN_SLOTS` | worker | `max(2·max_batch, 8)` — concurrent Generate RPCs; beyond = gRPC `RESOURCE_EXHAUSTED` (gateway 503). gRPC threads = slots + 8 (replaces `QWEN_GRPC_THREADS`) |
 | `MAC_EXPORTER_ADDR` | exporter | `0.0.0.0:9101` |
+
+## License
+
+MIT (`LICENSE`). Code derived from MLX, mlx-vlm (MIT) and vLLM (Apache 2.0) and the
+projects whose ideas it borrows are listed in `THIRD_PARTY_NOTICES.md`.
