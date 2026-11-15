@@ -212,6 +212,7 @@ class _DecodeMixin:
                 req.ctl.n += 1
             logits = req.ctl.mask(logits)
         self.quantize(row.cache)
+        self._kvq_mark(row)
         return logits
 
     def _sample(self, row, logits):

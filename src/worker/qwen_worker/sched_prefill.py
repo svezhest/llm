@@ -10,7 +10,7 @@ import numpy as np
 from .config import (CLEAR_CACHE, GIB, log, PREEMPT, PROMPT_CACHE, PROMPT_CACHE_CHAIN_FRESH_TOKENS,
                      PROMPT_CACHE_CHAIN_MARKS, PROMPT_CACHE_CHAIN_TAIL, PROMPT_CACHE_CKPTS,
                      PROMPT_CACHE_REPLY, PROMPT_CACHE_STRIDE)
-from .pcache import _Inherit, _lcp, _pins, _recurrent_states, _thin, _with_tail
+from .pcache import _Inherit, _lcp, _pins, _quantized, _recurrent_states, _thin, _with_tail
 from .sizing import _slab
 from .logprobs import _cache_mode, _score, _wants
 from .request import _Own
@@ -81,6 +81,11 @@ class _PrefillMixin:
                 log.info("prompt cache: %d entries evicted for the row of id=%s (%.2f GiB left)",
                          n, req.id, pc.bytes / GIB)
             return not over()
+        kv_start = self.kv["quantized_kv_start"]
+        if parent is not None and parent.quantized:
+            # restored quantized: the row never holds fp16 KV (its reservation
+            # drops that copy before room() sizes the cache against it)
+            self._kvq_mark(row, known=True)
         if parent is not None:
             # the first update's size: restore pre-sizes the buffer for it
             left = len(ids) - 1 - reused
@@ -92,12 +97,18 @@ class _PrefillMixin:
             # edited branch) stays whole; the row copies its part, as
             # without the mode, and its store inherits those pieces.
             n = len(parent.ids)
-            taken = move and (
+            # Quantized KV: only a quantized entry moves. An fp16 one (shorter
+            # than quantized_kv_start) is the only resume point below the
+            # start: the row's prefill may quantize what it took (a store
+            # never absorbs an fp16 entry into a quantized one), so it is
+            # copied, as without the mode (<= start tokens of fp16 KV).
+            movable = self.kv["kv_bits"] is None or parent.quantized
+            taken = movable and move and (
                 (n <= len(ids) - 1 and ids[:n] == parent.ids)
                 or (parent.reply is not None and parent.reply <= len(ids) - 1
                     and ids[:parent.reply] == parent.ids[:parent.reply]))
             covers = taken
-            if move and not taken and not room(keep=(parent,)):
+            if move and not taken and not room(keep=(parent,)) and movable:
                 # ... unless the row's copy does not fit beside it even with
                 # every other entry gone: then it moves too, and what it
                 # held past the resume point (the other branch) is given up
@@ -107,6 +118,12 @@ class _PrefillMixin:
                          "the row (no room for a copy beside it); its part past %d is dropped",
                          req.id, n, reused)
             pieces = [] if taken else parent.cut(reused)
+            if (move and pieces and self.kv["kv_bits"] and not parent.quantized
+                    and len(ids) - 1 >= kv_start):
+                # an fp16 parent of a row whose prefill quantizes its cache:
+                # the store copies none of the parent's pieces (other bits),
+                # so the row's own segment starts at 0 (_Own.lo)
+                pieces = []
             if move and pieces and _pins(pieces):
                 # the row's KV over [0, reused) is a copy of these pieces
                 # anyway (MOVE: its buffers become the entry): its store
@@ -249,7 +266,7 @@ class _PrefillMixin:
                     keep &= chain[0]
                 elif fresh is not None:
                     keep &= chain[0] | fresh[0]
-            start = self.kv["quantized_kv_start"]
+            start = kv_start
             if self.kv["kv_bits"] and end >= start:
                 # the entry will be quantized: nothing below the start is
                 # resumable from it (the unquantized entry there is)
@@ -281,7 +298,17 @@ class _PrefillMixin:
             holds (`why`), when it prefilled at least a slab past `reused`.
             Either way the prefill ends here. `tail` (DFlash rows): the
             drafter's context at the stored end (QWEN_DRAFT_TAIL_END)."""
-            nonlocal inherit
+            nonlocal inherit, lease
+            if lease is not None and upto is None and self.kv["kv_bits"] and not _quantized(cache):
+                # MOVE with quantized KV, a prompt shorter than
+                # quantized_kv_start (the cache is fp16 here): a decode step
+                # past the start would quantize the buffers the deferred
+                # store holds, and the fp16 prompt entry (the only resume
+                # point below the start) would be lost. Such a row stores as
+                # without the mode (a copy of < start tokens, its reply too).
+                row.own = None
+                lease.close()
+                lease = None
             if lease is not None:
                 if upto is None:
                     # stored when the row ends (_settle): its buffers, no copy
@@ -402,6 +429,7 @@ class _PrefillMixin:
             kwargs = {k: x for k, x in v.items()
                       if k not in ("input_ids", "pixel_values", "attention_mask")}
         row.cache = cache
+        self._kvq_mark(row)                     # (restored from a quantized entry)
         emb = self.model.get_input_embeddings(input_ids, pixel_values, mask=mask, **kwargs)
         inputs_embeds = emb.inputs_embeds
         kwargs.update({k: v for k, v in emb.to_dict().items()
@@ -451,6 +479,7 @@ class _PrefillMixin:
                     hid = lm(input_ids[:, :n], inputs_embeds=inputs_embeds[:, :n], cache=cache,
                              skip_logits=True, return_hidden=True, **kwargs).hidden_states[-1]
                 self.quantize(cache)
+                self._kvq_mark(row)
                 mx.eval([c.state for c in cache])
                 pos += n
                 intact = True

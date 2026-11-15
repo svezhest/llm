@@ -167,12 +167,14 @@ class Engine:
         if DRAFT and cfg.BATCH_INVARIANT:
             log.warning("QWEN_DRAFT ignored: QWEN_BATCH_INVARIANT=1 (the verify rounds "
                         "differently from the batch's decode)")
-        elif DRAFT and KV_KWARGS["kv_bits"] is not None:
-            # The spec loop never re-quantizes the cache and rollback trims a
-            # quantized cache wrongly; the drafter is only worth it on the 9B,
-            # which runs an fp16 cache anyway.
-            log.warning("QWEN_DRAFT ignored: speculative decoding needs QWEN_KV_BITS=0")
         elif DRAFT:
+            # Quantized KV too (2026-11-15): _spec quantizes its cache where
+            # the plain loop does (after every prefill slab and fed token past
+            # quantized_kv_start; no block crosses the start while the cache
+            # is fp16), and a verify block's commit / abort only moves a
+            # QuantizedKVCache's offset (mlx-vlm 0.7.6: its rows are
+            # quantized per token, so trimming is exact). The verify attends
+            # the quantized KV through the library's one-query calls.
             draft, wide = _load_drafter(self.model, DRAFT, DRAFT_BITS)
             self.draft, self.draft_wide = draft, wide
             log.info("dflash drafter loaded: %s (%s %s, %s, block %s, target layers %s)", DRAFT,
@@ -256,8 +258,13 @@ class Engine:
         lm = self.model.language_model
         log.info("prefill kernels: %s", _install_fast_paths())
         sizing._FIXED_SLAB = _fixed_slab()            # after the fused-SDPA probe; never changes after
-        log.info("prefill slab: %s", f"{PREFILL_STEP} at any context (fp16 KV + fused SDPA)"
-                 if sizing._FIXED_SLAB else f"{PREFILL_STEP}, shrunk to slab x offset <= {PREFILL_BUDGET}")
+        kvq = KV_KWARGS["kv_bits"] is not None
+        log.info("prefill slab: %s", (f"{PREFILL_STEP} at any context (quantized KV dequantized for "
+                                      f"the fused SDPA: QWEN_KVQ_PREFILL_FUSED)" if kvq else
+                                      f"{PREFILL_STEP} at any context (fp16 KV + fused SDPA)")
+                 if sizing._FIXED_SLAB else f"{PREFILL_STEP}, shrunk to slab x offset <= {PREFILL_BUDGET}"
+                 + (" (QWEN_KVQ_PREFILL_FUSED=1 ignored: no fused SDPA)"
+                    if kvq and cfg.KVQ_PREFILL_FUSED else ""))
         if not _install_rows_attention(lm):
             log.warning("%s is not a qwen3_5 / qwen3_5_moe model: no batching (QWEN_MAX_BATCH=1)",
                         type(lm).__module__)
@@ -291,10 +298,15 @@ class Engine:
         if self.draft is not None:
             nq = _probe_verify_attention(lm)
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",
-                     f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)" if nq
+                     (f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)"
+                      + (f" while the cache is fp16 (its first {KV_KWARGS['quantized_kv_start']} "
+                         f"tokens); quantized KV ({KV_KWARGS['kv_bits']}-bit): the library's "
+                         "one-query quantized calls (no quantized vector kernel)"
+                         if KV_KWARGS["kv_bits"] is not None else "")) if nq
                      else "the library's one-query calls")
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
-        reserve = _prefill_reserve(lm.args.num_attention_heads)
+        reserve = _prefill_reserve(lm.args.num_attention_heads, lm.args.num_key_value_heads,
+                                   lm.args.head_dim)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
         self.sched = _Scheduler(self, max_batch=self.max_batch, budget=budget, cap=cap,
                                 prefill_reserve=reserve, on_fault=_exit_soon)

@@ -2,8 +2,8 @@
 
 from . import config as cfg
 from .config import (BATCH_MEM_GB, CACHE_LIMIT_GB, CLEAR_CACHE, FP16, GIB, KV_KWARGS,
-                     PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_RESERVE_GB, PREFILL_STEP,
-                     SDPA_FUSED_MIN_KV)
+                     MAX_CONTEXT, PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_RESERVE_GB,
+                     PREFILL_STEP, SDPA_FUSED_MIN_KV)
 
 
 _FIXED_SLAB = None    # frozen at load (Engine.load); None = derived from the knobs (tests)
@@ -11,8 +11,11 @@ _FIXED_SLAB = None    # frozen at load (Engine.load); None = derived from the kn
 
 def _fixed_slab():
     """fp16 KV + fp16 queries + the fused SDPA (probed at load): slabs past
-    SDPA_FUSED_MIN_KV keys hold no score matrix."""
-    return KV_KWARGS["kv_bits"] is None and cfg.SDPA_FUSED and FP16
+    SDPA_FUSED_MIN_KV keys hold no score matrix. Quantized KV too with
+    QWEN_KVQ_PREFILL_FUSED (such a slab attends the layer's dequantized
+    KV through the fused kernel: kernels._fused_sdpa)."""
+    return ((KV_KWARGS["kv_bits"] is None or cfg.KVQ_PREFILL_FUSED)
+            and cfg.SDPA_FUSED and FP16)
 
 
 def _step(pos):
@@ -34,17 +37,27 @@ def _step(pos):
     return max(PREFILL_MIN_STEP, min(PREFILL_STEP, PREFILL_BUDGET // max(pos, 1)))
 
 
-def _prefill_reserve(heads):
+def _prefill_reserve(heads, kv_heads=0, head_dim=0):
     """Bytes kept outside the batch budget for a prefill slab's activations:
     the unfused attention scores (PREFILL_BUDGET x q heads x 2 B; with the
     fixed fp16 slab, at least PREFILL_STEP x SDPA_FUSED_MIN_KV — a short slab
-    just under the fused threshold) + ~0.4 GiB of MLP. QWEN_PREFILL_RESERVE_GB
-    replaces the estimate (measured peaks of a model + drafter)."""
+    just under the fused threshold) + ~0.4 GiB of MLP. Quantized KV with the
+    fixed slab (QWEN_KVQ_PREFILL_FUSED): + one full-attention layer's keys and
+    values dequantized to fp16 at QWEN_MAX_CONTEXT keys (`kv_heads` x
+    `head_dim`; the next layer's are built only after this layer's attention
+    consumed them: its keys depend on its input), x1.6: the measured slab
+    transient (27B shapes, 2048 x 80K keys: 504 MiB over 320 MiB of K + V). The fp16 copy a row holds
+    while its cache is quantized at quantized_kv_start is the row's own
+    reservation (_Scheduler._bytes). QWEN_PREFILL_RESERVE_GB replaces the
+    estimate (measured peaks of a model + drafter)."""
     if PREFILL_RESERVE_GB > 0:
         return int(PREFILL_RESERVE_GB * GIB)
     fixed = _FIXED_SLAB if _FIXED_SLAB is not None else _fixed_slab()
     scores = max(PREFILL_BUDGET, PREFILL_STEP * SDPA_FUSED_MIN_KV) if fixed else PREFILL_BUDGET
-    return scores * heads * 2 + (400 << 20)
+    deq = 0
+    if fixed and KV_KWARGS["kv_bits"] is not None:
+        deq = 2 * MAX_CONTEXT * kv_heads * head_dim * 2 * 8 // 5
+    return scores * heads * 2 + deq + (400 << 20)
 
 
 def _slab(pos, left, cuts):

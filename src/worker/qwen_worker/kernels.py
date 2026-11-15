@@ -26,29 +26,48 @@ def _fused_sdpa(queries, keys, values, cache, scale, mask, sinks=None):
     long fp16 prefill slabs (QWEN_SDPA_FUSED); everything else unchanged. If
     the fused kernel fails at run time, the gate turns off; a slab whose
     unfused scores would pass PREFILL_BUDGET (_step sized it for the fused
-    kernel) then fails its request instead of materializing them."""
+    kernel) then fails its request instead of materializing them.
+
+    Quantized KV (QWEN_KVQ_PREFILL_FUSED): the same slabs over a
+    QuantizedKVCache take the fused kernel over the layer's keys / values
+    dequantized to fp16 (_dequantized_kv); the cache keeps its packed arrays.
+    Off: the library's quantized SDPA, as before."""
     # cache type first: a quantized cache hands over (packed, scales, biases)
     # tuples as keys/values
-    if (type(cache).__name__ == "KVCache" and isinstance(keys, mx.array)
-            and sinks is None and isinstance(mask, str) and mask == "causal"
-            and queries.dtype == mx.float16 and keys.shape[2] >= SDPA_FUSED_MIN_KV
-            and (queries.shape[2] >= SDPA_FUSED_MIN_Q
-                 # a short slab (message cut, last slab) whose scores would
-                 # exceed the budget _step relies on
-                 or (queries.shape[2] > 16 and queries.shape[2] * keys.shape[2] > PREFILL_BUDGET))):
-        if cfg.SDPA_FUSED:
-            try:
-                return mx.fast.scaled_dot_product_attention(queries, keys, values, scale=scale,
-                                                            mask=mask, force_fused=True)
-            except (ValueError, RuntimeError) as e:    # no fused kernel for this shape / device
-                cfg.SDPA_FUSED = False
-                log.warning("QWEN_SDPA_FUSED off: %s", e)
-        q, k = queries.shape[2], keys.shape[2]
-        if q * k > PREFILL_BUDGET:
-            raise RuntimeError(
-                f"fused SDPA unavailable for a {q} x {k} prefill slab; unfused it would hold "
-                f"{q * k * queries.shape[1] * 2 / GIB:.1f} GiB of scores (> QWEN_PREFILL_BUDGET)")
+    plain = type(cache).__name__ == "KVCache" and isinstance(keys, mx.array)
+    deq = (not plain and cfg.KVQ_PREFILL_FUSED and type(cache).__name__ == "QuantizedKVCache"
+           and type(keys) in (tuple, list) and len(keys) == 3)
+    if ((plain or deq) and sinks is None and isinstance(mask, str) and mask == "causal"
+            and queries.dtype == mx.float16):
+        q, k = queries.shape[2], (keys if plain else keys[0]).shape[2]
+        if (k >= SDPA_FUSED_MIN_KV
+                and (q >= SDPA_FUSED_MIN_Q
+                     # a short slab (message cut, last slab) whose scores would
+                     # exceed the budget _step relies on
+                     or (q > 16 and q * k > PREFILL_BUDGET))):
+            if cfg.SDPA_FUSED:
+                try:
+                    kk, vv = (keys, values) if plain else _dequantized_kv(keys, values, cache)
+                    return mx.fast.scaled_dot_product_attention(queries, kk, vv, scale=scale,
+                                                                mask=mask, force_fused=True)
+                except (ValueError, RuntimeError) as e:    # no fused kernel for this shape / device
+                    cfg.SDPA_FUSED = False
+                    log.warning("QWEN_SDPA_FUSED off: %s", e)
+            if q * k > PREFILL_BUDGET:
+                raise RuntimeError(
+                    f"fused SDPA unavailable for a {q} x {k} prefill slab; unfused it would hold "
+                    f"{q * k * queries.shape[1] * 2 / GIB:.1f} GiB of scores (> QWEN_PREFILL_BUDGET)")
     return _SDPA(queries, keys, values, cache=cache, scale=scale, mask=mask, sinks=sinks)
+
+
+def _dequantized_kv(keys, values, cache):
+    """A QuantizedKVCache's (packed, scales, biases) keys / values -> fp16
+    arrays (the scales' dtype): mx.dequantize, the values the quantized
+    matmuls of the library's quantized SDPA compute with. One layer's
+    transient (_prefill_reserve sizes it at QWEN_MAX_CONTEXT keys)."""
+    def dq(x):
+        return mx.dequantize(*x, group_size=cache.group_size, bits=cache.bits)
+    return dq(keys), dq(values)
 
 
 def _probe_fused_sdpa():

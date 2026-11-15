@@ -124,6 +124,7 @@ class _Row:
         self.cached = False                         # resumed from the prompt cache or stored an entry
         self.spec = False                           # ran DFlash (_spec): never grouped
         self.group = None                           # its _PrefixGroup (QWEN_CASCADE)
+        self.kvq = False                            # its KV is quantized: no fp16 copy ahead (_bytes)
         # reply KV (QWEN_PROMPT_CACHE_REPLY; _Scheduler._store_reply)
         self.fed = None                             # generated tokens as read, in order (list)
         self.entry = None                           # weakref to the entry its prefill stored

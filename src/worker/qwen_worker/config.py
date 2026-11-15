@@ -650,6 +650,24 @@ SDPA_FUSED = os.environ.get("QWEN_SDPA_FUSED", "1") != "0"
 #   threshold (KL fused vs unfused 7e-6), not the slab cuts at the defaults.
 SDPA_FUSED_MIN_Q = 512
 SDPA_FUSED_MIN_KV = int(os.environ.get("QWEN_SDPA_FUSED_MIN_KV") or "32768")
+# QWEN_KVQ_PREFILL_FUSED (0): quantized KV (QWEN_KV_BITS 8 / 4) past
+#   quantized_kv_start: a prefill slab that the fp16 path would send to the
+#   fused kernel (fp16 queries, causal, >= SDPA_FUSED_MIN_KV keys, >= 512
+#   queries or scores over PREFILL_BUDGET) dequantizes the layer's cached
+#   keys / values to fp16 (mx.dequantize: the exact values the quantized
+#   matmuls use) and runs MLX's fused SDPA over them, instead of the
+#   library's quantized SDPA (two quantized matmuls over a materialized fp16
+#   slab x keys x heads score matrix). The stored cache stays quantized. With
+#   it _step keeps quantized slabs at PREFILL_STEP past the threshold, as for
+#   fp16 KV (frozen at load: _FIXED_SLAB), and the prefill reserve holds one
+#   layer's dequantized K + V at QWEN_MAX_CONTEXT keys x 1.6, the measured
+#   slab transient (27B: 2 x 128K x 4 x 256 x 2 B = 512 MiB -> 819 MiB). Numerics: attention over the dequantized KV with
+#   fp32 scores inside the kernel -- closer to the fp32 reference over the
+#   same dequantized KV than the quantized SDPA, whose scores and
+#   probabilities are rounded to fp16 (tests/test_kvq8.py); not the old
+#   path's bits, hence off until the GPU gate (docs/perf/2026-11-15/design/
+#   kv_q8.md). Decode / DFlash verify keep the library's quantized calls.
+KVQ_PREFILL_FUSED = os.environ.get("QWEN_KVQ_PREFILL_FUSED", "0") == "1"
 GDN_FAST = os.environ.get("QWEN_GDN_FAST", "0") == "1"
 GDN_FAST_MIN_T = 16
 VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
