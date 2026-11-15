@@ -57,7 +57,8 @@ the same rows (2.3e-4..1.4e-3) and 4-6x below a solo qmv row's (0.9-1.4e-3);
 rows are NOT bit-equal to a solo qmv row (15-23 % of the elements are), but a
 row's bits are the same at every row count 3..16 and whatever sits beside it
 (KS 8 in both buckets, _config).
-4 bits (QWEN_MRQMM4=1, default 0 until a GPU gate; the lmstudio-community
+4 bits (QWEN_MRQMM4=1, default 0: gated on the 27B 2026-11-15, numerics in class but
+DFlash identity 12/16 at near-ties, the 35B's shared expert ungated; the lmstudio-community
 4-bit 27B, every linear 4-bit g64): the weight side _WSIDE[4] (a 64-group is
 8 aligned words; a thread's 16 weights are 2 of them, regrouped once per group
 into 16-bit lanes, so step st is one shift and one mask), dispatched exactly

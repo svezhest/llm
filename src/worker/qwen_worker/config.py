@@ -387,7 +387,8 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # QWEN_MRQMM4 (default 0, read by mrqmm at load): the same for 4-bit affine g64
 # modules (the lmstudio-community 4-bit 27B, weights/qwen38-27b-mlx-4bit: every
 # linear 4-bit), everywhere QWEN_MRQMM5 takes 5-bit ones. A knob of its own:
-# no GPU gate yet, and a model mixing widths (the 35B's 4-bit shared expert)
+# gated on the 27B 4-bit (docs/perf/2026-11-16/profile_27b.md §5: DFlash x1.75,
+# KL <= 1e-5, identity 12/16 at near-ties; default stays 0), and a model mixing widths (the 35B's 4-bit shared expert)
 # must not be pulled in by QWEN_MRQMM5. Self-tested on the GPU at load before
 # its first dispatch (mrqmm._selftest: the unpack exactly + real-scale rows vs
 # an fp32 reference); a failure leaves every 4-bit call on quantized_matmul
