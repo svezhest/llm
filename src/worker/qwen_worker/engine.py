@@ -21,7 +21,7 @@ from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, 
                      GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
                      PROMPT_CACHE_GB, PROMPT_CACHE_REPLY, RESERVE_TOKENS, SAMPLING_KWARGS,
-                     SPLIT_SPECIAL_TOKENS, VERIFY_MR_HEAD, VERIFY_MRQMM)
+                     SPLIT_SPECIAL_TOKENS, TEXT_ONLY, VERIFY_MR_HEAD, VERIFY_MRQMM)
 from .chat import (_developer_to_system, _PlainContent, _rebuild_messages, materialize_images,
                    parse_tool_calls, THINK_CLOSE, THINK_OPEN, TOOL_OPEN)
 from .pcache import _Entry, _PrefixCache, _Seg
@@ -35,6 +35,34 @@ from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_L
                        PROMPT_CACHE_MODES)
 from .request import _Req
 from .scheduler import _Scheduler
+
+
+def _load_model(model_path, text_only=False):
+    """mlx_vlm.load -> (model, processor, skipped): `skipped` = (tensors, bytes)
+    of the vision tower left out with `text_only` (None: nothing left out).
+
+    text_only: the model is loaded lazily (mx.load reads a tensor's bytes only
+    when it is evaluated), its `vision_tower` is dropped -- the same state
+    mlx-vlm >= 0.7 leaves a checkpoint without vision weights in
+    (vision_tower = None) -- and only then are the parameters evaluated, so
+    the tower's tensors are never read from disk nor resident. mlx-vlm's
+    strict load_weights still checks them against the module (shapes, names).
+    Dropping vision_config before the build is not possible from outside:
+    load_model re-reads config.json and builds qwen3_5's VisionModel from
+    defaults even without one. The tower's random init is lazy too, and dies
+    unevaluated with it. Text: the same language-model bits as a full load."""
+    from mlx.utils import tree_flatten
+    from mlx_vlm import load
+    model, processor = load(model_path, lazy=text_only)
+    skipped = None
+    if text_only and getattr(model, "vision_tower", None) is not None:
+        params = tree_flatten(model.vision_tower.parameters())
+        skipped = (len(params), sum(a.nbytes for _, a in params))
+        del params
+        model.vision_tower = None
+    if text_only:
+        mx.eval(model.parameters())               # what load(lazy=False) does
+    return model, processor, skipped
 
 
 def _exit_soon(code=70):
@@ -52,6 +80,7 @@ class Engine:
         self.model_path = model_path
         # the id clients see (/v1/models, "model" in responses): the weights dir name
         self.model_id = os.path.basename(os.path.normpath(model_path))
+        self.text_only = False          # QWEN_TEXT_ONLY=1 on a VL checkpoint: no vision tower
         self.ready = False
         self.load_ms = 0
         self.max_batch = MAX_BATCH
@@ -66,7 +95,6 @@ class Engine:
         self._plain = None              # _PlainContent (QWEN_SPLIT_SPECIAL_TOKENS)
 
     def load(self):
-        from mlx_vlm import load
         from mlx_vlm.prompt_utils import apply_chat_template  # noqa: F401
         from mlx_vlm.utils import load_config
 
@@ -79,7 +107,17 @@ class Engine:
             # load (vision_tower = None); image requests are refused in _render.
             log.warning("no vision_config: text-only checkpoint (no vision tower; "
                         "image requests will be refused)")
-        self.model, self.processor = load(self.model_path)
+        self.model, self.processor, skipped = _load_model(
+            self.model_path, TEXT_ONLY and "vision_config" in self.config)
+        if TEXT_ONLY and "vision_config" in self.config:
+            self.text_only = True
+            if skipped is not None:
+                log.info("QWEN_TEXT_ONLY=1: vision tower not loaded (%d tensors, %.2f GiB of "
+                         "checkpoint weights never read); image requests will be refused",
+                         skipped[0], skipped[1] / GIB)
+            else:
+                log.warning("QWEN_TEXT_ONLY=1: %s has no vision tower to skip; image requests "
+                            "will be refused", type(self.model).__module__)
         if FP16:
             lm = self.model.language_model
             lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
@@ -371,6 +409,9 @@ class Engine:
         if images and "vision_config" not in self.config:
             raise _Reject("invalid_request", f"{self.model_id} is a text-only checkpoint: "
                           "image inputs are not supported")
+        if images and self.text_only:
+            raise _Reject("invalid_request", f"{self.model_id} is loaded text-only "
+                          "(QWEN_TEXT_ONLY=1): image inputs are not supported")
         if p.prompt_logprobs and images:
             raise _Reject("invalid_request", "prompt_logprobs is not supported with image inputs")
         if p.HasField("max_tokens") and p.max_tokens == 0 and not p.prompt_logprobs:
