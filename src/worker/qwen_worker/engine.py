@@ -30,7 +30,8 @@ from .stream import _BPEDetokenizer, _Control, _done, _eos_ids, _GenState, _Reje
 from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks, JSON_MAX_WS
 from .rows import _install_rows_attention
 from .kernels import (_draft_wide, _install_fast_paths, _install_gdn_fuse, _invariant_check,
-                      _log_invariant, _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
+                      _log_invariant, _probe_decode_att, _probe_verify_attention, _setup_verify_mrqmm,
+                      _widen_drafter)
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
 from .request import _Req
@@ -231,6 +232,7 @@ class Engine:
                  CACHE_LIMIT_GB, CLEAR_CACHE, PROMPT_CACHE)
         lm = self.model.language_model
         log.info("prefill kernels: %s", _install_fast_paths())
+        _probe_decode_att(lm)
         sizing._FIXED_SLAB = _fixed_slab()            # after the fused-SDPA probe; never changes after
         log.info("prefill slab: %s", f"{PREFILL_STEP} at any context (fp16 KV + fused SDPA)"
                  if sizing._FIXED_SLAB else f"{PREFILL_STEP}, shrunk to slab x offset <= {PREFILL_BUDGET}")

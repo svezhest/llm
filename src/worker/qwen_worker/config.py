@@ -648,6 +648,16 @@ VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
 _VERIFY_ATT_MODE = os.environ.get("QWEN_VERIFY_ATT", "1")
 VERIFY_ATT = _VERIFY_ATT_MODE in ("1", "2")
 VERIFY_ATT2 = _VERIFY_ATT_MODE == "2"
+# QWEN_DECODE_ATT (0 = off): a decode step's attention over >= this many fp16
+#   keys through the same one-pass kernel (vatt.py, one query: the G query
+#   heads of a kv head as one 8-row MMA block, the KV read once, fp32 partials)
+#   instead of MLX's 2-pass vector SDPA, which reads the KV at ~90 GB/s on the
+#   27B layout (G 6: one simdgroup per query head over strided keys): one layer
+#   at 60K keys 2.85 -> 0.99 ms, at 8K equal (microbench, verify_att2.md). Every
+#   decode row (a lone row's step and each row of a batch), fp16 KVCache only;
+#   not MLX's bits (fp32 partials; error vs fp32 <= MLX's). Self-tested at load
+#   (_probe_decode_att), else off.
+DECODE_ATT_MIN_KV = int(os.environ.get("QWEN_DECODE_ATT") or "0")
 
 
 # QWEN_VERIFY_MRQMM (1): DFlash rounds through mrqmm, the batched-decode

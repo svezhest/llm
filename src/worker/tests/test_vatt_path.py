@@ -122,3 +122,51 @@ def test_probe(dense, monkeypatch):
     monkeypatch.setattr(vatt, "attention", real)
     monkeypatch.setattr(worker, "VERIFY_ATT2", False)
     assert worker._probe_vatt(dense) is False
+
+
+def test_decode_att(dense_fused, monkeypatch):
+    """QWEN_DECODE_ATT: a decode step's attention over >= DECODE_ATT_MIN_KV
+    fp16 keys goes through vatt.attention on the row's own buffers (a lone row
+    and every row of a batch), prefill slabs and shorter KV do not; the greedy
+    answers are the ones without it (CPU: the reference stands in for the
+    kernel); a failing call turns it off."""
+    from mlx_vlm.models.qwen3_5 import language as q35
+    from conftest import prompts, request, run, scheduler
+    calls = _one_pass_calls(monkeypatch)
+    monkeypatch.setattr(worker, "_SDPA", q35.scaled_dot_product_attention)
+    monkeypatch.setattr(q35, "scaled_dot_product_attention", worker._fused_sdpa)
+    ps = prompts([40, 25, 33], 7)
+    want = {}
+    for mb in (1, 3):
+        monkeypatch.setattr(worker, "_VATT_DEC", False)
+        want[mb] = run(scheduler(dense_fused, max_batch=mb),
+                       [request(p, 12, f"r{i}") for i, p in enumerate(ps[:mb])])
+        assert not calls
+    monkeypatch.setattr(worker, "DECODE_ATT_MIN_KV", 30)
+    for mb in (1, 3):
+        monkeypatch.setattr(worker, "_VATT_DEC", True)
+        calls.clear()
+        got = run(scheduler(dense_fused, max_batch=mb), [request(p, 12, f"r{i}") for i, p in enumerate(ps[:mb])])
+        assert got == want[mb]
+        assert calls and all(T == 1 and n >= 30 for T, n, _ in calls)
+        # the 25-token prompt's first decode steps are under the threshold: not through it
+        assert min(n for _, n, _ in calls) == (40 if mb == 1 else 30)
+
+    def broken(*a, **k):
+        raise ValueError("no kernel")
+    monkeypatch.setattr(vatt, "attention", broken)
+    assert run(scheduler(dense_fused, max_batch=1), [request(ps[0], 12, "r0")]) == want[1]
+    assert worker._VATT_DEC is False
+
+
+def test_probe_decode_att(dense_fused, monkeypatch):
+    from mlx_vlm.models.qwen3_5 import language as q35
+    monkeypatch.setattr(worker, "DECODE_ATT_MIN_KV", 0)
+    assert worker._probe_decode_att(dense_fused) is False
+    monkeypatch.setattr(worker, "DECODE_ATT_MIN_KV", 4096)
+    assert worker._probe_decode_att(dense_fused) is False        # head_dim 64
+    monkeypatch.setattr(vatt, "D_OK", (64,))
+    monkeypatch.setattr(worker, "_SDPA", None)
+    assert worker._probe_decode_att(dense_fused) is False        # no override installed
+    monkeypatch.setattr(worker, "_SDPA", q35.scaled_dot_product_attention)
+    assert worker._probe_decode_att(dense_fused) is True and worker._VATT_DEC is True

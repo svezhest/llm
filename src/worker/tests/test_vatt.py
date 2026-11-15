@@ -88,7 +88,7 @@ def test_matches_reference(gpu, n, T, hq, hkv, mul):
 
 
 @gpu_only
-@pytest.mark.parametrize("n,chunk", [(3000, 48), (3000, 96), (1000, 960), (4100, 4096), (517, 2016)])
+@pytest.mark.parametrize("n,chunk", [(3000, 48), (3000, 96), (1000, 960), (4100, 4080), (517, 2016)])
 def test_chunks_and_tails(gpu, n, chunk):
     """Forced chunks: the tail of the block (last 8 keys) crossing a chunk end
     and a key-block end; a chunk fully past some rows' limits (weight 0)."""

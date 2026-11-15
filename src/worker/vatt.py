@@ -9,8 +9,9 @@ the KV is still read twice a round, at ~80 GB/s (60K keys: 8.1 ms a layer vs
 2.9 for one decode query). Here the G * T query rows of each kv head (48 on the
 27B at T = 8) attend the KV together, read once:
 
-  pass 1 (grid items x Hkv threadgroups, items = key chunks; adjacent
-         threadgroups take the query blocks of one chunk when G * T > BQ):
+  pass 1 (grid items x query blocks x Hkv threadgroups, items = key chunks,
+         query blocks of BQ = 16 rows; the blocks of one chunk are adjacent
+         threadgroups, so their K / V reads meet in the GPU's caches):
          MLX's steel attention loop (cascade_mma.cmma_p1 = mlx 0.32.3
          steel_attention.h `attention`: loaders, 8x8 simdgroup MMA, WN = 2
          score exchange, online softmax in the log2 domain) over one chunk of
@@ -20,7 +21,8 @@ the KV is still read twice a round, at ~80 GB/s (60K keys: 8.1 ms a layer vs
          flash-decoding). Q stays in registers (QREG), K / V blocks of BK keys
          are staged in threadgroup memory. S = Q K^T is fp16 x fp16 MMA with
          fp32 accumulation, P V multiplies the fp32 probabilities by fp16 V
-         fragments, fp32 accumulation.
+         fragments, fp32 accumulation. Small threadgroups win (4 simdgroups,
+         BK = 16): see tile_for.
   pass 2 (grid G * T x Hkv threadgroups of D threads): o = sum_c w_c o_c /
          sum_c w_c, w_c = l_c 2^(m_c - M) -> fp16, written as (1, Hq, T, D).
 
@@ -56,9 +58,10 @@ MAX_T = 16            # block queries per call
 MIN_CHUNK = 256
 MAX_CHUNK = 4096
 TARGET_TG = int(os.environ.get("VATT_TARGET_TG") or "256")   # pass-1 threadgroups aimed at
-# (BQ, BK, WM, WN) override for the microbench: "BQxBK" (WM = BQ / 8, WN = 2)
+# (BQ, BK, WM, WN) override for the microbench: "BQxBK" (WM = BQ / 8, WN = 2), "BQxBKw1" (WN = 1:
+# a simdgroup's 8 rows over the whole head_dim, no score exchange)
 TILE = os.environ.get("VATT_TILE", "")
-BK_MUL = int(os.environ.get("VATT_BK_MUL") or "1")           # BK = BK_MUL * BQ (>= 16)
+BK_MUL = int(os.environ.get("VATT_BK_MUL") or "1")           # > 1: BK = BK_MUL * BQ
 
 _IMPL = r"""
 // Adapted from mlx 0.32.3 kernels/steel/attn/kernels/steel_attention.h
@@ -111,7 +114,7 @@ METAL_FUNC void vatt_p1(
   constexpr short kFragSize = 8;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
   using MMAFrag_in_t = BaseMMAFrag<T, kFragSize, kFragSize>;
-  static_assert(WN == 2, "WN = 2 only");
+  static_assert(WN == 1 || WN == 2, "WN = 1 or 2");
   constexpr int TQ = BQ / (WM * kFragSize);
   static_assert(TQ >= 1 && BQ == WM * kFragSize * TQ, "TQ 8-row fragments per simdgroup");
   constexpr int TK = BK / kFragSize;
@@ -174,7 +177,7 @@ METAL_FUNC void vatt_p1(
       simdgroup_barrier(mem_flags::mem_none);
       tile_matmad(Stile, Qtiles[dd], Ktile, Stile);
     }
-    {   // WN = 2: each simdgroup summed half of D; exchange the partial scores
+    if constexpr (WN == 2) {   // each simdgroup summed half of D; exchange the partial scores
       constexpr int s_xchg_stride = decltype(Stile)::kElemsPerTile * 32;
       constexpr int s_xchg_size = WM * WN * s_xchg_stride;
       static_assert(s_xchg_size * sizeof(AccumType) <= tgp_mem_s * sizeof(T),
@@ -314,16 +317,23 @@ def _header() -> str:
 
 
 def tile_for(m0: int):
-    """(BQ, BK, WM, WN, blocks) for M0 query rows per kv head: one query block
-    of BQ in {8, 16, 32, 48} rows (WM = BQ / 8 simdgroup rows x WN = 2), blocks
-    of 48 above; BK = BK_MUL x BQ keys (>= 16: the loaders' thread layout)."""
+    """(BQ, BK, WM, WN, blocks) for M0 query rows per kv head: query blocks of
+    BQ = 16 rows (8 when M0 <= 8: a decode step's G rows), WM = BQ / 8
+    simdgroup rows x WN = 2, BK = 16 keys; the blocks of one chunk are
+    adjacent threadgroups (their K / V reads meet in the cache). Measured
+    2026-11-16 at 60K keys, 27B layout, T = 8 (raw/sweep): 16x16 2.41-2.52 ms
+    a layer; 16x32 2.50; 24x24 2.62; 48x24 2.81-3.08; 48x48 3.08-3.27; 32x32
+    4.23; 8x16 3.31; WN = 1 tiles 2.76-8.5."""
+    wn = 2
     if TILE:
-        bq, bk = (int(x) for x in TILE.split("x"))
+        t = TILE.split("w")
+        bq, bk = (int(x) for x in t[0].split("x"))
+        wn = int(t[1]) if len(t) > 1 else 2
     else:
-        bq = next(b for b in (8, 16, 32, 48, 48) if m0 <= b or b == 48)
-        bk = max(16, BK_MUL * bq)
+        bq = 8 if m0 <= 8 else 16
+        bk = max(16, BK_MUL * bq) if BK_MUL > 1 else 16
     blocks = -(-m0 // bq)
-    return bq, bk, bq // 8, 2, blocks
+    return bq, bk, bq // 8, wn, blocks
 
 
 def _loader_ok(bk, D, tgp):

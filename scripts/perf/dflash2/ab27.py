@@ -12,6 +12,9 @@ Variants (comma separated):
                  adN = adaptive with ceiling N, N = fixed N (1 anchor + N-1 drafts)
   m<cap>/<blk>   the same with QWEN_VERIFY_MRQMM on (verify blocks through mrqmm
                  where it covers the module; needs a kernel for the model's bits)
+  ...:va         the verify attention through the one-pass kernel (QWEN_VERIFY_ATT=2,
+                 vatt.py; the worker loaded with QWEN_VERIFY_ATT=2), else the vector
+                 kernel's path (QWEN_VERIFY_ATT=1)
 
 Per request: decode tok/s (tokens after the first / time from the first to the
 last token), rounds, accepted drafts per round, ms per round.
@@ -70,6 +73,7 @@ print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() /
       f"layers {list(cfg.target_layer_ids)}; draft bits {W.DRAFT_BITS}; "
       f"verify exact max T {W.VERIFY_EXACT_MAX_T}; VERIFY_MR {W.VERIFY_MR}", flush=True)
 MR0 = (W.VERIFY_MR, W.VERIFY_MR_HEAD)
+VA0 = W._VATT
 
 
 def set_variant(v):
@@ -77,6 +81,10 @@ def set_variant(v):
     if v == "plain":
         eng.draft = None
         return
+    v, _, att = v.partition(":")
+    assert att in ("", "va"), att
+    assert VA0 or not att, "':va' needs QWEN_VERIFY_ATT=2 (self-test passed)"
+    W._VATT = att == "va"
     knob, blk = v.split("/")
     eng.draft = DRAFT
     W.VERIFY_MR, W.VERIFY_MR_HEAD = MR0 if knob[0] == "m" else (False, False)

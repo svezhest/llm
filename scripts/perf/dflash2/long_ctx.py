@@ -48,6 +48,13 @@ ap.add_argument("--ab", type=int, default=0,
                 help="after the turns: N rounds of the last prompt (prompt_cache read: resumes from the "
                      "entry, stores nothing) as plain decode / DFlash with the library's per-token verify "
                      "attention / DFlash with the vector attention kernel (QWEN_VERIFY_ATT)")
+ap.add_argument("--ab-variants", default="plain,rows,vector",
+                help="--ab's variants, in rotation: plain / rows / vector (QWEN_VERIFY_ATT=1) / vatt (=2, "
+                     "needs the worker loaded with QWEN_VERIFY_ATT=2)")
+ap.add_argument("--ab-mode", default="read",
+                help="--ab's prompt_cache mode: read (a copy of the entry, nothing stored) or '' (the "
+                     "default: with QWEN_PROMPT_CACHE_MOVE the entry moves into the row and comes back "
+                     "-- one KV copy, for contexts where two do not fit)")
 ap.add_argument("--alt", choices=["rows", "plain"], default="",
                 help="even turns differently, odd ones as loaded (speeds at a context too long for --ab's "
                      "second KV copy): rows = the library's one-query verify attention (QWEN_VERIFY_ATT "
@@ -192,16 +199,30 @@ if a.cold_ref and res[-1]["end"][0] == "done":
     o["same"] = o["tokens"] == res[-1]["tokens"]
     res.append(o)
 if a.ab and res[-1]["end"][0] == "done":
-    nq = W._VERIFY_ATT_Q
+    nq, va0 = W._VERIFY_ATT_Q, W._VATT
+    names = a.ab_variants.split(",")
+    ref = None
     for k in range(a.ab):
-        for name in ("plain", "rows", "vector"):
+        order = names[k % len(names):] + names[:k % len(names)]      # rotate: no variant always first
+        for name in order:
             eng.draft = None if name == "plain" else DRAFT
-            W._VERIFY_ATT_Q = nq if name == "vector" else 0
-            o = run(last, f"{name}{k + 1}", "read")
+            W._VERIFY_ATT_Q = nq if name in ("vector", "vatt") else 0
+            W._VATT = va0 and name == "vatt"
+            o = run(last, f"{name}{k + 1}", a.ab_mode)
+            o["variant"], o["round"] = name, k
+            if name == "plain" and ref is None:
+                ref = o["tokens"]
             o["same"] = o["tokens"] == res[-1]["tokens"]
+            o["same_as_plain"] = ref is not None and o["tokens"] == ref
             show(o, same=o["same"])
             res.append(o)
-    eng.draft, W._VERIFY_ATT_Q = DRAFT, nq
+    eng.draft, W._VERIFY_ATT_Q, W._VATT = DRAFT, nq, va0
+    import statistics
+    for name in names:
+        rows = [o for o in res if o.get("variant") == name]
+        print(f"ab {name:7s} tps median {statistics.median(o['tps'] for o in rows):6.2f} "
+              f"(all {[o['tps'] for o in rows]}) round_ms {[o['round_ms'] for o in rows]} "
+              f"same as the first plain {sum(o['same_as_plain'] for o in rows)}/{len(rows)}", flush=True)
 print(f"process peak {max(o['peak_gib'] for o in res):.2f} GiB", flush=True)
 if a.json:
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
