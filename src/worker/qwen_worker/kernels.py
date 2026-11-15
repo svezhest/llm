@@ -233,7 +233,7 @@ def _setup_verify_mrqmm(lm, draft):
     if not VERIFY_MR:
         return "drafter lm_head only"
     gdn = _install_verify_mrqmm(lm)
-    if not cfg.DRAFT_BLOCK:
+    if not cfg.DRAFT_BLOCK and draft is not None:   # (None: QWEN_LOOKUP's rounds only)
         cfg.DRAFT_BLOCK = VERIFY_MR_BLOCK
         draft.prefer_requested_block_size = True
     return (f"verify blocks of 3..16 tokens + drafter lm_head ({gdn} GDN layers fused), "
