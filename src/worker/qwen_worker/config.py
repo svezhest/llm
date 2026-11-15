@@ -47,11 +47,7 @@ TEXT_ONLY = os.environ.get("QWEN_TEXT_ONLY", "0") == "1"
 # docs/perf/2026-10-24/design/special_tokens.md.
 SPLIT_SPECIAL_TOKENS = os.environ.get("QWEN_SPLIT_SPECIAL_TOKENS", "0") == "1"
 
-# Context ceiling (prompt + generation). Model supports 262144 natively, but on
-# 32 GB it's bounded by KV-cache memory. The weights are already 3-bit, so a
-# 4-bit KV cache (~20 KiB/token) is a balanced match — 128K costs ~2.6 GB
-# (model ~18 GB + KV still fits the default ~21.8 GB Metal wired limit; raise
-# iogpu.wired_limit_mb for more headroom if needed).
+# Context ceiling (prompt + generation): bounded by KV-cache memory on 32 GB, not by the model.
 # Context window (prompt + generation). 131072 is the shipped default for all
 # three models; the 27B can run 200K (`QWEN_MAX_CONTEXT=204800`) — see README
 # "Context & memory" for the KV budget before raising it.
