@@ -5,6 +5,10 @@ sibling of scripts/perf/verify_mrqmm/dflash_ab.py with per-round statistics.
 
 Variants (comma separated):
   plain          no DFlash (eng.draft = None): the plain greedy loop
+  plainnf        plain with the fused GDN in-projection off (QWEN_GDN_FUSE=0 at
+                 run time); --ident plainnf: the fusion's identity at B = 1
+                 (bit-exact claim: a width-grouped or uniform fusion == the
+                 library's four calls, 2026-11-15)
   e<cap>/<blk>   DFlash; verify blocks of <= cap tokens through mlx-vlm's exact
                  verify kernels (QWEN_VERIFY_EXACT_MAX_T), longer ones through
                  mx.quantized_matmul (e0 = always quantized_matmul)
@@ -74,7 +78,8 @@ MR0 = (W.VERIFY_MR, W.VERIFY_MR_HEAD)
 
 def set_variant(v):
     """Flip the globals the scheduler reads (idle scheduler: between requests)."""
-    if v == "plain":
+    W.GDN_FUSE = v != "plainnf"
+    if v in ("plain", "plainnf"):
         eng.draft = None
         return
     knob, blk = v.split("/")
@@ -151,7 +156,7 @@ if not a.skip_speed:
     run(TASKS[0], "warm", False)                           # compile / warm everything once
     for v in VS:
         set_variant(v)
-        o = run("Say OK.", f"warm-{v}", v != "plain")
+        o = run("Say OK.", f"warm-{v}", not v.startswith("plain"))
         print(f"warm {v}: n={o['n']} ok", flush=True)
     for rnd in range(a.rounds):
         for ti, text in enumerate(TASKS[:NT]):
@@ -160,7 +165,7 @@ if not a.skip_speed:
                 order = order[::-1]
             for v in order:
                 set_variant(v)
-                o = run(text, f"s{rnd}-code{ti}-{v}", v != "plain")
+                o = run(text, f"s{rnd}-code{ti}-{v}", not v.startswith("plain"))
                 o.update(variant=v, round=rnd, task=ti)
                 res["speed"].append(o)
                 print(f"r{rnd} code{ti} {v:8s} n={o['n']:3d} tps={o['tps']:6.2f} "
@@ -190,7 +195,7 @@ if not a.skip_ident:
         ref = run(text, f"i-t{ti}-plain", False)["tokens"]
         for v in a.ident.split(","):
             set_variant(v)
-            got = run(text, f"i-t{ti}-{v}", True)["tokens"]
+            got = run(text, f"i-t{ti}-{v}", not v.startswith("plain"))["tokens"]
             div = next((i for i, (x, y) in enumerate(zip(ref, got)) if x != y),
                        None if len(ref) == len(got) else min(len(ref), len(got)))
             res["ident"].append(dict(task=ti, variant=v, same=div is None, diverge=div, n=len(ref)))

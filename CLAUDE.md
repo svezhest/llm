@@ -9,7 +9,7 @@ See `README.md` for run instructions, `BACKLOG.md` for the plan + phase status.
 ## Layout (repo root = `/Users/user/Projects/llm`)
 
 - `weights/` — model dirs (git-ignored). `qwen36-35b-a3b-mlx-ud3`, `ornith10-9b-mlx-8bit`, `ornith15-9b-mlx-8bit`,
-  `qwen38-27b-mlx-5bit`. Pull with `scripts/hf_pull.sh <repo> <dir>` (resumable aria2c).
+  `qwen38-27b-mlx-5bit`, `qwen38-27b-mlx-4bit`, `qwen38-27b-mlx-oq4e`. Pull with `scripts/hf_pull.sh <repo> <dir>` (resumable aria2c).
 - `src/proto/worker.proto` — gRPC contract (single source of truth; both sides codegen).
 - `src/gateway/` (Rust) — axum HTTP + tonic gRPC client + queue + metrics + tracing.
   `src/{main,api,request,pool,metrics,worker_client,logging,journal,pb}.rs`.
@@ -81,6 +81,13 @@ resource manager / `footprint` for the real size.
   `model_type qwen3_5` like the 9B (64 layers, full attn every 4th, 4 KV heads,
   head_dim 256, native 256K). MLX 5-bit g64, ~18.1 GB. Run: `QWEN_KV_BITS=8` +
   wired-limit dance (~24 GB @128K; 200K via `QWEN_MAX_CONTEXT=204800`, ~26 GB).
+- **`qwen38-27b-mlx-oq4e`** — the same 27B, Jundot's oQ4e (oQ/oMLX mixed precision, MTP weights
+  dropped at load): affine g64, base 4 bits with per-module overrides in `config.json` (lm_head 6,
+  embed 5, attention 5 (last layer's k/v 6), GDN out 5, z / b / a 5 in layers 0–18, b / a 8 or 6 in
+  three late layers, MLP down 5 in layers 0–17, the rest 4). LM ~14.85 GiB vs ~14.09 for the uniform
+  4-bit (from the headers, MTP excluded); teacher-forced KL vs the 5-bit (`kl_models.py`, 3 × 3072
+  tokens) 0.0236 / top-1 93.6 % vs 0.0534 / 90.1 % for the uniform 4-bit. Fast paths for it:
+  `QWEN_MRQMM4/5/6=1` + the width-grouped GDN fusion (see "oQ4e" below).
 
 Download over a slow, throttled link — hard-won recipe:
 - `HF_HUB_DISABLE_XET=1` always (Xet backend hangs silently at 0 MB/s here).
@@ -267,7 +274,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   cascade_gpu.md`): step 8K × 16 rows 66.4 → 53.7 ms (×1.24), 32K × 8 83.6 → 68.2 ms;
   16 × 32K all admitted (peak 25.3 → 23.2 GB); 16 × 8K active −3 GiB; formation
   transient +2.2 GB at 8 × 32K; 32K × 16 at 92 ms vs ~62 projected (open, profile it).
-- **Fused GDN decode in-projection (`QWEN_GDN_FUSE=1`, 2026-10-12)**: mlx-vlm 0.7
+- **Fused GDN decode in-projection (`QWEN_GDN_FUSE=1`, 2026-10-12; by width groups since 2026-11-15)**: mlx-vlm 0.7
   dropped 0.6.2's `_decode_quantized_linears_fused`, so a decode step ran qkv/z/b/a
   as 4 launches per GDN layer. `_install_gdn_fuse` concatenates the four weights once
   and points the modules at row views of it (no extra memory; 0.6.2 kept a second
@@ -276,7 +283,13 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   `QWEN_MRQMM=0` or the 5-bit 27B) and hands the outputs to the library `__call__`.
   Bit-identical at B ≤ 2; in-run A/B −2.3% at B=1, −1.6% at B=16. The concatenated
   shapes' mrqmm kernels are compiled at install. Needs fp16 scales/biases: with
-  `QWEN_FP16=0` it fuses nothing ("0 layers" in the load log).
+  `QWEN_FP16=0` it fuses nothing ("0 layers" in the load log). Mixed-width layers
+  (oQ4e): `_gdn_groups` concatenates the projections that share (bits, group, mode)
+  (≥ 2 of them); a projection alone at its width keeps its own weights and call.
+  `_fused_in` is a tuple of `_InGroup`s (a uniform layer: one group of four, the old
+  concatenation and split); a group takes mrqmm only with N ≥ `MIN_N` (b+a, N = 96,
+  stays on `quantized_matmul`). B = 1 bit-identical to the unfused calls (CPU-tested;
+  B = 2 on the GPU: `test_worker_gdn_fuse_mixed`).
 - **Multi-row 8-bit matmul (`mrqmm.py`, `QWEN_MRQMM=1`, measured 2026-10-12)**:
   `mx.fast.metal_kernel`, simdgroup MMA computing `Cᵀ = W·xᵀ` for ≤16 rows,
   A fragments built in registers from one 16-byte weight load per 8 rows × 64 k
@@ -303,6 +316,20 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   every 5-bit user (MRQuantizedLinear, `_gdn_call`, `_verify_linear(s)`, `_verify_head`) takes 4 bits unchanged.
   Random 4-bit weights (2026-11-10): 8 rows ×1.64 of a solo row, MMA-bound like 5 bits — a 4-bit build gains its
   smaller weights (solo row 46.5 vs 55 ms of linears), not a cheaper kernel. Model-level gate pending.
+- **oQ4e / mixed precision (2026-11-15, `docs/perf/2026-11-15/design/oq4e_speed.md`, GPU gate
+  `scripts/perf/dflash2/gate_oq4e.sh` pending)**: measured that day (separate processes, ~2K prompt):
+  plain 11.6–11.9 vs 17.2 tok/s (uniform 4-bit), DFlash 16.6–17.6 vs 37.7 (round 259–274 vs 153 ms,
+  3.57 vs 4.8 drafts accepted). By code + the 2026-11-10 per-width qmv table (1 row ~280 GB/s at
+  4/5/6/8 bits) the plain gap should be bytes (+5 %) + 4 GDN launches per layer (2–4 %): the rest is
+  probably GPU drift between the two processes (to be re-measured with `decode_probe.py`). DFlash
+  costs found: mlx-vlm's exact verify kernels take 4/5/8 bits only, so the 6-bit lm_head went
+  through per-token qmv (~8 head reads per round) and the drafter's head (the target's) through
+  `quantized_matmul`; fixed by `QWEN_MRQMM6` (6-bit weight side `_WSIDE[6]`: 3 aligned words per
+  thread, 4 lane words, one shift + mask per step; self-tested at load). The GDN in-projections
+  were never fused (mixed widths); now by width groups (30 layers qkv+z 4 + b+a 5, 15 qkv alone +
+  z+b+a 5, 2 qkv+z + b+a 8, 1 qkv+z + b, a alone). Re-quantizing the head to 8 bits was rejected
+  (+0.3 GiB, a second rounding, +1.2 ms per plain token). `oq4e_bench.py`: per-width qmv, verify
+  block per kind, lm_head paths, kernel accuracy, both checkpoints in one process.
 - **Decode step profile (2026-10-12, B ≥ 2)**: the worker's step was GPU-bound but
   the step-ahead was broken. The token read `mx.concatenate([r.y…]).tolist()` queued
   a new kernel *behind* the step just submitted, so the read waited for step k+1 too,
@@ -885,7 +912,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_MRQMM` | worker | `1` — multi-row 8-bit matmul kernel (`mrqmm.py`) for batched decode with 3..16 rows (8-bit affine g64 fp16 modules with N ≥ 512 only); `0` = MLX `quantized_matmul` |
 | `QWEN_MRQMM5` | worker | `0` — the same multi-row kernel for 5-bit affine g64 modules (the 27B: every linear incl. lm_head and the fused GDN in-projection), 3..16 rows: batched decode, the fused GDN in-projection and the DFlash verify block + drafter lm_head. Linears of one 27B forward at 8 rows 249 → 89 ms (×1.61 of a solo row, stock ×4.5). Off by default: the 27B's batched decode (B ≥ 3) is not gated yet; DFlash2 on the 27B needs it (`docs/perf/2026-11-10/dflash2_27b.md`). Ignored with `QWEN_BATCH_INVARIANT=1` |
 | `QWEN_MRQMM4` | worker | `0` — the same multi-row kernel for 4-bit affine g64 modules (`weights/qwen38-27b-mlx-4bit`, lmstudio-community: every linear 4-bit), everywhere `QWEN_MRQMM5` takes 5-bit ones (batched decode 3..16 rows, fused GDN in-projection, DFlash verify block + drafter lm_head). Own knob: separate GPU gate, and a mixed-width model (35B: 4-bit shared expert) is not pulled in by `QWEN_MRQMM5`. Self-tested on the GPU at load before its first dispatch (`mrqmm._selftest`: unpack exact on one-hot x at every in-group offset, both row buckets + real-scale rows 3/8/9/16 vs fp32 and `quantized_matmul`); a failure logs `self-test FAILED` and leaves 4-bit on `quantized_matmul`. Off until the gate (`scripts/perf/dflash2/gate_mrqmm4.sh`). Ignored with `QWEN_BATCH_INVARIANT=1` |
-| `QWEN_GDN_FUSE` | worker | `1` — one matmul for a decode step's 4 GDN in-projections (weights concatenated at load, modules hold views); `0` = 4 launches. Needs fp16 scales (`QWEN_FP16=1`): with `QWEN_FP16=0` it fuses nothing |
+| `QWEN_MRQMM6` | worker | `0` — the same multi-row kernel for 6-bit affine g64 modules (oQ4e: the lm_head 248320×5120 and the last layer's k/v; N ≥ 512), everywhere `QWEN_MRQMM5` takes 5-bit ones; above all the DFlash verify block's lm_head and the drafter's head (without it: mlx-vlm's per-token path, ~8 head reads per round, and `quantized_matmul`). Self-tested at load like 4 bits; off until `scripts/perf/dflash2/gate_oq4e.sh`. Ignored with `QWEN_BATCH_INVARIANT=1` |
+| `QWEN_GDN_FUSE` | worker | `1` — one matmul for a decode step's 4 GDN in-projections (weights concatenated at load, modules hold views); a mixed-width layer (oQ4e) fuses each group of ≥ 2 same-width projections (load log `fused by width`), the rest stay separate; `0` = 4 launches. Needs fp16 scales (`QWEN_FP16=1`): with `QWEN_FP16=0` it fuses nothing |
 | `QWEN_SDPA_FUSED` | worker | `1` — force MLX's fused SDPA for fp16-KV prefill slabs ≥ 512 over ≥ 32K keys (per call ×0.89 at 2048 × 32K, ×0.6–0.7 at 64K+; 64K prefill −3…5%, −1.3 GB peak) |
 | `QWEN_SDPA_FUSED_MIN_KV` | worker | `32768` — keys from which a long fp16 prefill slab takes the fused SDPA kernel (the gate of `QWEN_SDPA_FUSED`); `8192` + `QWEN_PREFILL_BUDGET=16777216` cap the unfused scores at 0.75 GiB and the prefill reserve at 1.15 GiB instead of 3.4 (27B, 24 heads: the hump just under 32K keys is 2.8 GiB) — for the 27B + drafter at long context |
 | `QWEN_GDN_FAST` | worker | `0` — `mx.fast.gated_delta_update` for prefill slabs (×1.02 per slab; rounds the decay to fp16: KL 0.013 on 8K real tokens — rejected) |
