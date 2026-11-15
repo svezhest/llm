@@ -6,7 +6,7 @@ from mlx.utils import tree_flatten, tree_unflatten
 from mlx_vlm import load
 from mlx_vlm.speculative.drafters import load_drafter
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-model, proc = load(f"{ROOT}/weights/qwen38-27b-mlx-5bit")
+model, proc = load(os.environ.get("MODEL", f"{ROOT}/weights/qwen38-27b-mlx-5bit"))
 lm = model.language_model
 lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
 mx.eval(lm.parameters())
@@ -45,7 +45,7 @@ for it in range(12):
         mm = tm("mlp (gate, up, down)", lambda: layer.mlp(pm[0]))
         h = tm("conv.finish + residual", lambda: h + layer.mlp_conv.finish(mm, pm[1]))
     hn = tm("final norm", lambda: d.norm(h)[:, 1:])
-    lg = tm("lm_head (7 rows, target 5-bit)", lambda: head(hn.astype(mx.float16)))
+    lg = tm("lm_head (7 rows, target)", lambda: head(hn.astype(mx.float16)))
     cand = tm("selector argpartition top-16", lambda: mx.argpartition(lg, -16, axis=-1)[..., -16:])
     sel = d.candidate_selector
     un = tm("selector unary+hidden_projection", lambda: (mx.take_along_axis(lg, cand, axis=-1), sel.hidden_projection(hn)))

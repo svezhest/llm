@@ -32,10 +32,17 @@ def kq(q, k, v):
     w = mx.softmax(s, axis=-2, precise=True)
     o = mx.matmul(w.swapaxes(-1, -2), v[:, :, None])              # (1,HK,R,T,D)
     return o.reshape(1, H, T, D)
+def vec(q, k, v):                                                # QWEN_VERIFY_ATT=1: 32 // GQA queries per vector-kernel call
+    step = max(1, 32 // (H // HK))
+    out = []
+    for a in range(0, T, step):
+        b = min(T, a + step)
+        out.append(sd(q[:, :, a:b], k[:, :, :N - T + b], v[:, :, :N - T + b], scale=scale, mask="causal", force_fused=True))
+    return mx.concatenate(out, axis=2)
 def single(q, k, v):                                             # one plain decode step's attention
     return sd(q[:, :, :1], k[:, :, :N], v[:, :, :N], scale=scale, mask=None)
 
-fns = dict(single=single, rows=rows, one_mask=one_mask, one_causal=one_causal, one_fused=one_fused, kq=kq)
+fns = dict(single=single, rows=rows, vec=vec, one_mask=one_mask, one_causal=one_causal, one_fused=one_fused, kq=kq)
 ref = rows(Q, Ks[0], Vs[0]).astype(mx.float32); mx.eval(ref)
 ok = {}
 for n, f in list(fns.items()):
