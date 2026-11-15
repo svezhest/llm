@@ -1,0 +1,86 @@
+loaded in 12 s; active 16.51 GB; max_batch 1; drafter DFlash2DraftModel; DRAFT_BLOCK 8; VERIFY_MR True
+turn 1: 213 tokens (['stop'])
+warm plain: n=2
+warm dflash: n=2
+warm hyb: n=2
+warm splice: n=2
+warm lplain: n=2
+r0 rewrite_a plain            n= 384 prompt= 1958 reused=    0 tps= 20.19 ttft= 11.82 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 rewrite_a dflash           n= 384 prompt= 1958 reused= 1957 tps= 31.12 ttft=  0.07 dflash=99r 285/693 lookup=0r 0/0 plain=0
+r0 rewrite_a hyb              n= 384 prompt= 1958 reused= 1957 tps= 86.10 ttft=  0.07 dflash=4r 12/28 lookup=27r 341/397 plain=0
+r0 rewrite_a splice           n= 384 prompt= 1958 reused= 1957 tps= 72.40 ttft=  0.07 dflash=7r 12/49 lookup=25r 340/368 plain=0
+r0 rewrite_a lplain           n= 384 prompt= 1958 reused= 1957 tps= 84.59 ttft=  0.07 dflash=0r 0/0 lookup=27r 346/398 plain=11
+r0 rewrite_b plain            n= 384 prompt= 2469 reused=    0 tps= 20.13 ttft= 15.68 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 rewrite_b lplain           n= 384 prompt= 2469 reused= 2468 tps= 80.82 ttft=  0.07 dflash=0r 0/0 lookup=26r 341/389 plain=17
+r0 rewrite_b splice           n= 384 prompt= 2469 reused= 2468 tps= 71.97 ttft=  0.09 dflash=10r 24/70 lookup=23r 327/336 plain=0
+r0 rewrite_b hyb              n= 384 prompt= 2469 reused= 2468 tps= 85.47 ttft=  0.07 dflash=5r 16/35 lookup=26r 337/389 plain=0
+r0 rewrite_b dflash           n= 384 prompt= 2469 reused= 2468 tps= 31.54 ttft=  0.08 dflash=96r 288/668 lookup=0r 0/0 plain=0
+r0 reemit    hyb              n= 269 prompt=  309 reused=    0 tps= 76.62 ttft=  2.28 dflash=7r 46/49 lookup=19r 198/285 plain=0
+r0 reemit    splice           n= 269 prompt=  309 reused=  308 tps= 76.14 ttft=  0.06 dflash=7r 48/49 lookup=16r 199/240 plain=0
+r0 reemit    lplain           n= 269 prompt=  309 reused=  308 tps= 51.64 ttft=  0.06 dflash=0r 0/0 lookup=23r 206/345 plain=40
+r0 reemit    plain            n= 269 prompt=  309 reused=  308 tps= 20.05 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 reemit    dflash           n= 269 prompt=  309 reused=  308 tps= 50.66 ttft=  0.07 dflash=41r 229/287 lookup=0r 0/0 plain=0
+r0 code      hyb              n= 384 prompt=   46 reused=    0 tps= 39.55 ttft=  0.52 dflash=65r 293/451 lookup=12r 13/180 plain=0
+r0 code      dflash           n= 384 prompt=   46 reused=   45 tps= 42.97 ttft=  0.06 dflash=71r 312/493 lookup=0r 0/0 plain=0
+r0 code      plain            n= 384 prompt=   46 reused=   45 tps= 19.65 ttft=  0.10 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 code      lplain           n= 384 prompt=   46 reused=   45 tps= 18.20 ttft=  0.07 dflash=0r 0/0 lookup=27r 34/405 plain=322
+r0 code      splice           n= 384 prompt=   46 reused=   45 tps= 34.31 ttft=  0.07 dflash=74r 283/514 lookup=7r 19/105 plain=0
+r0 code2k    lplain           n= 384 prompt= 3589 reused=    0 tps= 19.66 ttft= 25.60 dflash=0r 0/0 lookup=40r 131/600 plain=212
+r0 code2k    plain            n= 384 prompt= 3589 reused= 3588 tps= 17.96 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 code2k    dflash           n= 384 prompt= 3589 reused= 3588 tps= 33.31 ttft=  0.08 dflash=77r 307/531 lookup=0r 0/0 plain=0
+r0 code2k    hyb              n= 384 prompt= 3589 reused= 3588 tps= 29.08 ttft=  0.07 dflash=58r 187/399 lookup=26r 113/390 plain=0
+r0 code2k    splice           n= 384 prompt= 3589 reused= 3588 tps= 31.32 ttft=  0.07 dflash=61r 200/420 lookup=15r 108/225 plain=0
+r0 en2k      lplain           n= 384 prompt= 2630 reused=    0 tps= 17.56 ttft= 19.41 dflash=0r 0/0 lookup=1r 1/15 plain=381
+r0 en2k      splice           n= 384 prompt= 2630 reused= 2629 tps= 16.26 ttft=  0.08 dflash=161r 220/1118 lookup=1r 2/15 plain=0
+r0 en2k      hyb              n= 384 prompt= 2630 reused= 2629 tps= 16.23 ttft=  0.07 dflash=160r 220/1111 lookup=2r 2/30 plain=0
+r0 en2k      dflash           n= 384 prompt= 2630 reused= 2629 tps= 16.65 ttft=  0.07 dflash=162r 222/1125 lookup=0r 0/0 plain=0
+r0 en2k      plain            n= 384 prompt= 2630 reused= 2629 tps= 18.20 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 ru2k      dflash           n= 384 prompt= 2699 reused=    0 tps= 14.49 ttft= 19.99 dflash=178r 205/1243 lookup=0r 0/0 plain=0
+r0 ru2k      hyb              n= 384 prompt= 2699 reused= 2698 tps= 13.79 ttft=  0.07 dflash=176r 198/1229 lookup=7r 2/105 plain=0
+r0 ru2k      splice           n= 384 prompt= 2699 reused= 2698 tps= 14.37 ttft=  0.07 dflash=178r 201/1243 lookup=2r 2/30 plain=0
+r0 ru2k      lplain           n= 384 prompt= 2699 reused= 2698 tps= 17.46 ttft=  0.07 dflash=0r 0/0 lookup=7r 5/105 plain=371
+r0 ru2k      plain            n= 384 prompt= 2699 reused= 2698 tps= 18.10 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 rewrite_a plain            n= 384 prompt= 1958 reused=    0 tps= 18.01 ttft= 14.32 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 rewrite_a lplain           n= 384 prompt= 1958 reused= 1957 tps= 70.90 ttft=  0.08 dflash=0r 0/0 lookup=27r 346/398 plain=11
+r1 rewrite_a splice           n= 384 prompt= 1958 reused= 1957 tps= 62.88 ttft=  0.07 dflash=7r 12/49 lookup=25r 340/368 plain=0
+r1 rewrite_a hyb              n= 384 prompt= 1958 reused= 1957 tps= 75.24 ttft=  0.07 dflash=4r 12/28 lookup=27r 341/397 plain=0
+r1 rewrite_a dflash           n= 384 prompt= 1958 reused= 1957 tps= 27.26 ttft=  0.07 dflash=99r 285/693 lookup=0r 0/0 plain=0
+r1 rewrite_b hyb              n= 384 prompt= 2469 reused=    0 tps= 72.81 ttft= 17.88 dflash=4r 14/28 lookup=26r 340/389 plain=0
+r1 rewrite_b splice           n= 384 prompt= 2469 reused= 2468 tps= 61.88 ttft=  0.08 dflash=7r 21/49 lookup=24r 332/351 plain=0
+r1 rewrite_b lplain           n= 384 prompt= 2469 reused= 2468 tps= 69.52 ttft=  0.08 dflash=0r 0/0 lookup=26r 341/389 plain=17
+r1 rewrite_b plain            n= 384 prompt= 2469 reused= 2468 tps= 18.12 ttft=  0.13 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 rewrite_b dflash           n= 384 prompt= 2469 reused= 2468 tps= 27.91 ttft=  0.08 dflash=96r 288/668 lookup=0r 0/0 plain=0
+r1 reemit    hyb              n= 269 prompt=  309 reused=    0 tps= 68.28 ttft=  2.77 dflash=7r 46/49 lookup=19r 198/285 plain=0
+r1 reemit    dflash           n= 269 prompt=  309 reused=  308 tps= 56.82 ttft=  0.06 dflash=34r 236/238 lookup=0r 0/0 plain=0
+r1 reemit    plain            n= 269 prompt=  309 reused=  308 tps= 18.45 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 reemit    lplain           n= 269 prompt=  309 reused=  308 tps= 44.86 ttft=  0.08 dflash=0r 0/0 lookup=23r 206/345 plain=40
+r1 reemit    splice           n= 269 prompt=  309 reused=  308 tps= 62.97 ttft=  0.07 dflash=7r 48/49 lookup=16r 199/240 plain=0
+r1 code      lplain           n= 384 prompt=   46 reused=    0 tps= 17.57 ttft=  0.57 dflash=0r 0/0 lookup=27r 34/405 plain=322
+r1 code      plain            n= 384 prompt=   46 reused=   45 tps= 18.60 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 code      dflash           n= 384 prompt=   46 reused=   45 tps= 35.42 ttft=  0.08 dflash=79r 304/549 lookup=0r 0/0 plain=0
+r1 code      hyb              n= 384 prompt=   46 reused=   45 tps= 31.73 ttft=  0.07 dflash=70r 277/486 lookup=16r 20/240 plain=0
+r1 code      splice           n= 384 prompt=   46 reused=   45 tps= 33.43 ttft=  0.06 dflash=74r 283/514 lookup=7r 19/105 plain=0
+r1 code2k    lplain           n= 384 prompt= 3589 reused=    0 tps= 19.79 ttft= 25.53 dflash=0r 0/0 lookup=40r 131/600 plain=212
+r1 code2k    splice           n= 384 prompt= 3589 reused= 3588 tps= 31.55 ttft=  0.08 dflash=61r 200/420 lookup=15r 108/225 plain=0
+r1 code2k    hyb              n= 384 prompt= 3589 reused= 3588 tps= 29.08 ttft=  0.08 dflash=58r 187/399 lookup=26r 113/390 plain=0
+r1 code2k    dflash           n= 384 prompt= 3589 reused= 3588 tps= 34.57 ttft=  0.08 dflash=77r 307/531 lookup=0r 0/0 plain=0
+r1 code2k    plain            n= 384 prompt= 3589 reused= 3588 tps= 18.14 ttft=  0.13 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 en2k      dflash           n= 384 prompt= 2630 reused=    0 tps= 17.63 ttft= 18.74 dflash=151r 232/1048 lookup=0r 0/0 plain=0
+r1 en2k      hyb              n= 384 prompt= 2630 reused= 2629 tps= 17.33 ttft=  0.07 dflash=150r 229/1041 lookup=2r 2/30 plain=0
+r1 en2k      splice           n= 384 prompt= 2630 reused= 2629 tps= 17.42 ttft=  0.07 dflash=150r 230/1041 lookup=1r 2/15 plain=0
+r1 en2k      lplain           n= 384 prompt= 2630 reused= 2629 tps= 18.12 ttft=  0.07 dflash=0r 0/0 lookup=1r 1/15 plain=381
+r1 en2k      plain            n= 384 prompt= 2630 reused= 2629 tps= 18.24 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 ru2k      dflash           n= 384 prompt= 2699 reused=    0 tps= 14.73 ttft= 19.46 dflash=178r 205/1243 lookup=0r 0/0 plain=0
+r1 ru2k      plain            n= 384 prompt= 2699 reused= 2698 tps= 18.10 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 ru2k      lplain           n= 384 prompt= 2699 reused= 2698 tps= 17.54 ttft=  0.08 dflash=0r 0/0 lookup=7r 5/105 plain=371
+r1 ru2k      splice           n= 384 prompt= 2699 reused= 2698 tps= 14.64 ttft=  0.08 dflash=179r 197/1250 lookup=2r 5/30 plain=0
+r1 ru2k      hyb              n= 384 prompt= 2699 reused= 2698 tps= 14.23 ttft=  0.07 dflash=177r 191/1236 lookup=9r 6/135 plain=0
+r2 rewrite_a hyb              n= 384 prompt= 1958 reused=    0 tps= 78.32 ttft= 14.14 dflash=3r 21/21 lookup=26r 334/380 plain=0
+r2 rewrite_a splice           n= 384 prompt= 1958 reused= 1957 tps= 63.52 ttft=  0.07 dflash=4r 22/22 lookup=24r 334/360 plain=0
+r2 rewrite_a lplain           n= 384 prompt= 1958 reused= 1957 tps= 74.92 ttft=  0.07 dflash=0r 0/0 lookup=27r 346/398 plain=11
+r2 rewrite_a plain            n= 384 prompt= 1958 reused= 1957 tps= 18.24 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r2 rewrite_a dflash           n= 384 prompt= 1958 reused= 1957 tps= 27.19 ttft=  0.08 dflash=99r 285/693 lookup=0r 0/0 plain=0
+r2 rewrite_b hyb              n= 384 prompt= 2469 reused=    0 tps= 74.10 ttft= 17.69 dflash=4r 14/28 lookup=26r 340/389 plain=0
+r2 rewrite_b dflash           n= 384 prompt= 2469 reused= 2468 tps= 28.02 ttft=  0.09 dflash=93r 291/646 lookup=0r 0/0 plain=0
+r2 rewrite_b plain            n= 384 prompt= 2469 reused= 2468 tps= 18.24 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r2 rewrite_b lplain           n= 384 prompt= 2469 reused= 2468 tps= 68.13 ttft=  0.08 dflash=0r 0/0 lookup=26r 341/389 plain=17

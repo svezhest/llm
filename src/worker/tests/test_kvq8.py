@@ -207,7 +207,9 @@ def test_dflash_quantized_equals_plain(dense, monkeypatch, start):
     assert run(sched, [request(p, 30, "a")])["a"] == plain
     assert len(d.accept_lens) > 3
     if 25 < start:                                      # the start falls inside the decode
-        assert min(d.sizes) < 4 or start - 25 <= 1
+        # cut there: a shorter block, or (one fp16 position left) a plain step
+        # that records a round without a draft_block call
+        assert min(d.sizes) < 4 or len(d.accept_lens) > len(d.sizes) or start - 25 <= 1
     assert len(got["a"]) == len(ref["a"])
     for (k, v, q), (k0, v0, q0) in zip(got["a"], ref["a"]):
         # (a "length" row of the plain loop fed its last token too: one more)

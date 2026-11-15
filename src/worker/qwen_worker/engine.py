@@ -18,7 +18,7 @@ import worker_pb2 as pb
 from . import config as cfg
 from . import sizing
 from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, EVENT_POLL_S, FP16,
-                     GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, MAX_BATCH, MAX_CONTEXT,
+                     GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, LOOKUP, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
                      PROMPT_CACHE_GB, PROMPT_CACHE_REPLY, RESERVE_TOKENS, SAMPLING_KWARGS,
                      SPLIT_SPECIAL_TOKENS, TEXT_ONLY, VERIFY_MR_HEAD, VERIFY_MRQMM)
@@ -272,7 +272,10 @@ class Engine:
             self.max_batch = 1
         import pfqmm                       # after the fp16 cast (fp16 scales only); LM only
         pfqmm.install(lm)
-        if self.max_batch >= 3 or (self.draft is not None and VERIFY_MR_HEAD):
+        # a verify path: a drafter, or QWEN_LOOKUP's rounds without one
+        spec = self.draft is not None or (LOOKUP == "1" and KV_KWARGS["kv_bits"] is None
+                                          and not cfg.BATCH_INVARIANT)
+        if self.max_batch >= 3 or (spec and VERIFY_MR_HEAD):
             # after the fp16 cast (the kernel takes fp16 scales only); the
             # language model only (never the vision tower or the drafter,
             # which shares lm_head and calls it with (1, T, K): mrqmm only
@@ -290,13 +293,13 @@ class Engine:
             self.max_batch = _invariant_check(lm, self.max_batch)
         if VERIFY_MRQMM not in ("0", "1", "head"):
             log.warning("QWEN_VERIFY_MRQMM=%r: not 0 / 1 / head, off", VERIFY_MRQMM)
-        if self.draft is not None and VERIFY_MR_HEAD:
+        if spec and VERIFY_MR_HEAD:
             # never with QWEN_BATCH_INVARIANT (it loads no drafter)
             how = _setup_verify_mrqmm(lm, self.draft)
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
         if self.draft is not None and (cfg.DRAFT_MRQMM or cfg.DRAFT_COMPILE):
             log.info("drafter fast paths: %s", _setup_drafter_fast(self.draft, self.draft_wide))
-        if self.draft is not None:
+        if spec:
             nq = _probe_verify_attention(lm)
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",
                      (f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)"
