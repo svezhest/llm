@@ -191,48 +191,70 @@ class MTPDraft:
 class Chooser:
     """Which arm a round takes (QWEN_DRAFT_HYBRID / QWEN_SPEC_PLAIN): "dflash",
     "mtp" (a drafter's round) or "plain" (one plain step) - the one with the
-    most tokens per ms, (1 + accepted drafts) / wall time, from exponential
-    averages of each arm's own rounds. An arm not taken while EXPLORE tokens
-    were emitted gets one round (re-probing: its estimate would go stale);
-    a plain step costs ~1/2 of a DFlash round on the 27B, so a losing
-    drafter's probe costs about one plain step per EXPLORE tokens."""
+    most expected tokens per ms, tokens per round / wall time per round.
 
-    ALPHA = 0.25
-    EXPLORE = 48
+    Tokens per round (1 + accepted drafts) start at a prior worth PRIOR rounds
+    (a drafter gets the benefit of the doubt; plain is exactly 1) and follow
+    an exponential average (weight max(ALPHA, 1 / (rounds + PRIOR))). Wall
+    time: the arm's first round is replaced by its second (a DFlash round
+    right after prefill feeds the drafter the whole prompt window), then an
+    exponential average. Every arm is first taken PROBE rounds in a row; an
+    arm not taken while EXPLORE tokens were emitted gets PROBE rounds again
+    (re-probing: a drafter that lost on one stretch of text can win on the
+    next). A plain step costs about half a drafter round on the 27B, so a
+    losing drafter's re-probe costs ~PROBE plain steps per EXPLORE tokens."""
+
+    ALPHA = 0.2
+    EXPLORE = 64
+    PROBE = 2
+    PRIOR = 2
+    PRIORS = {"dflash": 3.0, "mtp": 2.5, "plain": 1.0}
 
     def __init__(self, kinds):
         self.kinds = list(kinds)
-        self.tok = {k: None for k in kinds}
+        self.tok = {k: self.PRIORS.get(k, 2.0) for k in kinds}
         self.ms = {k: None for k in kinds}
-        self.idle = {k: 0 for k in kinds}      # tokens emitted since the arm's last round
+        self.n = {k: 0 for k in kinds}          # rounds taken
+        self.idle = {k: 0 for k in kinds}       # tokens emitted since the arm's last round
+        self.left = {k: self.PROBE for k in kinds}   # probe rounds still owed
         self.t0 = self.cur = None
-        self.taken = {k: 0 for k in kinds}
+        self.taken = self.n
+
+    def rate(self, k):
+        return self.tok[k] / self.ms[k] if self.ms[k] else float("inf")
 
     def pick(self, force=None):
         if force in self.kinds:
             k = force
+        elif self.cur is not None and self.left[self.cur] > 0:
+            k = self.cur                        # finish the running probe
         else:
-            fresh = [k for k in self.kinds if self.tok[k] is None]
+            owed = [k for k in self.kinds if self.left[k] > 0]
             stale = [k for k in self.kinds if self.idle[k] >= self.EXPLORE]
-            k = (fresh or stale or [max(self.kinds, key=lambda k: self.tok[k] / self.ms[k])])[0]
+            if not owed and stale:
+                self.left[stale[0]] = self.PROBE
+                owed = stale[:1]
+            k = owed[0] if owed else max(self.kinds, key=self.rate)
         self.cur, self.t0 = k, time.perf_counter()
-        self.taken[k] += 1
         return k
 
     def done(self, accepted):
         """The round of the last pick() kept `accepted` drafts (call after
         its tokens were read: the wall time covers drafting + verify)."""
         k, ms = self.cur, 1000.0 * (time.perf_counter() - self.t0)
-        a = self.ALPHA
         tok = 1.0 + accepted
-        self.tok[k] = tok if self.tok[k] is None else (1 - a) * self.tok[k] + a * tok
-        self.ms[k] = ms if self.ms[k] is None else (1 - a) * self.ms[k] + a * ms
+        if k != "plain":
+            a = max(self.ALPHA, 1.0 / (self.n[k] + 1 + self.PRIOR))
+            self.tok[k] = (1 - a) * self.tok[k] + a * tok
+        self.ms[k] = ms if self.n[k] <= 1 else (1 - self.ALPHA) * self.ms[k] + self.ALPHA * ms
+        self.n[k] += 1
+        self.left[k] = max(0, self.left[k] - 1)
         for x in self.kinds:
             self.idle[x] = 0 if x == k else self.idle[x] + tok
 
     def summary(self):
-        return ", ".join(f"{k} {self.taken[k]} rounds" + (
-            f" ({self.tok[k]:.2f} tok / {self.ms[k]:.0f} ms)" if self.tok[k] else "")
+        return ", ".join(f"{k} {self.n[k]} rounds" + (
+            f" ({self.tok[k]:.2f} tok / {self.ms[k]:.0f} ms)" if self.ms[k] else "")
             for k in self.kinds)
 
 

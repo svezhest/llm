@@ -131,12 +131,13 @@ def test_hybrid_exact_takes_both(dense, spec, monkeypatch):
 
 def test_chooser_prefers_tokens_per_ms():
     c = worker.Chooser(("dflash", "mtp", "plain"))
-    assert c.pick() == "dflash"
-    c.done(5)
-    assert c.pick() == "mtp"
-    c.done(0)
-    assert c.pick() == "plain"
-    c.done(0)
+    P = c.PROBE
+    assert [(c.pick(), c.done(5))[0] for _ in range(P)] == ["dflash"] * P   # its probe
+    assert c.n["dflash"] == P and c.tok["dflash"] > c.PRIORS["dflash"]
+    assert [(c.pick(), c.done(0))[0] for _ in range(P)] == ["mtp"] * P
+    assert c.tok["mtp"] < c.PRIORS["mtp"]                      # the prior gives way
+    assert [(c.pick(), c.done(0))[0] for _ in range(P)] == ["plain"] * P
+    assert c.tok["plain"] == 1.0                                 # plain is exactly 1
     c.tok = {"dflash": 6.0, "mtp": 1.5, "plain": 1.0}
     c.ms = {"dflash": 150.0, "mtp": 60.0, "plain": 50.0}
     assert c.pick() == "dflash"                          # 0.040 vs 0.025 / 0.020 tok/ms
@@ -145,12 +146,31 @@ def test_chooser_prefers_tokens_per_ms():
     assert c.pick() == "mtp"
     c.tok["mtp"] = 1.0
     picks = []
-    for _ in range(4 * c.EXPLORE):
+    for _ in range(8 * c.EXPLORE):
         picks.append(c.pick())
         c.done(0)
         c.tok, c.ms = {"dflash": 2.0, "mtp": 1.0, "plain": 1.0}, {"dflash": 150.0, "mtp": 60.0, "plain": 50.0}
     assert picks.count("plain") > 0.9 * len(picks)      # every drafter below plain: plain
     assert "dflash" in picks and "mtp" in picks          # re-probed now and then
+    runs = "".join(x[0] for x in picks).replace("p", " ").split()
+    assert all(len(r) == P for r in runs[1:-1])          # each re-probe is PROBE rounds
+
+
+def test_chooser_first_round_time_replaced():
+    """An arm's first wall time (DFlash: the prompt window fed to the drafter)
+    is replaced by its second, then averaged."""
+    c = worker.Chooser(("dflash", "plain"))
+    t = iter([0.0, 1.0, 1.0, 1.1, 2.0, 2.1])
+    import qwen_worker.mtp as M
+    real = M.time.perf_counter
+    M.time.perf_counter = lambda: next(t)
+    try:
+        for _ in range(3):
+            c.pick(force="dflash")
+            c.done(1)
+    finally:
+        M.time.perf_counter = real
+    assert c.ms["dflash"] == pytest.approx(0.8 * 100 + 0.2 * 100)
 
 
 @pytest.mark.parametrize("arms", ["mtp", "dflash", "both"])

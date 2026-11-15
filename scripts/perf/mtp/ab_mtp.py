@@ -10,10 +10,12 @@ Variants (comma separated):
   mtpK         the MTP head alone, K drafts per round (QWEN_MTP_K); mtpKr = QWEN_MTP_REFEED=1
   hybK         both, per-round choice (QWEN_DRAFT_HYBRID=1), MTP rounds of K drafts
   <v>+p        any of the above with plain steps as an arm (QWEN_SPEC_PLAIN=1)
+  <v>+x        verify blocks through mlx-vlm's exact multi-row qmv (QWEN_VERIFY_MRQMM off)
   K = 0: the adaptive draft count (QWEN_MTP_K=0)
 Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tokens of
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
-scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts).
+scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts),
+--set short (SHORT below: a ~300-word story asked in one line, ru / en / code; keys = --prompts).
 --sampling: temperature 0.6 / top_p 0.95 / top_k 20 / seed per request (QWEN_DRAFT_SAMPLING
 for the speculative variants). Per request: decode tok/s = (n - 1) / (t_last - t_first),
 rounds, accepted drafts per round per drafter.
@@ -44,7 +46,7 @@ from wtest import TASKS  # noqa: E402
 ap = argparse.ArgumentParser()
 ap.add_argument("--rounds", type=int, default=3)
 ap.add_argument("--variants", default="plain,dflash,mtp3,hyb3")
-ap.add_argument("--set", default="bench27", choices=["bench27", "wtest"])
+ap.add_argument("--set", default="bench27", choices=["bench27", "wtest", "short"])
 ap.add_argument("--prompts", default="code-2k-0,en-2k-0,ru-2k-0", help="bench27 prompt ids")
 ap.add_argument("--tasks", type=int, default=5, help="wtest: the first N TASKS")
 ap.add_argument("--max-tokens", type=int, default=256)
@@ -66,15 +68,17 @@ tok = getattr(eng.processor, "tokenizer", eng.processor)
 print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() / 1e9:.2f} GB; "
       f"dflash {type(D).__name__ if D else None} mtp {type(M).__name__ if M else None}; "
       f"DRAFT_BLOCK {W.DRAFT_BLOCK} VERIFY_MR {W.VERIFY_MR}", flush=True)
-REFEED0, SAMPLING0 = W.MTP_REFEED, W.DRAFT_SAMPLING
+REFEED0, SAMPLING0, MR0 = W.MTP_REFEED, W.DRAFT_SAMPLING, (W.VERIFY_MR, W.VERIFY_MR_HEAD)
 
 
 def set_variant(v):
     """Flip what the scheduler reads (idle scheduler: between requests)."""
     W.MTP_REFEED, W.DRAFT_HYBRID = REFEED0, "1"
     W.DRAFT_SAMPLING = a.sampling or SAMPLING0
-    W.SPEC_PLAIN = v.endswith("+p")
-    v = v.removesuffix("+p")
+    flags = set(v.split("+")[1:])
+    v = v.split("+")[0]
+    W.SPEC_PLAIN = "p" in flags
+    W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
     if v == "plain":
         eng.draft = eng.mtp = None
     elif v == "dflash":
@@ -91,7 +95,19 @@ def set_variant(v):
         raise SystemExit(f"unknown variant {v}")
 
 
+SHORT = {
+    "ru": "Напиши короткий рассказ (около 300 слов) о старом часовщике, который однажды утром "
+          "находит в своей мастерской часы, идущие назад.",
+    "en": "Write a short story (about 300 words) about an old clockmaker who one morning finds a "
+          "clock in his workshop that runs backwards.",
+    "code": "Write a Python function that merges overlapping intervals in a list of (start, end) "
+            "pairs, with a docstring and three doctests.",
+}
+
+
 def messages_of(key):
+    if a.set == "short":
+        return [pb.Message(role="user", content=SHORT[key])]
     if a.set == "wtest":
         return [pb.Message(role="user", content=TASKS[int(key)])]
     import prompts as P
@@ -102,7 +118,7 @@ def messages_of(key):
 
 if a.set == "bench27":
     sys.path.insert(0, os.environ["BENCH27"])
-KEYS = a.prompts.split(",") if a.set == "bench27" else [str(i) for i in range(a.tasks)]
+KEYS = a.prompts.split(",") if a.set in ("bench27", "short") else [str(i) for i in range(a.tasks)]
 MSGS = {}
 
 
@@ -158,7 +174,7 @@ def run(key, rid, v, seed=0):
         sd = stats(D) if D is not None and eng.draft is not None else {}
         sm = stats(M) if M is not None and eng.mtp is not None else {}
         rounds = sd.get("rounds", 0) + sm.get("rounds", 0)
-        out["plain_steps"] = r.steps - 1 - rounds if v.endswith("+p") else 0
+        out["plain_steps"] = r.steps - 1 - rounds if "+p" in v else 0
         out.update(dflash=sd, mtp=sm, rounds=rounds, round_ms=1000.0 * dt / rounds if rounds else None,
                    tok_per_round=(n - 1) / rounds if rounds else None)
     return out
