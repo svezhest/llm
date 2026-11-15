@@ -60,6 +60,16 @@ class _SpecMixin:
         Demotion (another request waiting, max_batch > 1): after a round the
         target cache holds every token before the last emitted one, `b` —
         exactly a batch row whose next input is b, already emitted (`first`).
+
+        Quantized KV (QWEN_KV_BITS): the cache is quantized where the plain
+        loop quantizes it (self.quantize after every prefill slab, after the
+        first target call and every committed round / plain step: offset >=
+        quantized_kv_start), and while it is still fp16 no verify block
+        crosses the start (cut at it; at start - 1 a plain one-token step),
+        so every position attends the same KV format as in the plain loop.
+        The verify forward attends a QuantizedKVCache through the library's
+        one-query quantized calls (the QWEN_VERIFY_ATT kernel is fp16-only);
+        its commit / abort move the cache's offset only.
         """
         from mlx_vlm.speculative.cache_state import (abort_speculative_round,
                                                      commit_speculative_round)
@@ -71,7 +81,23 @@ class _SpecMixin:
         row.spec = True                         # also after a demotion: never grouped
         input_ids, cache, pos, cuts, on_ckpt, on_prefilled = self._prompt_cache(row)
         row.cache = cache
+        self._kvq_mark(row)
         layers = list(draft.config.target_layer_ids)
+        kv_start = self.kv["quantized_kv_start"]
+        fa = lm.model.fa_idx
+
+        def requant():
+            """As the plain loop after a slab / a step (_prefill, _logits)."""
+            self.quantize(cache)
+            self._kvq_mark(row)
+
+        def fp16_left():
+            """Quantized KV: positions left before quantized_kv_start while
+            the cache is still fp16 (a block must stay within them), else None."""
+            c = cache[fa]
+            if not self.kv["kv_bits"] or hasattr(c, "bits"):
+                return None
+            return kv_start - c.offset
         win = draft.config.sliding_window - 1
         argmax = lambda logits: mx.argmax(logits, axis=-1)  # noqa: E731
         sampling, sampler, pen, max_tokens = req.sampling, row.sampler, row.pen, req.max_tokens
@@ -125,6 +151,7 @@ class _SpecMixin:
                 sink = []
                 intact = False                  # the forward moves every cache's offset
                 lm.model(ctx[:, :n], cache=cache, capture_layer_ids=layers, hidden_sink=sink)
+                requant()
                 h = mx.concatenate(sink, axis=-1)
                 hidden.append(h)
                 # drop the oldest chunk while the rest still covers the window
@@ -155,6 +182,7 @@ class _SpecMixin:
         on_prefilled(cache, tail=tail_end())
         on_ckpt = on_prefilled = None           # nothing of the prefill outlives it here
         out = lm(input_ids[:, -1:], cache=cache, capture_layer_ids=layers)
+        requant()
         hidden.append(mx.concatenate(out.hidden_states, axis=-1))
         hidden = mx.concatenate(hidden, axis=1)[:, -win:]
         first = pick(out.logits[:, -1:, :], input_ids[0, -1:])
@@ -217,6 +245,7 @@ class _SpecMixin:
             while f is not None and n < max_tokens:
                 if not cached:
                     o = lm(mx.array([[last]], dtype=dtype), cache=cache, capture_layer_ids=layers)
+                    requant()
                     h = mx.concatenate(o.hidden_states, axis=-1)
                     mx.eval(h, [c.state for c in cache])
                     ctx.append(h)
@@ -228,6 +257,17 @@ class _SpecMixin:
                 n += 1
                 f = budget(last)
             return last, ctx, None
+
+        def step1(tok):
+            """One plain target step for `tok` (quantized KV: the last fp16
+            position, quantized_kv_start - 1, which no verify block may
+            cross) -> (its hidden states, [the target's token])."""
+            o = lm(mx.array([[tok]], dtype=dtype), cache=cache, capture_layer_ids=layers)
+            requant()
+            h = mx.concatenate(o.hidden_states, axis=-1)
+            t = pick(o.logits[:, -1:, :], mx.array([tok], dtype=dtype))
+            mx.eval(t, h, [c.state for c in cache])
+            return h, [t.item()]
 
         finish, n, acc, drafted = "length", 0, 0, 0
         if max_tokens > 0 and not emit(first):
@@ -272,36 +312,45 @@ class _SpecMixin:
                 bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
                 if bs <= 1:
                     break
-                drafts = draft.draft_block(b, hidden.astype(mx.float32) if wide else hidden,
-                                           draft_cache, bs, argmax, dtype)
-                mx.async_eval(drafts)
-                fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
-                txn = None
-                try:
-                    # the verify forward opens a cache transaction (out.gdn_states)
-                    # that must be committed every round, or aborted
-                    out = lm(fed, cache=cache, capture_layer_ids=layers, speculative_verify=True)
-                    txn = out.gdn_states
-                    hidden = mx.concatenate(out.hidden_states, axis=-1)
-                    targets = pick(out.logits, fed[0])
-                    mx.async_eval(targets, hidden)
-                    accepted, new = _speculative_walk(drafts, targets, max_tokens - n)
-                    hit, cut = accepted, None       # hit: the drafter's score (statistics)
-                    if think is not None:
-                        cut = _budget_cut(think, new, self.eng.stopping)
-                        if cut is not None and cut < accepted:
-                            # the budget forces the token after the draft
-                            # new[cut]: the later drafts and the target's own
-                            # token leave the cache with the commit
-                            accepted, new = cut + 1, new[:cut + 1]
-                    commit_speculative_round(lm, cache, txn, accepted, bs)
-                    if accepted + 1 < bs:       # the kept state is a view of the block's
-                        _own_states(cache)
-                except BaseException:
-                    abort_speculative_round(txn)
-                    raise
-                _record_speculative_round(draft, hit, bs - 1)
-                acc, drafted = acc + hit, drafted + bs - 1
+                left = fp16_left()
+                if left is not None and 0 < left < bs:
+                    bs = left                   # the block ends at the last fp16 position
+                if bs == 1:
+                    hidden, new = step1(b)
+                    accepted = hit = 0
+                    cut = None
+                else:
+                    drafts = draft.draft_block(b, hidden.astype(mx.float32) if wide else hidden,
+                                               draft_cache, bs, argmax, dtype)
+                    mx.async_eval(drafts)
+                    fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
+                    txn = None
+                    try:
+                        # the verify forward opens a cache transaction (out.gdn_states)
+                        # that must be committed every round, or aborted
+                        out = lm(fed, cache=cache, capture_layer_ids=layers, speculative_verify=True)
+                        txn = out.gdn_states
+                        hidden = mx.concatenate(out.hidden_states, axis=-1)
+                        targets = pick(out.logits, fed[0])
+                        mx.async_eval(targets, hidden)
+                        accepted, new = _speculative_walk(drafts, targets, max_tokens - n)
+                        hit, cut = accepted, None       # hit: the drafter's score (statistics)
+                        if think is not None:
+                            cut = _budget_cut(think, new, self.eng.stopping)
+                            if cut is not None and cut < accepted:
+                                # the budget forces the token after the draft
+                                # new[cut]: the later drafts and the target's own
+                                # token leave the cache with the commit
+                                accepted, new = cut + 1, new[:cut + 1]
+                        commit_speculative_round(lm, cache, txn, accepted, bs)
+                        if accepted + 1 < bs:       # the kept state is a view of the block's
+                            _own_states(cache)
+                    except BaseException:
+                        abort_speculative_round(txn)
+                        raise
+                    requant()                       # (outside the transaction: offset >= start)
+                    _record_speculative_round(draft, hit, bs - 1)
+                    acc, drafted = acc + hit, drafted + bs - 1
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
                 if accepted < bs - 1:           # the positions the commit kept
                     hidden = hidden[:, : accepted + 1, :]

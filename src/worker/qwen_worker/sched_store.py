@@ -61,24 +61,29 @@ class _StoreMixin:
     def _move_on(self):
         """Single stream only: with other rows around, an entry moved into a
         row would be a miss for its siblings, and a cascade group's rows hold
-        no KV of their own to give back. fp16 KV only (the quantized entries'
-        resume rules below quantized_kv_start are not handled). Not with the
-        disk tier (QWEN_PROMPT_CACHE_DISK: an evicted entry's RAM stays held
-        until written, and its pending write may share a segment the move
-        empties; not built)."""
+        no KV of their own to give back. Quantized KV (since 2026-11-15):
+        only quantized entries move (their segments are (packed, scales,
+        biases) tuples, taken / restored like fp16 arrays); the fp16 part
+        below quantized_kv_start is copied as without the mode (an fp16 entry
+        is never moved, a row still fp16 at its prefill's end stores by copy:
+        _prompt_cache). Not with the disk tier (QWEN_PROMPT_CACHE_DISK: an
+        evicted entry's RAM stays held until written, and its pending write
+        may share a segment the move empties; not built)."""
         return bool(PROMPT_CACHE_MOVE and PROMPT_CACHE and self.max_batch == 1
-                    and self.kv["kv_bits"] is None and self.eng._pcache.disk is None)
+                    and self.eng._pcache.disk is None)
 
     def move_state(self):
         if self._move_on():
-            return "on (a hit moves the entry's KV into the row; a row's buffers become its entry)"
+            return ("on (a hit moves the entry's KV into the row; a row's buffers become its entry"
+                    + (f"; {self.kv['kv_bits']}-bit KV: quantized entries move, the fp16 part "
+                       f"below {self.kv['quantized_kv_start']} tokens is copied"
+                       if self.kv["kv_bits"] else "") + ")")
         if not PROMPT_CACHE_MOVE:
             return "off"
         return "off: needs " + ", ".join(
             x for x, ok in (("QWEN_PROMPT_CACHE=1", PROMPT_CACHE),
                             ("QWEN_MAX_BATCH=1 (max_batch is %d)" % self.max_batch,
                              self.max_batch == 1),
-                            ("fp16 KV (QWEN_KV_BITS=0)", self.kv["kv_bits"] is None),
                             ("no QWEN_PROMPT_CACHE_DISK", self.eng._pcache.disk is None))
             if not ok)
 

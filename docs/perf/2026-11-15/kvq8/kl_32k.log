@@ -1,0 +1,21 @@
+fast paths: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+loaded ../../weights/qwen38-27b-mlx-4bit in 8.8 s, active 14.95 GiB; SDPA_FUSED True, MIN_KV 8192, PREFILL_BUDGET 16777216
+  fp16: prefill 32768 tokens in 287.4 s (16 slabs, min 2048), peak 19.65 GiB
+  fp16: decode 512 steps in 36.4 s; quantized FA layers 0, peak 19.65 GiB
+  q8: prefill 32768 tokens in 279.1 s (34 slabs, min 153), peak 18.83 GiB
+  q8: decode 512 steps in 45.9 s; quantized FA layers 16, peak 18.83 GiB
+  q8f: prefill 32768 tokens in 260.6 s (16 slabs, min 2048), peak 18.80 GiB
+  q8f: decode 512 steps in 44.3 s; quantized FA layers 16, peak 18.80 GiB
+logits of 33280 positions x 3 variants in 39.8 s
+fp16  NLL fp16 part 1.5912  prefill 1.5726  decode 1.8356   slabs 16 (min 2048), peak 19.65 GiB
+q8    NLL fp16 part 1.5912  prefill 1.5727  decode 1.8364   slabs 34 (min 153), peak 18.83 GiB
+q8f   NLL fp16 part 1.5912  prefill 1.5726  decode 1.8355   slabs 16 (min 2048), peak 18.8 GiB
+q8 vs fp16   fp16 part   5000 pos  KL mean 0  p99 0  max 0  top-1 100.00%
+q8 vs fp16   prefill    27768 pos  KL mean 5.95e-05  p99 0.000504  max 0.024  top-1 99.66%
+q8 vs fp16   decode       512 pos  KL mean 7e-05  p99 0.000453  max 0.00232  top-1 100.00%
+q8f vs fp16  fp16 part   5000 pos  KL mean 0  p99 0  max 0  top-1 100.00%
+q8f vs fp16  prefill    27768 pos  KL mean 5.59e-05  p99 0.00046  max 0.0203  top-1 99.70%
+q8f vs fp16  decode       512 pos  KL mean 6.02e-05  p99 0.000376  max 0.000627  top-1 99.80%
+q8f vs q8    fp16 part   5000 pos  KL mean 0  p99 0  max 0  top-1 100.00%
+q8f vs q8    prefill    27768 pos  KL mean 4.54e-05  p99 0.00039  max 0.0156  top-1 99.73%
+q8f vs q8    decode       512 pos  KL mean 6.81e-05  p99 0.000585  max 0.0022  top-1 99.80%

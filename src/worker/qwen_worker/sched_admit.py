@@ -36,25 +36,51 @@ class _AdmitMixin:
             return False
         return True
 
-    def _bytes(self, n):
-        """Reservation for a row of n KV tokens."""
+    def _bytes(self, n, kvq=False):
+        """Reservation for a row of n KV tokens. Quantized KV (QWEN_KV_BITS)
+        past quantized_kv_start: n quantized tokens (packed values + an fp16
+        scale and bias per group: _kv_token_bytes) and, until the row's cache
+        is quantized (`kvq` False), the fp16 KV it holds before: the cache is
+        quantized whole (to_quantized) after the first prefill slab ending at
+        or past the start (a decode step at the start), which leaves the fp16
+        buffers of those c <= start + PREFILL_STEP tokens beside their
+        quantized copy for that moment -- the row's peak. A row whose cache is
+        quantized already (resumed from a quantized entry, or past that
+        point: _kvq_mark) never holds fp16 KV again."""
         start = self.kv["quantized_kv_start"]
         if self.kv["kv_bits"] and n >= start:
-            kv = start * self.kv_fp16 + n * self.kv_q     # + the fp16 copy while quantizing
+            kv = n * self.kv_q + (0 if kvq else min(n, start + PREFILL_STEP) * self.kv_fp16)
         else:
             kv = n * self.kv_fp16
         # +5%: a KVCache grows by concatenating 256-token steps; the recurrent
         # state twice: the queued step's output exists beside its input
         return int(kv * 1.05) + 2 * self.gdn_row + (8 << 20)
 
+    def _kvq_mark(self, row, known=False):
+        """Quantized KV: once the row's cache is quantized (`known`: it is
+        about to be, restored from a quantized entry) its reservation drops
+        the fp16 copy (_bytes kvq). Plain attributes only: no MLX op, safe
+        while a decode step is built."""
+        if row.kvq or not self.kv["kv_bits"] or row.group is not None:
+            return
+        if not known:
+            c = row.cache[self.fa_layers[0]] if row.cache is not None and self.fa_layers else None
+            if c is None or not hasattr(c, "bits"):
+                return
+        row.kvq = True
+        need = self._bytes(row.tokens, kvq=True)
+        if not row.done:
+            self.reserved += need - row.reserved
+        row.reserved = need
+
     def _step_bytes(self, rows):
         """Bytes a decode step over `rows` must read at least: the weights
-        once, every row's KV, its recurrent state read and written."""
+        once, every row's KV (quantized whole past quantized_kv_start), its
+        recurrent state read and written."""
         start, kv = self.kv["quantized_kv_start"], 0
         for r in rows:
             n = r.pos
-            kv += (start * self.kv_fp16 + (n - start) * self.kv_q
-                   if self.kv["kv_bits"] and n >= start else n * self.kv_fp16)
+            kv += n * self.kv_q if self.kv["kv_bits"] and n >= start else n * self.kv_fp16
         return self.w_bytes + kv + 2 * len(rows) * self.gdn_row
 
     def _tokens(self, req):
@@ -81,7 +107,7 @@ class _AdmitMixin:
         tokens = min(row.pos + ahead + 1024, len(row.req.ids) + row.req.max_tokens + 1)
         g = row.group
         if g is None:
-            need = self._bytes(tokens)
+            need = self._bytes(tokens, row.kvq)
             rows = self.reserved + need - row.reserved
         else:                                   # a member grows its group's charge
             need = self._group_bytes(g.P, g.rows, {row: tokens})
