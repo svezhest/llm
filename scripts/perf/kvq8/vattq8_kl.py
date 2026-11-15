@@ -13,9 +13,14 @@ Then:
   decode steps   --decode one-token forwards (state restored between the two
                  variants): lib = the library's quantized SDPA vs vq8.
 
-Per pair: KL(lib || vq8) mean / p99 / max over every position (fp32
-log-softmax of the logits), top-1 agreement, max |d logprob|. Gate (night
-rules): KL mean <= 1e-4, top-1 >= 99.7 %.
+A third variant, ref = the exact attention over the same dequantized KV
+(vatt.reference_q8: fp32 throughout, rounded to fp16 once), tells which side
+of a lib / vq8 disagreement is off: KL(ref || lib) vs KL(ref || vq8).
+
+Per pair: KL(a || b) mean / p99 / max over every position (fp32 log-softmax
+of the logits), top-1 agreement, max |d logprob|, and for every top-1
+disagreement the top-1 / top-2 logprob gap of ref there. Gate (night rules):
+KL(lib || vq8) mean <= 1e-4, top-1 >= 99.7 %.
 
   cd src/worker && QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1 \\
     QWEN_KV_BITS=8 QWEN_VATT_Q8=1 QWEN_KVQ_PREFILL_FUSED=1 QWEN_MAX_BATCH=1 QWEN_WIRED_LIMIT_GB=27 \\
@@ -89,8 +94,22 @@ lm._rope_deltas = mx.zeros((1, 1), dtype=mx.int32)
 FA = [i for i, c in enumerate(cache) if type(c).__name__ == "QuantizedKVCache"]
 
 
-def verify(block, on):
-    W._VATT_Q8 = on
+import vatt  # noqa: E402
+KERNEL = vatt.attention_q8
+
+
+def exact(q, kq, vq, n, scale, group_size=64, bits=8, chunk=None):
+    return vatt.reference_q8(q, kq, vq, n, scale, group_size, bits).astype(q.dtype)
+
+
+def mode(m):
+    """lib / vq8 / ref -> the q8 attention switches (verify and decode alike)."""
+    vatt.attention_q8 = exact if m == "ref" else KERNEL
+    return m != "lib"
+
+
+def verify(block, m):
+    W._VATT_Q8 = mode(m)
     out = lm(block, cache=cache, speculative_verify=True)
     lp = out.logits[0].astype(mx.float32)
     lp = lp - mx.logsumexp(lp, axis=-1, keepdims=True)
@@ -100,28 +119,41 @@ def verify(block, on):
     return lp
 
 
-def add(s, la, lb, n):
+MODES = ("lib", "vq8", "ref")
+PAIRS = (("lib", "vq8"), ("ref", "lib"), ("ref", "vq8"))
+
+
+def add(s, la, lb, lr):
     p = mx.exp(la)
     kl = (p * (la - lb)).sum(axis=-1)
     s["kl"] += kl.reshape(-1).tolist()
-    s["agree"] += (mx.argmax(la, -1) == mx.argmax(lb, -1)).sum().item()
-    s["n"] += n
+    ta, tb = mx.argmax(la, -1).reshape(-1), mx.argmax(lb, -1).reshape(-1)
+    s["agree"] += (ta == tb).sum().item()
+    s["n"] += ta.size
     s["dmax"] = max(s["dmax"], mx.abs(la - lb).max().item())
+    top2 = mx.sort(lr.reshape(-1, lr.shape[-1]), axis=-1)[:, -2:]
+    gap = (top2[:, 1] - top2[:, 0]).tolist()
+    s["flip_gaps"] += [round(gap[i], 4) for i, same in enumerate((ta == tb).tolist()) if not same]
 
 
-acc = {"verify": dict(kl=[], agree=0, n=0, dmax=0.0), "decode": dict(kl=[], agree=0, n=0, dmax=0.0)}
+acc = {f"{x}|{y} {k}": dict(kl=[], agree=0, n=0, dmax=0.0, flip_gaps=[])
+       for k in ("verify", "decode") for x, y in PAIRS}
+
+
+def add_all(kind, lps):
+    for x, y in PAIRS:
+        add(acc[f"{x}|{y} {kind}"], lps[x], lps[y], lps["ref"])
+
+
 W._VATT_Q8_DEC = False
 t0 = time.time()
 for b in range(a.blocks):
     assert cache[FA[0]].offset == pos, (cache[FA[0]].offset, pos)
     block = inp[:, pos:pos + a.T]
-    if b % 2:
-        la, lb = verify(block, False), verify(block, True)
-    else:
-        lb = verify(block, True)
-        la = verify(block, False)
-    add(acc["verify"], la, lb, a.T)
-    W._VATT_Q8 = False
+    r = b % len(MODES)
+    lps = {m: verify(block, m) for m in MODES[r:] + MODES[:r]}
+    add_all("verify", lps)
+    W._VATT_Q8 = mode("lib")
     lm(block, cache=cache)                               # move on: the block as a plain slab
     quantize()
     mx.eval([c.state for c in cache])
@@ -130,8 +162,8 @@ for b in range(a.blocks):
         print(f"  {b + 1} blocks, {time.time() - t0:.0f} s", flush=True)
 
 
-def step(x, on):
-    W._VATT_Q8_DEC = on
+def step(x, m):
+    W._VATT_Q8_DEC = mode(m)
     snap = [c.offset if type(c).__name__ in ("KVCache", "QuantizedKVCache") else list(c.state) for c in cache]
     out = lm(x, cache=cache)
     lp = out.logits[0, -1].astype(mx.float32)
@@ -147,13 +179,10 @@ def step(x, on):
 
 for i in range(a.decode):
     x = inp[:, pos:pos + 1]
-    if i % 2:
-        la, lb = step(x, False), step(x, True)
-    else:
-        lb = step(x, True)
-        la = step(x, False)
-    add(acc["decode"], la[None], lb[None], 1)
-    W._VATT_Q8_DEC = False
+    r = i % len(MODES)
+    lps = {m: step(x, m)[None] for m in MODES[r:] + MODES[:r]}
+    add_all("decode", lps)
+    W._VATT_Q8_DEC = mode("lib")
     lm(x, cache=cache)
     quantize()
     mx.eval([c.state for c in cache])
@@ -168,15 +197,18 @@ for k, s in acc.items():
     if not n:
         continue
     r = dict(n=n, kl_mean=sum(kl) / n, kl_p99=kl[min(n - 1, int(0.99 * n))], kl_max=kl[-1],
-             top1=100.0 * s["agree"] / s["n"], max_abs_dlogprob=s["dmax"])
+             top1=100.0 * s["agree"] / s["n"], max_abs_dlogprob=s["dmax"], ref_gap_at_flips=s["flip_gaps"])
     r["gate"] = r["kl_mean"] <= 1e-4 and r["top1"] >= 99.7
-    ok &= r["gate"]
-    res["pairs"][f"lib|vq8 {k}"] = r
-    print(f"{k:6s} lib vs vq8: {n} positions  KL mean {r['kl_mean']:.3g}  p99 {r['kl_p99']:.3g}  "
+    if k.startswith("lib|vq8"):
+        ok &= r["gate"]
+    res["pairs"][k] = r
+    print(f"{k:17s}: {n} positions  KL mean {r['kl_mean']:.3g}  p99 {r['kl_p99']:.3g}  "
           f"max {r['kl_max']:.3g}  top-1 {r['top1']:.2f}%  max|d logprob| {r['max_abs_dlogprob']:.3g}  "
-          f"{'PASS' if r['gate'] else 'FAIL'}", flush=True)
+          f"ref top-2 gap at flips {s['flip_gaps']}" + (f"  {'PASS' if r['gate'] else 'FAIL'}"
+                                                        if k.startswith("lib|vq8") else ""), flush=True)
 res["gate"] = ok
-print(f"gate (KL <= 1e-4, top-1 >= 99.7 %, verify and decode): {'PASS' if ok else 'FAIL'}", flush=True)
+print(f"gate (KL(lib||vq8) <= 1e-4, top-1 >= 99.7 %, verify and decode): {'PASS' if ok else 'FAIL'}",
+      flush=True)
 if a.json:
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
     json.dump(res, open(a.json, "w"), indent=1)

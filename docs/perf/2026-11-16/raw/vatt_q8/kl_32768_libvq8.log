@@ -1,0 +1,9 @@
+loaded; 33408 tokens
+prefill 32768 in 233 s; caches ['ArraysCache', 'QuantizedKVCache']
+  16 blocks, 23 s
+  32 blocks, 46 s
+  48 blocks, 68 s
+  64 blocks, 91 s
+verify lib vs vq8: 512 positions  KL mean 1.44e-05  p99 8.22e-05  max 0.000109  top-1 99.41%  max|d logprob| 1.53  FAIL
+decode lib vs vq8: 128 positions  KL mean 1.44e-05  p99 9.04e-05  max 0.000109  top-1 100.00%  max|d logprob| 0.203  PASS
+gate (KL <= 1e-4, top-1 >= 99.7 %, verify and decode): FAIL

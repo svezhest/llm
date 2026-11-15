@@ -1,0 +1,29 @@
+{
+ "tokens": 32768,
+ "blocks": 64,
+ "T": 8,
+ "decode": 128,
+ "model": "/Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit",
+ "kvq_prefill_fused": true,
+ "pairs": {
+  "lib|vq8 verify": {
+   "n": 512,
+   "kl_mean": 1.4446511242882654e-05,
+   "kl_p99": 8.215941488742828e-05,
+   "kl_max": 0.00010902341455221176,
+   "top1": 99.4140625,
+   "max_abs_dlogprob": 1.5314922332763672,
+   "gate": false
+  },
+  "lib|vq8 decode": {
+   "n": 128,
+   "kl_mean": 1.4429345809277745e-05,
+   "kl_p99": 9.03689069673419e-05,
+   "kl_max": 0.00010886043310165405,
+   "top1": 100.0,
+   "max_abs_dlogprob": 0.2031269073486328,
+   "gate": true
+  }
+ },
+ "gate": false
+}

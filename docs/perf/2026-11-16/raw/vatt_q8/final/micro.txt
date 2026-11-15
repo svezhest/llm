@@ -1,0 +1,43 @@
+== tests
+== micro N=8192 T=8 (coalesced K loader)
+q8single      0.462 ms/layer    38.6 GB/s  vs fp32 ref: max|d| 5.34e-03 rel rms 1.35e-03  transient 0 MiB
+q8rows        3.638 ms/layer     4.9 GB/s  vs fp32 ref: max|d| 6.04e-03 rel rms 1.71e-03  transient 14 MiB
+vq8           0.487 ms/layer    36.6 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 22 MiB
+vq8_1         0.199 ms/layer    89.6 GB/s  vs fp32 ref: max|d| 4.75e-04 rel rms 2.07e-04  transient -21 MiB
+single        0.215 ms/layer   155.9 GB/s  vs fp32 ref: max|d| 1.18e-03 rel rms 2.65e-04  transient 3 MiB
+vatt1         0.213 ms/layer   157.5 GB/s  vs fp32 ref: max|d| 4.87e-04 rel rms 2.07e-04  transient -3 MiB
+vatt          0.457 ms/layer    73.4 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 25 MiB
+== micro N=32768 T=8 (coalesced K loader)
+q8single      1.725 ms/layer    41.3 GB/s  vs fp32 ref: max|d| 5.65e-03 rel rms 2.57e-03  transient 0 MiB
+q8rows       15.129 ms/layer     4.7 GB/s  vs fp32 ref: max|d| 9.44e-03 rel rms 2.29e-03  transient 57 MiB
+vq8           1.452 ms/layer    49.1 GB/s  vs fp32 ref: max|d| 9.49e-04 rel rms 2.09e-04  transient -4 MiB
+vq8_1         0.463 ms/layer   154.0 GB/s  vs fp32 ref: max|d| 7.00e-04 rel rms 2.07e-04  transient 0 MiB
+single        0.688 ms/layer   195.1 GB/s  vs fp32 ref: max|d| 1.11e-03 rel rms 2.90e-04  transient 6 MiB
+vatt1         0.564 ms/layer   237.9 GB/s  vs fp32 ref: max|d| 4.99e-04 rel rms 2.00e-04  transient 3 MiB
+vatt          1.369 ms/layer    98.0 GB/s  vs fp32 ref: max|d| 9.56e-04 rel rms 2.06e-04  transient 18 MiB
+== micro N=61440 T=8 (coalesced K loader)
+q8single      3.349 ms/layer    39.9 GB/s  vs fp32 ref: max|d| 5.34e-03 rel rms 2.74e-03  transient 0 MiB
+q8rows       29.691 ms/layer     4.5 GB/s  vs fp32 ref: max|d| 7.81e-03 rel rms 2.84e-03  transient 97 MiB
+vq8           2.648 ms/layer    50.5 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient -3 MiB
+vq8_1         0.753 ms/layer   177.5 GB/s  vs fp32 ref: max|d| 8.48e-04 rel rms 1.99e-04  transient -12 MiB
+single        2.089 ms/layer   120.5 GB/s  vs fp32 ref: max|d| 1.00e-03 rel rms 2.49e-04  transient 13 MiB
+vatt1         0.961 ms/layer   261.9 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.03e-04  transient 5 MiB
+vatt          2.556 ms/layer    98.4 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient 23 MiB
+== micro N=81920 T=8 (coalesced K loader)
+q8single      4.572 ms/layer    39.0 GB/s  vs fp32 ref: max|d| 5.34e-03 rel rms 2.89e-03  transient 0 MiB
+q8rows       40.472 ms/layer     4.4 GB/s  vs fp32 ref: max|d| 7.68e-03 rel rms 2.86e-03  transient 121 MiB
+vq8           3.486 ms/layer    51.1 GB/s  vs fp32 ref: max|d| 9.67e-04 rel rms 2.08e-04  transient 1 MiB
+vq8_1         0.910 ms/layer   195.9 GB/s  vs fp32 ref: max|d| 9.67e-04 rel rms 2.08e-04  transient -23 MiB
+single        2.574 ms/layer   130.4 GB/s  vs fp32 ref: max|d| 6.97e-04 rel rms 2.61e-04  transient 41 MiB
+vatt1         1.178 ms/layer   284.8 GB/s  vs fp32 ref: max|d| 9.58e-04 rel rms 2.12e-04  transient -5 MiB
+vatt          3.227 ms/layer   104.0 GB/s  vs fp32 ref: max|d| 9.58e-04 rel rms 2.07e-04  transient 6 MiB
+== micro N=131072 T=8 (coalesced K loader)
+q8single      5.551 ms/layer    51.4 GB/s  vs fp32 ref: max|d| 6.96e-03 rel rms 2.70e-03  transient 1 MiB
+q8rows       56.711 ms/layer     5.0 GB/s  vs fp32 ref: max|d| 8.25e-03 rel rms 2.76e-03  transient 178 MiB
+vq8           5.606 ms/layer    50.9 GB/s  vs fp32 ref: max|d| 9.62e-04 rel rms 2.06e-04  transient 11 MiB
+vq8_1         1.576 ms/layer   180.9 GB/s  vs fp32 ref: max|d| 4.79e-04 rel rms 2.08e-04  transient -18 MiB
+single        6.146 ms/layer    87.4 GB/s  vs fp32 ref: max|d| 5.89e-04 rel rms 2.39e-04  transient 43 MiB
+vatt1         1.800 ms/layer   298.3 GB/s  vs fp32 ref: max|d| 4.88e-04 rel rms 2.11e-04  transient -6 MiB
+vatt          4.991 ms/layer   107.6 GB/s  vs fp32 ref: max|d| 9.30e-04 rel rms 2.04e-04  transient -1 MiB
+== KL 32K
+== A/B 32K
