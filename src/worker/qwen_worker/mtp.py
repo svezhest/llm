@@ -189,19 +189,22 @@ class MTPDraft:
 
 
 class Chooser:
-    """QWEN_DRAFT_HYBRID: which drafter a round takes - the one with the
-    larger expected tokens per second, (1 + accepted drafts) / round time,
-    from exponential averages of each one's own rounds; a drafter not taken
-    for EXPLORE rounds gets one round (its estimate would go stale)."""
+    """Which arm a round takes (QWEN_DRAFT_HYBRID / QWEN_SPEC_PLAIN): "dflash",
+    "mtp" (a drafter's round) or "plain" (one plain step) - the one with the
+    most tokens per ms, (1 + accepted drafts) / wall time, from exponential
+    averages of each arm's own rounds. An arm not taken while EXPLORE tokens
+    were emitted gets one round (re-probing: its estimate would go stale);
+    a plain step costs ~1/2 of a DFlash round on the 27B, so a losing
+    drafter's probe costs about one plain step per EXPLORE tokens."""
 
     ALPHA = 0.25
-    EXPLORE = 12
+    EXPLORE = 48
 
     def __init__(self, kinds):
         self.kinds = list(kinds)
         self.tok = {k: None for k in kinds}
         self.ms = {k: None for k in kinds}
-        self.idle = {k: 0 for k in kinds}
+        self.idle = {k: 0 for k in kinds}      # tokens emitted since the arm's last round
         self.t0 = self.cur = None
         self.taken = {k: 0 for k in kinds}
 
@@ -212,8 +215,6 @@ class Chooser:
             fresh = [k for k in self.kinds if self.tok[k] is None]
             stale = [k for k in self.kinds if self.idle[k] >= self.EXPLORE]
             k = (fresh or stale or [max(self.kinds, key=lambda k: self.tok[k] / self.ms[k])])[0]
-        for x in self.kinds:
-            self.idle[x] = 0 if x == k else self.idle[x] + 1
         self.cur, self.t0 = k, time.perf_counter()
         self.taken[k] += 1
         return k
@@ -226,6 +227,8 @@ class Chooser:
         tok = 1.0 + accepted
         self.tok[k] = tok if self.tok[k] is None else (1 - a) * self.tok[k] + a * tok
         self.ms[k] = ms if self.ms[k] is None else (1 - a) * self.ms[k] + a * ms
+        for x in self.kinds:
+            self.idle[x] = 0 if x == k else self.idle[x] + tok
 
     def summary(self):
         return ", ".join(f"{k} {self.taken[k]} rounds" + (

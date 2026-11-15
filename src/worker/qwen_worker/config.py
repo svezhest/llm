@@ -362,6 +362,11 @@ MTP_K = int(os.environ.get("QWEN_MTP_K") or "3")
 MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
 MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
 DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
+# QWEN_SPEC_PLAIN=1: plain steps are an arm of the per-round choice (mtp.Chooser)
+# beside the loaded drafter(s): a request whose drafts are rarely accepted
+# (short Russian prose on the 27B: DFlash below plain) decodes mostly plain,
+# re-probing the drafters every mtp.Chooser.EXPLORE tokens.
+SPEC_PLAIN = os.environ.get("QWEN_SPEC_PLAIN", "0") == "1"
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs

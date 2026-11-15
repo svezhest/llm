@@ -130,27 +130,66 @@ def test_hybrid_exact_takes_both(dense, spec, monkeypatch):
 
 
 def test_chooser_prefers_tokens_per_ms():
-    c = worker.Chooser(("dflash", "mtp"))
-    import time as _t
+    c = worker.Chooser(("dflash", "mtp", "plain"))
     assert c.pick() == "dflash"
     c.done(5)
     assert c.pick() == "mtp"
     c.done(0)
-    c.tok, c.ms = {"dflash": 6.0, "mtp": 1.5}, {"dflash": 150.0, "mtp": 60.0}
-    assert c.pick() == "dflash"                          # 0.040 vs 0.025 tok/ms
+    assert c.pick() == "plain"
+    c.done(0)
+    c.tok = {"dflash": 6.0, "mtp": 1.5, "plain": 1.0}
+    c.ms = {"dflash": 150.0, "mtp": 60.0, "plain": 50.0}
+    assert c.pick() == "dflash"                          # 0.040 vs 0.025 / 0.020 tok/ms
+    c.done(5)
     c.tok["dflash"] = 2.0
     assert c.pick() == "mtp"
-    picks = [c.pick() for _ in range(2 * c.EXPLORE)]
-    assert "dflash" in picks                             # explored now and then
-    del _t
+    c.tok["mtp"] = 1.0
+    picks = []
+    for _ in range(4 * c.EXPLORE):
+        picks.append(c.pick())
+        c.done(0)
+        c.tok, c.ms = {"dflash": 2.0, "mtp": 1.0, "plain": 1.0}, {"dflash": 150.0, "mtp": 60.0, "plain": 50.0}
+    assert picks.count("plain") > 0.9 * len(picks)      # every drafter below plain: plain
+    assert "dflash" in picks and "mtp" in picks          # re-probed now and then
 
 
-def test_thinking_budget(dense, spec, monkeypatch):
+@pytest.mark.parametrize("arms", ["mtp", "dflash", "both"])
+def test_plain_arm_exact(dense, spec, monkeypatch, arms):
+    """QWEN_SPEC_PLAIN: plain steps mixed into the rounds (each arm is taken
+    at least once: fresh estimates first); the answer is plain greedy's."""
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker.Chooser, "EXPLORE", 4)
+    ids = prompts([25], 36)[0]
+    ref = plain(dense, ids, 40)
+    mt = Oracle(head(dense), dense, ids + ref[0]) if arms != "dflash" else None
+    emitted = []
+
+    class Rec(FakeDraft):
+        def draft_block(self, b, hidden, cache, bs, sampler, dtype):
+            return mx.array([(ref[0][len(emitted):] + [0] * bs)[:bs - 1]], dtype=dtype)
+    d = Rec(ref[0]) if arms != "mtp" else None
+    taken = []
+    pick = worker.Chooser.pick
+    monkeypatch.setattr(worker.Chooser, "pick", lambda self, force=None: taken.append(pick(self, force))
+                        or taken[-1])
+    sched = scheduler(dense, max_batch=1)
+    sched.eng.mtp, sched.eng.draft = mt, d
+    stop = sched.eng.stopping
+    sched.eng.stopping = lambda t: emitted.append(t) or stop(t)     # every emitted token
+    assert run(sched, [request(ids, 40, "a")])["a"] == ref
+    assert "plain" in taken and len(set(taken)) == (3 if arms == "both" else 2)
+
+
+@pytest.mark.parametrize("plain_arm", [False, True])
+def test_thinking_budget(dense, spec, monkeypatch, plain_arm):
     """A thinking budget inside MTP rounds: the same tokens as the plain loop
     with that budget (the forced tokens go through plain steps; the head's
     pending position takes the forced token as its successor)."""
     from mlx_vlm.utils import ThinkingBudgetCriteria
     monkeypatch.setattr(worker, "MTP_K", 3)
+    monkeypatch.setattr(worker, "SPEC_PLAIN", plain_arm)
+    monkeypatch.setattr(worker.Chooser, "EXPLORE", 3)
     NL, CLOSE, OPEN = 11, 12, 13
     tok = FakeTok({"</think>": [CLOSE], "<think>": [OPEN], "\n": [NL]})
     p = prompts([25], 30)[0] + [OPEN]

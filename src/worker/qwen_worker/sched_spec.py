@@ -273,10 +273,15 @@ class _SpecMixin:
                 draft.lm_head = (lambda x, head=draft.lm_head, hd=self._hidden_dtype():
                                  head(x.astype(hd)))
             # QWEN_DRAFT_HYBRID: both drafters, one per round (mtp.Chooser);
-            # DFlash's context collects the positions of the MTP rounds
-            pick_kind = Chooser(("dflash", "mtp")) if draft is not None and mt is not None else None
-            force = cfg.DRAFT_HYBRID if cfg.DRAFT_HYBRID in ("dflash", "mtp") else None
-            kind, dpend = ("dflash" if mt is None else "mtp"), []
+            # QWEN_SPEC_PLAIN: plain steps are an arm too (a drafter whose
+            # rounds give fewer tokens per ms than a plain step loses to it,
+            # re-probed now and then). DFlash's context collects the positions
+            # of the other arms' rounds.
+            arms = [x for x, on in (("dflash", draft is not None), ("mtp", mt is not None),
+                                    ("plain", cfg.SPEC_PLAIN)) if on]
+            pick_kind = Chooser(arms) if len(arms) > 1 else None
+            force = cfg.DRAFT_HYBRID if cfg.DRAFT_HYBRID in arms else None
+            kind, dpend, plain_steps = arms[0], [], 0
             b, why = first, None
             f = budget(first)
             if f is not None:                   # a budget the first token already passes
@@ -305,6 +310,41 @@ class _SpecMixin:
                     return
                 if pick_kind is not None:
                     kind = pick_kind.pick(force)
+                if kind == "plain":
+                    # one plain step on the anchor (the batch path's B = 1
+                    # call, as close's); its position joins every context
+                    if draft is not None:
+                        dpend.append(dfl(hidden))
+                        while sum(t.shape[1] for t in dpend[1:]) >= win:
+                            dpend.pop(0)
+                    o = lm(mx.array([[b]], dtype=dtype), cache=cache, capture_layer_ids=layers,
+                           return_hidden=fin)
+                    hidden = mx.concatenate(o.hidden_states, axis=-1)
+                    t = pick(o.logits[:, -1:, :], mx.array([b], dtype=dtype))
+                    mx.eval(t, hidden, [c.state for c in cache])
+                    tok = t.item()
+                    req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
+                    plain_steps += 1
+                    if mt is not None:
+                        mt.round_end(0, hidden[..., -H:])
+                    seen(hidden)
+                    pick_kind.done(0)
+                    if not emit(tok):
+                        finish = "stop"
+                        break
+                    n += 1
+                    b = tok
+                    f = budget(tok)
+                    if f is not None:
+                        b, ctx, why = close(b, False, f)
+                        if ctx:
+                            hidden = mx.concatenate([hidden] + ctx, axis=1)
+                        if why:
+                            finish = why
+                            break
+                    if n % 256 == 0 and CLEAR_CACHE:
+                        mx.clear_cache()
+                    continue
                 if kind == "mtp":
                     bs = min(mt.next_k() + 1, max_tokens - n + 1)
                 else:

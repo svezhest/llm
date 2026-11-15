@@ -9,6 +9,8 @@ Variants (comma separated):
   dflash       DFlash alone (eng.mtp = None)
   mtpK         the MTP head alone, K drafts per round (QWEN_MTP_K); mtpKr = QWEN_MTP_REFEED=1
   hybK         both, per-round choice (QWEN_DRAFT_HYBRID=1), MTP rounds of K drafts
+  <v>+p        any of the above with plain steps as an arm (QWEN_SPEC_PLAIN=1)
+  K = 0: the adaptive draft count (QWEN_MTP_K=0)
 Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tokens of
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
 scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts).
@@ -71,6 +73,8 @@ def set_variant(v):
     """Flip what the scheduler reads (idle scheduler: between requests)."""
     W.MTP_REFEED, W.DRAFT_HYBRID = REFEED0, "1"
     W.DRAFT_SAMPLING = a.sampling or SAMPLING0
+    W.SPEC_PLAIN = v.endswith("+p")
+    v = v.removesuffix("+p")
     if v == "plain":
         eng.draft = eng.mtp = None
     elif v == "dflash":
@@ -154,6 +158,7 @@ def run(key, rid, v, seed=0):
         sd = stats(D) if D is not None and eng.draft is not None else {}
         sm = stats(M) if M is not None and eng.mtp is not None else {}
         rounds = sd.get("rounds", 0) + sm.get("rounds", 0)
+        out["plain_steps"] = r.steps - 1 - rounds if v.endswith("+p") else 0
         out.update(dflash=sd, mtp=sm, rounds=rounds, round_ms=1000.0 * dt / rounds if rounds else None,
                    tok_per_round=(n - 1) / rounds if rounds else None)
     return out
@@ -188,7 +193,8 @@ if not a.skip_speed:
                 print(f"r{rnd} {key:10s} {v:7s} n={o['n']:3d} tps={o['tps']:6.2f} "
                       f"tok/round={o.get('tok_per_round') or 0:4.2f} round_ms={o.get('round_ms') or 0:6.1f} "
                       f"dflash={sd.get('rounds', 0)}r/{sd.get('accept', 0):4.1f}% "
-                      f"mtp={sm.get('rounds', 0)}r/{sm.get('accept', 0):4.1f}% {sm.get('hist', '')}",
+                      f"mtp={sm.get('rounds', 0)}r/{sm.get('accept', 0):4.1f}% {sm.get('hist', '')} "
+                      f"plain={o.get('plain_steps', 0)}",
                       flush=True)
     plain = {(o["round"], o["key"]): o["tokens"] for o in res["speed"] if o["variant"] == "plain"}
     print("\n== median decode tok/s per prompt (median over rounds) ==")
