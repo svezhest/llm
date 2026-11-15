@@ -16,7 +16,7 @@ import pcdisk
 import worker_pb2 as pb
 
 from . import config as cfg
-from . import sizing
+from . import kernels, sizing
 from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, EVENT_POLL_S, FP16,
                      GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
@@ -31,7 +31,8 @@ from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks
 from .rows import _install_rows_attention
 from .kernels import (_draft_wide, _install_drafter_compile, _install_drafter_mrqmm,
                       _install_fast_paths, _install_gdn_fuse, _invariant_check, _log_invariant,
-                      _probe_decode_att, _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
+                      _probe_decode_att, _probe_vatt_q8, _probe_verify_attention, _setup_verify_mrqmm,
+                      _widen_drafter)
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
 from .request import _Req
@@ -258,6 +259,7 @@ class Engine:
         lm = self.model.language_model
         log.info("prefill kernels: %s", _install_fast_paths())
         _probe_decode_att(lm)
+        _probe_vatt_q8(lm)
         sizing._FIXED_SLAB = _fixed_slab()            # after the fused-SDPA probe; never changes after
         kvq = KV_KWARGS["kv_bits"] is not None
         log.info("prefill slab: %s", (f"{PREFILL_STEP} at any context (quantized KV dequantized for "
@@ -301,8 +303,9 @@ class Engine:
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",
                      (f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)"
                       + (f" while the cache is fp16 (its first {KV_KWARGS['quantized_kv_start']} "
-                         f"tokens); quantized KV ({KV_KWARGS['kv_bits']}-bit): the library's "
-                         "one-query quantized calls (no quantized vector kernel)"
+                         f"tokens); quantized KV ({KV_KWARGS['kv_bits']}-bit): "
+                         + ("the one-pass q8 kernel (QWEN_VATT_Q8)" if kernels._VATT_Q8 else
+                            "the library's one-query quantized calls (QWEN_VATT_Q8 off)")
                          if KV_KWARGS["kv_bits"] is not None else "")) if nq
                      else "the library's one-query calls")
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)

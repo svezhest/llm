@@ -142,3 +142,114 @@ def test_cpu_reference_is_causal_tail():
             s = (q[0, hq, t].astype(mx.float32) * 0.0625) @ k[0, hq // 2, :lim].astype(mx.float32).T
             want = mx.softmax(s, precise=True) @ v[0, hq // 2, :lim].astype(mx.float32)
             assert mx.abs(out[0, hq, t].astype(mx.float32) - want).max().item() < 2e-3
+
+
+# ---- 8-bit quantized KV (vatt.attention_q8, QWEN_VATT_Q8) ----
+
+def kvq(n, hkv, spare=37, seed=0, strided=False):
+    """An 8-bit QuantizedKVCache's buffers: (packed, scales, biases) for K and
+    V with spare slots past n holding garbage (random bytes, K scales 1000, V
+    scales NaN): never read."""
+    k, v = kv(n, hkv, spare, seed, strided=False)
+    k, v = k[..., :n, :], v[..., :n, :]
+    pad = [(0, 0), (0, 0), (0, spare), (0, 0)]
+    kq = [mx.pad(a, pad) for a in mx.quantize(k, 64, 8)]
+    vq = [mx.pad(a, pad) for a in mx.quantize(v, 64, 8)]
+    kq[0][..., n:, :] = 0x7f3a91c5
+    vq[0][..., n:, :] = 0x12ffee01
+    kq[1][..., n:, :] = 1000.0
+    vq[1][..., n:, :] = float("nan")
+    if strided:                     # every other head of a bigger buffer: non-contiguous views
+        kq = [mx.concatenate([a, a], axis=1)[:, ::2] for a in kq]
+        vq = [mx.concatenate([a, a], axis=1)[:, ::2] for a in vq]
+    mx.eval(kq, vq)
+    return tuple(kq), tuple(vq)
+
+
+def rows_q8_lib(q, kq, vq, n, scale):
+    """The library's verify attention over a quantized cache: one quantized
+    SDPA call per query."""
+    from mlx_vlm.models.base import quantized_scaled_dot_product_attention as qsdpa
+    T = q.shape[2]
+    return mx.concatenate([qsdpa(q[:, :, i:i + 1], tuple(x[..., :n - T + i + 1, :] for x in kq),
+                                 tuple(x[..., :n - T + i + 1, :] for x in vq), scale, None, 64, 8)
+                           for i in range(T)], axis=2)
+
+
+CASES_Q8 = [  # (n, T, hq, hkv)
+    (1, 1, 24, 4), (8, 8, 24, 4), (9, 8, 24, 4), (100, 8, 24, 4), (700, 8, 24, 4),
+    (2049, 8, 24, 4), (4096 + 3, 8, 24, 4), (12345, 8, 24, 4), (33000, 8, 24, 4),
+    (5000, 1, 24, 4), (5000, 2, 24, 4), (5000, 5, 24, 4), (5000, 9, 24, 4), (5000, 16, 24, 4),
+    (3000, 8, 16, 4), (3000, 1, 16, 4), (3000, 8, 16, 2), (60000, 8, 24, 4), (60000, 1, 24, 4),
+]
+
+
+@gpu_only
+@pytest.mark.parametrize("n,T,hq,hkv", CASES_Q8)
+@pytest.mark.parametrize("mul", [1.0, 8.0])
+def test_q8_matches_reference(gpu, n, T, hq, hkv, mul):
+    kq, vq = kvq(n, hkv, seed=n % 7)
+    mx.random.seed(T)
+    q = (mx.random.normal((1, hq, T, D)) * mul).astype(mx.float16)
+    scale = D ** -0.5
+    out = vatt.attention_q8(q, kq, vq, n, scale)
+    ref = vatt.reference_q8(q, kq, vq, n, scale)
+    lib = rows_q8_lib(q, kq, vq, n, scale)
+    mx.eval(out, ref, lib)
+    assert out.shape == q.shape and out.dtype == mx.float16
+    assert not mx.any(mx.isnan(out)).item()
+    e, e_lib = rel_rms(out, ref), rel_rms(lib, ref)
+    assert e <= max(1.05 * e_lib, 4e-4), (e, e_lib)
+
+
+@gpu_only
+def test_q8_dequantizes_like_mlx(gpu):
+    """The in-register dequantization == mx.dequantize: the q8 kernel over the
+    packed KV equals the fp16 kernel over mx.dequantize's fp16 KV (the same
+    tiles after the loaders) to fp16 rounding of the dequantized values."""
+    n = 3000
+    kq, vq = kvq(n, 4, seed=5)
+    q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
+    a = vatt.attention_q8(q, kq, vq, n, D ** -0.5)
+    b = vatt.attention(q, vatt.dequantized(kq, n), vatt.dequantized(vq, n), n, D ** -0.5)
+    assert mx.abs(a.astype(mx.float32) - b.astype(mx.float32)).max().item() <= 2e-3
+    assert rel_rms(a, b.astype(mx.float32)) < 2e-4
+
+
+@gpu_only
+@pytest.mark.parametrize("n,chunk", [(3000, 48), (3000, 96), (1000, 960), (4100, 4080), (517, 2016)])
+def test_q8_chunks_and_tails(gpu, n, chunk):
+    kq, vq = kvq(n, 4, seed=1)
+    q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
+    for nn in (n, n - 3, n - 5):
+        out = vatt.attention_q8(q, kq, vq, nn, D ** -0.5, chunk=chunk)
+        assert rel_rms(out, vatt.reference_q8(q, kq, vq, nn, D ** -0.5)) < 4e-4, (nn, chunk)
+
+
+@gpu_only
+def test_q8_strided_view_no_copy(gpu):
+    kq, vq = kvq(3000, 4, seed=2, strided=True)
+    q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
+    out = vatt.attention_q8(q, kq, vq, 2990, D ** -0.5)
+    assert rel_rms(out, vatt.reference_q8(q, kq, vq, 2990, D ** -0.5)) < 4e-4
+
+
+def test_q8_rejects_bad_inputs():
+    k = mx.quantize(mx.zeros((1, 4, 64, D), mx.float16), 64, 8)
+    q = mx.zeros((1, 24, 8, D), mx.float16)
+    for args in ((q, k, k, 40, 64, 4), (q, k, k, 40, 32, 8), (q, k, k, 65, 64, 8),
+                 (q.astype(mx.float32), k, k, 40, 64, 8), (q, k[:2], k, 40, 64, 8),
+                 (q, (k[0], k[1].astype(mx.float32), k[2]), k, 40, 64, 8)):
+        with pytest.raises(ValueError):
+            vatt.attention_q8(args[0], args[1], args[2], args[3], 0.0625, args[4], args[5])
+
+
+def test_q8_cpu_reference_is_dequantized_attention():
+    mx.random.seed(0)
+    q = mx.random.normal((1, 4, 3, D)).astype(mx.float16)
+    k = mx.random.normal((1, 2, 20, D)).astype(mx.float16)
+    v = mx.random.normal((1, 2, 20, D)).astype(mx.float16)
+    kq, vq = mx.quantize(k, 64, 8), mx.quantize(v, 64, 8)
+    out = vatt.attention_q8(q, kq, vq, 15, 0.0625)
+    want = vatt.attention(q, mx.dequantize(*kq, 64, 8), mx.dequantize(*vq, 64, 8), 15, 0.0625)
+    assert mx.array_equal(out, want).item()

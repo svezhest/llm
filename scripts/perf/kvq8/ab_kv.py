@@ -7,9 +7,14 @@ QWEN_KVQ_PREFILL_FUSED=1, so the prefill reserve has room for the dequantized
 layer). A variant is switched between requests, never during one (`use`):
 the scheduler's KV settings (self.kv's kv_bits, self.quantize, self.kv_q),
 the frozen slab policy (sizing._FIXED_SLAB) and QWEN_KVQ_PREFILL_FUSED, and
-the prompt cache — every variant has its own _PrefixCache (an fp16 entry is
+the prompt cache — every KV format has its own _PrefixCache (an fp16 entry is
 never read by a q8 run). Variants: fp16 / q8 / q8f (q8 + the dequantized
-fused prefill; same decode as q8).
+fused prefill; same decode as q8); a "v" suffix on a quantized variant (q8v,
+q8fv): its decode steps and DFlash verify blocks through the one-pass q8
+kernel (QWEN_VATT_Q8; the worker loaded with it), without: the library's
+quantized SDPA. Variants that differ only by "v" share their prefix cache and
+their prefill (it is the same). fp16 runs whatever QWEN_VERIFY_ATT /
+QWEN_DECODE_ATT the worker was loaded with.
 
 Per context (--contexts; a system document of that many tokens, the repo's
 docs, + a coding task, thinking off unless --thinking):
@@ -65,6 +70,10 @@ ap.add_argument("--rounds", type=int, default=3)
 ap.add_argument("--max-tokens", type=int, default=256)
 ap.add_argument("--modes", nargs="+", default=["plain", "dflash"])
 ap.add_argument("--thinking", action="store_true")
+ap.add_argument("--decode-mode", default="read",
+                help="prompt_cache mode of the decode runs: read (a copy of the entry, nothing stored) or '' "
+                     "(with QWEN_PROMPT_CACHE_MOVE the entry moves into the row and comes back with the reply: "
+                     "one KV copy, for contexts where two do not fit)")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
 assert os.environ.get("QWEN_PROMPT_CACHE") == "1"
@@ -81,15 +90,27 @@ if DRAFT is None and "dflash" in a.modes:
     print("no drafter (QWEN_DRAFT): DFlash runs skipped", flush=True)
     a.modes = [m for m in a.modes if m != "dflash"]
 tok = getattr(eng.processor, "tokenizer", eng.processor)
-CACHES = {v: W._PrefixCache() for v in a.variants}
 START = sched.kv["quantized_kv_start"]
+VQ8 = (W._VATT_Q8, W._VATT_Q8_DEC)               # as the load's self-test left them
+
+
+def fmt(v):
+    """The KV format of a variant (its prefix cache): the "v" suffix only changes the attention."""
+    return v[:-1] if v.endswith("v") and v != "fp16" else v
 
 
 def parse(v):
     if v == "fp16":
         return None, False
+    v = fmt(v)
     assert v[0] == "q", v
     return int(v[1:].rstrip("f")), v.endswith("f")
+
+
+FMTS = list(dict.fromkeys(fmt(v) for v in a.variants))
+CACHES = {f: W._PrefixCache() for f in FMTS}
+if any(v != fmt(v) for v in a.variants):
+    assert VQ8[0] and VQ8[1], "a 'v' variant needs the worker loaded with QWEN_VATT_Q8=1 (self-test passed)"
 
 
 def use(v):
@@ -103,7 +124,9 @@ def use(v):
     sched.kv_q = W._kv_token_bytes(lm, bits)
     W.KVQ_PREFILL_FUSED = fused
     W._FIXED_SLAB = bool((bits is None or fused) and W.SDPA_FUSED and W.FP16)
-    eng._pcache = CACHES[v]
+    vq = v != fmt(v)
+    W._VATT_Q8, W._VATT_Q8_DEC = VQ8[0] and vq, VQ8[1] and vq
+    eng._pcache = CACHES[fmt(v)]
 
 
 def doc(n):
@@ -175,11 +198,11 @@ print(f"loaded; drafter {'on' if DRAFT is not None else 'OFF'}, move: {sched.mov
 res = []
 for ctx in a.contexts:
     msgs = [("system", doc(ctx)), ("user", TASKS[0])]
-    for v in a.variants:
-        CACHES[v] = W._PrefixCache()             # the previous context's entries go
+    for f in FMTS:
+        CACHES[f] = W._PrefixCache()             # the previous context's entries go
     mx.clear_cache()
     for k in range(a.prefill_rounds):
-        order = a.variants if k % 2 == 0 else a.variants[::-1]
+        order = FMTS if k % 2 == 0 else FMTS[::-1]
         for v in order:
             use(v)
             o = run(msgs, f"{ctx}-{v}-prefill{k + 1}", "off", 1)
@@ -187,12 +210,13 @@ for ctx in a.contexts:
             show(o)
             res.append(o)
     for k in range(a.rounds):
-        order = a.variants if k % 2 == 0 else a.variants[::-1]
+        r = k % len(a.variants)
+        order = a.variants[r:] + a.variants[:r]   # rotate: no variant always first
         for v in order:
             use(v)
             for m in (a.modes if k % 2 == 0 else a.modes[::-1]):
                 eng.draft = DRAFT if m == "dflash" else None
-                o = run(msgs, f"{ctx}-{v}-{m}{k + 1}", "read", a.max_tokens)
+                o = run(msgs, f"{ctx}-{v}-{m}{k + 1}", a.decode_mode, a.max_tokens)
                 o.update(ctx=ctx, variant=v, mode=m, round=k + 1)
                 eng.draft = DRAFT
                 show(o)

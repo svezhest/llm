@@ -70,12 +70,11 @@ _IMPL = r"""
 // strided buffers (head stride, token stride), a causal tail per query row
 // (row r < M0 sees keys < N - TQN + 1 + r % TQN), keys [start, start + kL)
 // of one chunk; writes the chunk's normalized o (fp32) + m and l.
-template <typename T, int BQ, int BK, int BD, int WM, int WN, bool SPLIT>
+template <typename T, int BQ, int BK, int BD, int WM, int WN, bool SPLIT, typename KVSRC>
 METAL_FUNC void vatt_p1(
-    const device T* Q, const device T* K, const device T* V,
+    const device T* Q, thread const KVSRC& kv,
     device float* po, device float* pml,
     const int M0, const int N, const int TQN, const int chunk, const int blocks, const int HKV_,
-    const size_t ksh, const int kst, const size_t vsh, const int vst,
     const float scale,
     threadgroup T* KV_smem,
     uint simd_lane_id, uint simd_group_id, uint3 tid) {
@@ -93,8 +92,6 @@ METAL_FUNC void vatt_p1(
   const int lim0 = N - TQN + 1;                 // row t = 0 sees keys < lim0
 
   Q += (size_t(h) * M0 + q0) * BD;
-  K += size_t(h) * ksh + size_t(start) * kst;
-  V += size_t(h) * vsh + size_t(start) * vst;
 
   constexpr short padK = 16 / sizeof(T);
   constexpr short padV = 16 / sizeof(T);
@@ -111,10 +108,12 @@ METAL_FUNC void vatt_p1(
   threadgroup float* Xs = SPLIT ? reinterpret_cast<threadgroup float*>(KV_smem + tgp_mem_0 + tgp_mem_1)
                                 : reinterpret_cast<threadgroup float*>(KV_smem);
 
-  using KBlockLoader = BlockLoaderT<T, BK, BD, 1, LDK_tgp, 0, WM * WN * 32>;   // K transposed
-  using VBlockLoader = BlockLoaderT<T, BK, BV, LDV_tgp, 1, 0, WM * WN * 32>;
-  KBlockLoader loader_k(K, kst, Ks, simd_group_id, simd_lane_id);
-  VBlockLoader loader_v(V, vst, Vs, simd_group_id, simd_lane_id);
+  // K transposed (Ks[d * LDK_tgp + key]), V as it is (Vs[key * LDV_tgp + d]), both fp16 in
+  // threadgroup memory whatever the source (KVF16: copied; KVQ8: dequantized on the way)
+  typename KVSRC::template KLoader<BK, BD, LDK_tgp, WM * WN * 32> loader_k(kv, h, start, Ks, simd_group_id,
+                                                                          simd_lane_id);
+  typename KVSRC::template VLoader<BK, BV, LDV_tgp, WM * WN * 32> loader_v(kv, h, start, Vs, simd_group_id,
+                                                                          simd_lane_id);
 
   constexpr short kFragSize = 8;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
@@ -282,6 +281,121 @@ METAL_FUNC void vatt_p1(
     }
   }
 }
+
+// fp16 buffers (1, Hkv, cap, D): the steel loaders, as before
+template <typename T>
+struct KVF16 {
+  const device T* k;
+  const device T* v;
+  size_t ksh, vsh;              // head strides
+  int kst, vst;                 // token strides
+  template <short BK, short BD, short LD, short TGP>
+  struct KLoader : mlx::steel::BlockLoaderT<T, BK, BD, 1, LD, 0, TGP> {
+    METAL_FUNC KLoader(thread const KVF16& s, int h, int start, threadgroup T* dst, uint sg, uint ln) thread
+        : mlx::steel::BlockLoaderT<T, BK, BD, 1, LD, 0, TGP>(
+              s.k + size_t(h) * s.ksh + size_t(start) * s.kst, s.kst, dst, sg, ln) {}
+  };
+  template <short BK, short BD, short LD, short TGP>
+  struct VLoader : mlx::steel::BlockLoaderT<T, BK, BD, LD, 1, 0, TGP> {
+    METAL_FUNC VLoader(thread const KVF16& s, int h, int start, threadgroup T* dst, uint sg, uint ln) thread
+        : mlx::steel::BlockLoaderT<T, BK, BD, LD, 1, 0, TGP>(
+              s.v + size_t(h) * s.vsh + size_t(start) * s.vst, s.vst, dst, sg, ln) {}
+  };
+};
+
+// A block of BK keys of an 8-bit affine QuantizedKVCache (mx.quantize: 4 values a uint32,
+// lowest byte first; one fp16 scale and bias per 64 values) -> fp16 threadgroup memory,
+// dequantized in registers: w = scale * q + bias (one fma, rounded to fp16 once). A unit is
+// 16 values of one key (a uint4 of packed words, a quarter of a group). TRANS (K, stored
+// dst[d * LD + key]): consecutive threads take consecutive keys (the strided fp16 stores of
+// a simdgroup hit 2 banks a word, not 16); else (V, dst[key * LD + d]): consecutive threads
+// take consecutive units of one key (256 contiguous bytes read, half4 stores).
+template <short BK, short BD, bool TRANS, short LD, short TGP>
+struct Q8Loader {
+  STEEL_CONST short CPK = BD / 16;                  // units per key
+  STEEL_CONST short PASSES = BK * CPK / TGP;
+  static_assert(PASSES * TGP == BK * CPK, "a block of units must split evenly over the threads");
+  static_assert(TRANS ? TGP % BK == 0 : TGP % CPK == 0, "thread to unit mapping");
+  const device uint32_t* w;
+  const device half* s;
+  const device half* b;
+  const int wt, st, bt;
+  threadgroup half* dst;
+  const short key0, c0;
+
+  METAL_FUNC Q8Loader(const device uint32_t* w_, const device half* s_, const device half* b_,
+                      int wt_, int st_, int bt_, threadgroup half* dst_, uint sg, uint ln) thread
+      : w(w_), s(s_), b(b_), wt(wt_), st(st_), bt(bt_), dst(dst_),
+        key0(TRANS ? short((sg * 32 + ln) % BK) : short((sg * 32 + ln) / CPK)),
+        c0(TRANS ? short((sg * 32 + ln) / BK) : short((sg * 32 + ln) % CPK)) {}
+
+  METAL_FUNC void unit(short p, bool valid) const thread {
+    const short key = TRANS ? key0 : short(key0 + p * (TGP / CPK));
+    const short c = TRANS ? short(c0 + p * (TGP / BK)) : c0;
+    half v[16];
+    if (valid) {
+      const uint4 q = *(const device uint4*)(w + key * wt + c * 4);
+      const half2 sc = half2(s[key * st + c / 4]);
+      const half2 bi = half2(b[key * bt + c / 4]);
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        const uint x = q[i];
+        const half2 lo = fma(as_type<half2>((x & 0x00ff00ffu) | 0x64006400u) - half2(1024.0h), sc, bi);
+        const half2 hi = fma(as_type<half2>(((x >> 8) & 0x00ff00ffu) | 0x64006400u) - half2(1024.0h), sc, bi);
+        v[4 * i] = lo.x; v[4 * i + 1] = hi.x; v[4 * i + 2] = lo.y; v[4 * i + 3] = hi.y;
+      }
+    } else {
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 16; i++) v[i] = half(0);
+    }
+    if (TRANS) {
+      STEEL_PRAGMA_UNROLL
+      for (short d = 0; d < 16; d++) dst[(c * 16 + d) * LD + key] = v[d];
+    } else {
+      threadgroup half4* o = (threadgroup half4*)(dst + key * LD + c * 16);
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) o[i] = half4(v[4 * i], v[4 * i + 1], v[4 * i + 2], v[4 * i + 3]);
+    }
+  }
+  METAL_FUNC void load_unsafe() const thread {
+    STEEL_PRAGMA_UNROLL
+    for (short p = 0; p < PASSES; p++) unit(p, true);
+  }
+  METAL_FUNC void load_safe(short2 dims) const thread {     // dims.y keys valid; zeros past them
+    STEEL_PRAGMA_UNROLL
+    for (short p = 0; p < PASSES; p++) unit(p, (TRANS ? key0 : short(key0 + p * (TGP / CPK))) < dims.y);
+  }
+  METAL_FUNC void next() thread {
+    w += BK * wt;
+    s += BK * st;
+    b += BK * bt;
+  }
+};
+
+struct KVQ8 {
+  const device uint32_t* kw;
+  const device half* ks;
+  const device half* kb;
+  const device uint32_t* vw;
+  const device half* vs;
+  const device half* vb;
+  size_t kwh, ksh, kbh, vwh, vsh, vbh;      // head strides
+  int kwt, kst, kbt, vwt, vst, vbt;         // token strides
+  template <short BK, short BD, short LD, short TGP>
+  struct KLoader : Q8Loader<BK, BD, true, LD, TGP> {
+    METAL_FUNC KLoader(thread const KVQ8& s, int h, int start, threadgroup half* dst, uint sg, uint ln) thread
+        : Q8Loader<BK, BD, true, LD, TGP>(
+              s.kw + size_t(h) * s.kwh + size_t(start) * s.kwt, s.ks + size_t(h) * s.ksh + size_t(start) * s.kst,
+              s.kb + size_t(h) * s.kbh + size_t(start) * s.kbt, s.kwt, s.kst, s.kbt, dst, sg, ln) {}
+  };
+  template <short BK, short BD, short LD, short TGP>
+  struct VLoader : Q8Loader<BK, BD, false, LD, TGP> {
+    METAL_FUNC VLoader(thread const KVQ8& s, int h, int start, threadgroup half* dst, uint sg, uint ln) thread
+        : Q8Loader<BK, BD, false, LD, TGP>(
+              s.vw + size_t(h) * s.vwh + size_t(start) * s.vwt, s.vs + size_t(h) * s.vsh + size_t(start) * s.vst,
+              s.vb + size_t(h) * s.vbh + size_t(start) * s.vbt, s.vwt, s.vst, s.vbt, dst, sg, ln) {}
+  };
+};
 """
 
 # constants prepended (_consts): D, HKV, BQ, BK, WM, WN, SCALE2 (scale * log2 e)
@@ -290,8 +404,26 @@ _P1 = r"""
     constexpr int KVS = SPLIT ? (BK + 8) * D + BK * (D + 8) + 2 * WM * WN * (BQ / (8 * WM)) * BK * 8
                               : ((BK + 8) * D > BK * (D + 8) ? (BK + 8) * D : BK * (D + 8));
     threadgroup half KV_smem[KVS];
-    vatt_p1<half, BQ, BK, D, WM, WN, SPLIT>(q, k, v, po, pml, meta[0], meta[1], meta[2], meta[3], meta[5], HKV,
-        size_t(k_strides[1]), int(k_strides[2]), size_t(v_strides[1]), int(v_strides[2]),
+    KVF16<half> kv;
+    kv.k = k; kv.v = v;
+    kv.ksh = size_t(k_strides[1]); kv.kst = int(k_strides[2]);
+    kv.vsh = size_t(v_strides[1]); kv.vst = int(v_strides[2]);
+    vatt_p1<half, BQ, BK, D, WM, WN, SPLIT>(q, kv, po, pml, meta[0], meta[1], meta[2], meta[3], meta[5], HKV,
+        SCALE2, KV_smem, thread_index_in_simdgroup, simdgroup_index_in_threadgroup,
+        threadgroup_position_in_grid);
+"""
+
+# the same over an 8-bit QuantizedKVCache's (packed, scales, biases) buffers
+_P1Q = _P1.split("    threadgroup half KV_smem[KVS];")[0] + r"""    threadgroup half KV_smem[KVS];
+    KVQ8 kv;
+    kv.kw = kw; kv.ks = ks; kv.kb = kb; kv.vw = vw; kv.vs = vs; kv.vb = vb;
+    kv.kwh = size_t(kw_strides[1]); kv.kwt = int(kw_strides[2]);
+    kv.ksh = size_t(ks_strides[1]); kv.kst = int(ks_strides[2]);
+    kv.kbh = size_t(kb_strides[1]); kv.kbt = int(kb_strides[2]);
+    kv.vwh = size_t(vw_strides[1]); kv.vwt = int(vw_strides[2]);
+    kv.vsh = size_t(vs_strides[1]); kv.vst = int(vs_strides[2]);
+    kv.vbh = size_t(vb_strides[1]); kv.vbt = int(vb_strides[2]);
+    vatt_p1<half, BQ, BK, D, WM, WN, SPLIT>(q, kv, po, pml, meta[0], meta[1], meta[2], meta[3], meta[5], HKV,
         SCALE2, KV_smem, thread_index_in_simdgroup, simdgroup_index_in_threadgroup,
         threadgroup_position_in_grid);
 """
@@ -360,27 +492,37 @@ def _consts(D, hkv, scale, bq, bk, wm, wn):
             f"    constexpr float SCALE2 = {scale * math.log2(math.e)!r}f;\n")
 
 
-def _kernels(D, hkv, scale, bq, bk, wm, wn):
-    key = (D, hkv, float(scale), bq, bk, wm, wn)
+def _kernels(D, hkv, scale, bq, bk, wm, wn, q8=False):
+    key = (D, hkv, float(scale), bq, bk, wm, wn, q8)
     k = _KERNELS.get(key)
     if k is None:
         with _LOCK:
             k = _KERNELS.get(key)
             if k is None:
-                if not _loader_ok(bk, D, 32 * wm * wn):
+                tgp = 32 * wm * wn
+                if not (_q8_loader_ok(bk, D, tgp) if q8 else _loader_ok(bk, D, tgp)):
                     raise ValueError(f"vatt: tile {bq}x{bk} does not fit the loaders")
                 c = _consts(D, hkv, scale, bq, bk, wm, wn)
                 tag = (f"q{bq}k{bk}w{wm}x{wn}{'s' if SPLIT else ''}_d{D}_h{hkv}_s"
                        + float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p'))
                 p1 = mx.fast.metal_kernel(
-                    name=f"vatt_p1_{tag}", input_names=["q", "k", "v", "meta"],
-                    output_names=["po", "pml"], source=c + _P1, header=_header(),
+                    name=f"vatt{'q8' if q8 else ''}_p1_{tag}",
+                    input_names=(["q", "kw", "ks", "kb", "vw", "vs", "vb", "meta"] if q8
+                                 else ["q", "k", "v", "meta"]),
+                    output_names=["po", "pml"], source=c + (_P1Q if q8 else _P1), header=_header(),
                     ensure_row_contiguous=False)
-                p2 = mx.fast.metal_kernel(
-                    name=f"vatt_p2_d{D}_h{hkv}", input_names=["po", "pml", "meta"],
-                    output_names=["out"], source=c + _P2)
+                p2 = _KERNELS.get(("p2", D, hkv))
+                if p2 is None:
+                    p2 = _KERNELS[("p2", D, hkv)] = mx.fast.metal_kernel(
+                        name=f"vatt_p2_d{D}_h{hkv}", input_names=["po", "pml", "meta"],
+                        output_names=["out"], source=c + _P2)
                 k = _KERNELS[key] = (p1, p2)
     return k
+
+
+def _q8_loader_ok(bk, D, tgp):
+    units = bk * D // 16
+    return D % 64 == 0 and units % tgp == 0 and tgp % bk == 0 and tgp % (D // 16) == 0
 
 
 def pick_chunk(n: int, hkv: int, blocks: int, bk: int) -> int:
@@ -443,8 +585,11 @@ def attention(q, k, v, n, scale, chunk=None):
     check(q, k, v, n)
     if not use_kernel():
         return reference(q, k, v, n, scale).astype(mx.float16)
+    return _run(q, [k, v], k.shape[1], n, scale, chunk, False)
+
+
+def _run(q, kv_inputs, Hkv, n, scale, chunk, q8):
     _, Hq, T, D = q.shape
-    Hkv = k.shape[1]
     m0 = Hq // Hkv * T
     bq, bk, wm, wn, blocks = tile_for(m0)
     chunk = chunk or pick_chunk(n, Hkv, blocks, bk)
@@ -452,14 +597,63 @@ def attention(q, k, v, n, scale, chunk=None):
         raise ValueError(f"vatt: chunk {chunk} not a multiple of {bk}")
     items = -(-n // chunk)
     meta = _meta(m0, n, T, chunk, blocks)
-    p1, p2 = _kernels(D, Hkv, scale, bq, bk, wm, wn)
+    p1, p2 = _kernels(D, Hkv, scale, bq, bk, wm, wn, q8)
     tg = 32 * wm * wn
     qf = q.reshape(-1)               # (Hkv, M0, D) row-major (a copy when q is a transposed view)
-    po, pml = p1(inputs=[qf, k, v, meta], grid=(tg * items * blocks, Hkv, 1), threadgroup=(tg, 1, 1),
+    po, pml = p1(inputs=[qf, *kv_inputs, meta], grid=(tg * items * blocks, Hkv, 1), threadgroup=(tg, 1, 1),
                  output_shapes=[(items * Hkv * m0 * D,), (items * Hkv * m0 * 2,)],
                  output_dtypes=[F32, F32])
     return p2(inputs=[po, pml, meta], grid=(D * m0, Hkv, 1), threadgroup=(D, 1, 1),
               output_shapes=[(1, Hq, T, D)], output_dtypes=[mx.float16])[0]
+
+
+# ---- 8-bit quantized KV (QWEN_VATT_Q8): a QuantizedKVCache's own buffers ----
+
+Q8_BITS = (8,)
+Q8_GROUP = 64
+
+
+def check_q8(q, kq, vq, n, group_size, bits):
+    """kq / vq = (packed uint32 (1, Hkv, cap, D * bits / 32), scales, biases
+    fp16 (1, Hkv, cap, D / group_size)) as a QuantizedKVCache holds them."""
+    if bits not in Q8_BITS or group_size != Q8_GROUP:
+        raise ValueError(f"vatt: {bits}-bit KV in groups of {group_size} (8 / 64 only)")
+    if len(kq) != 3 or len(vq) != 3:
+        raise ValueError("vatt: quantized K / V must be (packed, scales, biases)")
+    if q.ndim != 4 or q.shape[0] != 1 or q.dtype != mx.float16:
+        raise ValueError(f"vatt: q {tuple(q.shape)} {q.dtype}")
+    _, Hq, T, D = q.shape
+    w = kq[0]
+    Hkv, cap = w.shape[1], w.shape[2]
+    want = ((1, Hkv, cap, D * bits // 32), (1, Hkv, cap, D // group_size), (1, Hkv, cap, D // group_size))
+    for x in (kq, vq):
+        if tuple(tuple(a.shape) for a in x) != want:
+            raise ValueError(f"vatt: quantized KV shapes {[tuple(a.shape) for a in x]}, want {want}")
+        if x[0].dtype != mx.uint32 or x[1].dtype != mx.float16 or x[2].dtype != mx.float16:
+            raise ValueError(f"vatt: quantized KV dtypes {[a.dtype for a in x]} (uint32 + fp16 scales only)")
+    if Hq % Hkv or D not in D_OK or not 1 <= T <= MAX_T or not T <= n <= cap:
+        raise ValueError(f"vatt: {Hq} q / {Hkv} kv heads, head_dim {D}, T {T}, n {n} of {cap} slots")
+
+
+def dequantized(x, n, group_size=Q8_GROUP, bits=8):
+    """(packed, scales, biases) -> fp16 (1, Hkv, n, D) (mx.dequantize of [0, n))."""
+    return mx.dequantize(*(a[..., :n, :] for a in x), group_size=group_size, bits=bits)
+
+
+def reference_q8(q, kq, vq, n, scale, group_size=Q8_GROUP, bits=8):
+    """fp32 reference over the dequantized KV -> (1, Hq, T, D) fp32."""
+    return reference(q, dequantized(kq, n, group_size, bits), dequantized(vq, n, group_size, bits), n, scale)
+
+
+def attention_q8(q, kq, vq, n, scale, group_size=Q8_GROUP, bits=8, chunk=None):
+    """`attention` over an 8-bit QuantizedKVCache: kq / vq the cache's
+    (packed, scales, biases) buffers (1, Hkv, cap, ...), keys [0, n) valid,
+    read in place and dequantized in registers into the kernel's fp16
+    threadgroup tiles (the rest of the kernel is the fp16 one)."""
+    check_q8(q, kq, vq, n, group_size, bits)
+    if not use_kernel():
+        return reference_q8(q, kq, vq, n, scale, group_size, bits).astype(mx.float16)
+    return _run(q, [*kq, *vq], kq[0].shape[1], n, scale, chunk, True)
 
 
 def partial_bytes(n: int, hq: int, T: int, D: int = 256) -> int:
