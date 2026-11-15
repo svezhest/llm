@@ -1,0 +1,108 @@
+== tests
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+98 passed, 2 warnings in 1.64s
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+== fp16 identity
+700 8 24 4 bit-equal
+5000 1 24 4 bit-equal
+33000 8 24 4 bit-equal
+3000 16 16 4 bit-equal
+61440 8 24 4 bit-equal
+81920 1 24 4 bit-equal
+ALL EQUAL
+== micro N=8192 T=8
+N=8192 T=8 H=24/4 KV per layer 32 MiB; ref |max| 3.22
+q8single      0.456 ms/layer    39.1 GB/s  vs fp32 ref: max|d| 5.34e-03 rel rms 1.35e-03  transient 0 MiB
+q8rows        3.625 ms/layer     4.9 GB/s  vs fp32 ref: max|d| 6.04e-03 rel rms 1.71e-03  transient 14 MiB
+vq8           0.488 ms/layer    36.5 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 22 MiB
+vq8_1         0.231 ms/layer    77.2 GB/s  vs fp32 ref: max|d| 4.75e-04 rel rms 2.07e-04  transient -21 MiB
+single        0.214 ms/layer   156.7 GB/s  vs fp32 ref: max|d| 1.18e-03 rel rms 2.65e-04  transient 3 MiB
+vatt1         0.209 ms/layer   160.2 GB/s  vs fp32 ref: max|d| 4.87e-04 rel rms 2.07e-04  transient -3 MiB
+vec           1.173 ms/layer    28.6 GB/s  vs fp32 ref: max|d| 1.14e-03 rel rms 2.75e-04  transient 26 MiB
+vatt          0.453 ms/layer    74.0 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 18 MiB
+== micro N=32768 T=8
+N=32768 T=8 H=24/4 KV per layer 128 MiB; ref |max| 3.38
+q8single      1.703 ms/layer    41.9 GB/s  vs fp32 ref: max|d| 5.65e-03 rel rms 2.57e-03  transient 0 MiB
+q8rows       15.147 ms/layer     4.7 GB/s  vs fp32 ref: max|d| 9.44e-03 rel rms 2.29e-03  transient 57 MiB
+vq8           1.500 ms/layer    47.5 GB/s  vs fp32 ref: max|d| 9.49e-04 rel rms 2.09e-04  transient -4 MiB
+vq8_1         0.624 ms/layer   114.2 GB/s  vs fp32 ref: max|d| 7.00e-04 rel rms 2.07e-04  transient -18 MiB
+single        0.772 ms/layer   173.8 GB/s  vs fp32 ref: max|d| 1.11e-03 rel rms 2.90e-04  transient 12 MiB
+vatt1         0.567 ms/layer   236.7 GB/s  vs fp32 ref: max|d| 4.99e-04 rel rms 2.00e-04  transient 3 MiB
+vec           4.123 ms/layer    32.6 GB/s  vs fp32 ref: max|d| 1.42e-03 rel rms 2.73e-04  transient 92 MiB
+vatt          1.367 ms/layer    98.2 GB/s  vs fp32 ref: max|d| 9.56e-04 rel rms 2.06e-04  transient 6 MiB
+== micro N=61440 T=8
+N=61440 T=8 H=24/4 KV per layer 240 MiB; ref |max| 3.31
+q8single      3.352 ms/layer    39.9 GB/s  vs fp32 ref: max|d| 5.34e-03 rel rms 2.74e-03  transient 0 MiB
+q8rows       29.617 ms/layer     4.5 GB/s  vs fp32 ref: max|d| 7.81e-03 rel rms 2.84e-03  transient 97 MiB
+vq8           2.707 ms/layer    49.4 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient -3 MiB
+vq8_1         1.047 ms/layer   127.7 GB/s  vs fp32 ref: max|d| 8.48e-04 rel rms 1.99e-04  transient -12 MiB
+single        1.810 ms/layer   139.1 GB/s  vs fp32 ref: max|d| 1.00e-03 rel rms 2.49e-04  transient 24 MiB
+vatt1         0.959 ms/layer   262.4 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.03e-04  transient 5 MiB
+vec           7.628 ms/layer    33.0 GB/s  vs fp32 ref: max|d| 1.00e-03 rel rms 2.59e-04  transient 183 MiB
+vatt          2.477 ms/layer   101.6 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient -26 MiB
+== micro N=81920 T=8
+N=81920 T=8 H=24/4 KV per layer 320 MiB; ref |max| 3.10
+q8single      4.513 ms/layer    39.5 GB/s  vs fp32 ref: max|d| 5.34e-03 rel rms 2.89e-03  transient 0 MiB
+q8rows       40.346 ms/layer     4.4 GB/s  vs fp32 ref: max|d| 7.68e-03 rel rms 2.86e-03  transient 121 MiB
+vq8           3.675 ms/layer    48.5 GB/s  vs fp32 ref: max|d| 9.67e-04 rel rms 2.08e-04  transient 1 MiB
+vq8_1         1.322 ms/layer   134.9 GB/s  vs fp32 ref: max|d| 9.67e-04 rel rms 2.08e-04  transient -23 MiB
+single        2.447 ms/layer   137.1 GB/s  vs fp32 ref: max|d| 6.97e-04 rel rms 2.61e-04  transient 41 MiB
+vatt1         1.180 ms/layer   284.4 GB/s  vs fp32 ref: max|d| 9.58e-04 rel rms 2.12e-04  transient 2 MiB
+vec          10.204 ms/layer    32.9 GB/s  vs fp32 ref: max|d| 1.23e-03 rel rms 2.54e-04  transient 366 MiB
+vatt          3.438 ms/layer    97.6 GB/s  vs fp32 ref: max|d| 9.58e-04 rel rms 2.07e-04  transient -68 MiB
+== micro N=131072 T=8
+N=131072 T=8 H=24/4 KV per layer 512 MiB; ref |max| 3.05
+q8single      6.450 ms/layer    44.2 GB/s  vs fp32 ref: max|d| 6.96e-03 rel rms 2.70e-03  transient 1 MiB
+q8rows       63.478 ms/layer     4.5 GB/s  vs fp32 ref: max|d| 8.25e-03 rel rms 2.76e-03  transient 178 MiB
+vq8           5.859 ms/layer    48.7 GB/s  vs fp32 ref: max|d| 9.62e-04 rel rms 2.06e-04  transient 11 MiB
+vq8_1         2.330 ms/layer   122.4 GB/s  vs fp32 ref: max|d| 4.79e-04 rel rms 2.08e-04  transient -0 MiB
+single        6.562 ms/layer    81.8 GB/s  vs fp32 ref: max|d| 5.89e-04 rel rms 2.39e-04  transient 49 MiB
+vatt1         1.842 ms/layer   291.5 GB/s  vs fp32 ref: max|d| 4.88e-04 rel rms 2.11e-04  transient -6 MiB
+vec          16.350 ms/layer    32.8 GB/s  vs fp32 ref: max|d| 1.06e-03 rel rms 2.43e-04  transient 354 MiB
+vatt          5.204 ms/layer   103.2 GB/s  vs fp32 ref: max|d| 9.30e-04 rel rms 2.04e-04  transient -74 MiB
+== sweep verify tiles (T=8)
+-- N=61440 16x16
+vq8           2.638 ms/layer    50.7 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient 0 MiB
+vatt          2.427 ms/layer   103.7 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient 10 MiB
+-- N=61440 16x32
+vq8           3.097 ms/layer    43.2 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient 0 MiB
+vatt          2.503 ms/layer   100.6 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient 10 MiB
+-- N=61440 24x24
+vq8           2.717 ms/layer    49.2 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient 0 MiB
+vatt          2.565 ms/layer    98.1 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient 33 MiB
+-- N=61440 32x32
+vq8           4.229 ms/layer    31.6 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient 0 MiB
+vatt          4.018 ms/layer    62.6 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient 27 MiB
+-- N=61440 48x24
+vq8           2.831 ms/layer    47.2 GB/s  vs fp32 ref: max|d| 9.65e-04 rel rms 2.07e-04  transient 44 MiB
+vatt          2.787 ms/layer    90.3 GB/s  vs fp32 ref: max|d| 9.05e-04 rel rms 2.05e-04  transient 70 MiB
+-- N=8192 16x16
+vq8           0.494 ms/layer    36.1 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 0 MiB
+vatt          0.449 ms/layer    74.8 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 1 MiB
+-- N=8192 16x32
+vq8           0.526 ms/layer    33.9 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 0 MiB
+vatt          0.468 ms/layer    71.6 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 6 MiB
+-- N=8192 24x24
+vq8           0.505 ms/layer    35.3 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 6 MiB
+vatt          0.487 ms/layer    68.9 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 6 MiB
+-- N=8192 32x32
+vq8           0.761 ms/layer    23.4 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 0 MiB
+vatt          0.698 ms/layer    48.1 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 24 MiB
+-- N=8192 48x24
+vq8           0.562 ms/layer    31.7 GB/s  vs fp32 ref: max|d| 9.50e-04 rel rms 2.06e-04  transient 0 MiB
+vatt          0.533 ms/layer    63.0 GB/s  vs fp32 ref: max|d| 9.76e-04 rel rms 2.07e-04  transient 6 MiB
+== sweep decode tiles (T=1)
+-- N=81920 8x16
+vq8_1         1.436 ms/layer   124.2 GB/s  vs fp32 ref: max|d| 4.88e-04 rel rms 2.07e-04  transient 8 MiB
+vatt1         1.128 ms/layer   297.4 GB/s  vs fp32 ref: max|d| 4.79e-04 rel rms 2.08e-04  transient 2 MiB
+-- N=81920 8x32
+vq8_1         2.348 ms/layer    75.9 GB/s  vs fp32 ref: max|d| 4.88e-04 rel rms 2.07e-04  transient -5 MiB
+vatt1         1.525 ms/layer   220.0 GB/s  vs fp32 ref: max|d| 4.79e-04 rel rms 2.08e-04  transient 0 MiB
+-- N=8192 8x16
+vq8_1         0.267 ms/layer    66.7 GB/s  vs fp32 ref: max|d| 9.62e-04 rel rms 2.09e-04  transient 1 MiB
+vatt1         0.231 ms/layer   145.1 GB/s  vs fp32 ref: max|d| 9.62e-04 rel rms 2.08e-04  transient 0 MiB
+-- N=8192 8x32
+vq8_1         0.368 ms/layer    48.5 GB/s  vs fp32 ref: max|d| 9.62e-04 rel rms 2.09e-04  transient 2 MiB
+vatt1         0.267 ms/layer   125.9 GB/s  vs fp32 ref: max|d| 9.62e-04 rel rms 2.08e-04  transient 1 MiB

@@ -63,6 +63,7 @@ TARGET_TG = int(os.environ.get("VATT_TARGET_TG") or "256")   # pass-1 threadgrou
 TILE = os.environ.get("VATT_TILE", "")
 SPLIT = os.environ.get("VATT_SPLIT", "0") == "1"   # K / V / exchange in separate smem regions
 BK_MUL = int(os.environ.get("VATT_BK_MUL") or "1")           # > 1: BK = BK_MUL * BQ
+Q8_KMAP = os.environ.get("VATT_Q8_KMAP", "c")   # q8 K loader: "c" = threads over a key's units (coalesced reads), "k" = over keys
 
 _IMPL = r"""
 // Adapted from mlx 0.32.3 kernels/steel/attn/kernels/steel_attention.h
@@ -110,10 +111,8 @@ METAL_FUNC void vatt_p1(
 
   // K transposed (Ks[d * LDK_tgp + key]), V as it is (Vs[key * LDV_tgp + d]), both fp16 in
   // threadgroup memory whatever the source (KVF16: copied; KVQ8: dequantized on the way)
-  typename KVSRC::template KLoader<BK, BD, LDK_tgp, WM * WN * 32> loader_k(kv, h, start, Ks, simd_group_id,
-                                                                          simd_lane_id);
-  typename KVSRC::template VLoader<BK, BV, LDV_tgp, WM * WN * 32> loader_v(kv, h, start, Vs, simd_group_id,
-                                                                          simd_lane_id);
+  auto loader_k = kv.template kloader<BK, BD, LDK_tgp, WM * WN * 32>(h, start, Ks, simd_group_id, simd_lane_id);
+  auto loader_v = kv.template vloader<BK, BV, LDV_tgp, WM * WN * 32>(h, start, Vs, simd_group_id, simd_lane_id);
 
   constexpr short kFragSize = 8;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
@@ -290,32 +289,35 @@ struct KVF16 {
   size_t ksh, vsh;              // head strides
   int kst, vst;                 // token strides
   template <short BK, short BD, short LD, short TGP>
-  struct KLoader : mlx::steel::BlockLoaderT<T, BK, BD, 1, LD, 0, TGP> {
-    METAL_FUNC KLoader(thread const KVF16& s, int h, int start, threadgroup T* dst, uint sg, uint ln) thread
-        : mlx::steel::BlockLoaderT<T, BK, BD, 1, LD, 0, TGP>(
-              s.k + size_t(h) * s.ksh + size_t(start) * s.kst, s.kst, dst, sg, ln) {}
-  };
+  METAL_FUNC mlx::steel::BlockLoaderT<T, BK, BD, 1, LD, 0, TGP> kloader(
+      int h, int start, threadgroup T* dst, uint sg, uint ln) const thread {
+    return mlx::steel::BlockLoaderT<T, BK, BD, 1, LD, 0, TGP>(
+        k + size_t(h) * ksh + size_t(start) * kst, kst, dst, sg, ln);
+  }
   template <short BK, short BD, short LD, short TGP>
-  struct VLoader : mlx::steel::BlockLoaderT<T, BK, BD, LD, 1, 0, TGP> {
-    METAL_FUNC VLoader(thread const KVF16& s, int h, int start, threadgroup T* dst, uint sg, uint ln) thread
-        : mlx::steel::BlockLoaderT<T, BK, BD, LD, 1, 0, TGP>(
-              s.v + size_t(h) * s.vsh + size_t(start) * s.vst, s.vst, dst, sg, ln) {}
-  };
+  METAL_FUNC mlx::steel::BlockLoaderT<T, BK, BD, LD, 1, 0, TGP> vloader(
+      int h, int start, threadgroup T* dst, uint sg, uint ln) const thread {
+    return mlx::steel::BlockLoaderT<T, BK, BD, LD, 1, 0, TGP>(
+        v + size_t(h) * vsh + size_t(start) * vst, vst, dst, sg, ln);
+  }
 };
 
 // A block of BK keys of an 8-bit affine QuantizedKVCache (mx.quantize: 4 values a uint32,
 // lowest byte first; one fp16 scale and bias per 64 values) -> fp16 threadgroup memory,
 // dequantized in registers: w = scale * q + bias (one fma, rounded to fp16 once). A unit is
-// 16 values of one key (a uint4 of packed words, a quarter of a group). TRANS (K, stored
-// dst[d * LD + key]): consecutive threads take consecutive keys (the strided fp16 stores of
-// a simdgroup hit 2 banks a word, not 16); else (V, dst[key * LD + d]): consecutive threads
-// take consecutive units of one key (256 contiguous bytes read, half4 stores).
+// 16 values of one key (a uint4 of packed words, a quarter of a group); consecutive threads
+// take consecutive units of one key (16 threads read its 256 contiguous bytes). K is stored
+// transposed (TRANS: dst[d * LD + key], scalar stores), V as it is (half4 stores).
+// VATT_Q8_KMAP=k: K's threads over consecutive keys instead (fewer smem bank conflicts,
+// uncoalesced reads): measured slower (27B layout, 80K keys: decode 1.23 vs 0.89 ms a layer,
+// verify-8 3.63 vs 3.42; raw/vatt_q8/sweep2).
 template <short BK, short BD, bool TRANS, short LD, short TGP>
 struct Q8Loader {
   STEEL_CONST short CPK = BD / 16;                  // units per key
   STEEL_CONST short PASSES = BK * CPK / TGP;
+  STEEL_CONST bool KF = TRANS && VATT_Q8_KFAST;      // consecutive threads on consecutive keys
   static_assert(PASSES * TGP == BK * CPK, "a block of units must split evenly over the threads");
-  static_assert(TRANS ? TGP % BK == 0 : TGP % CPK == 0, "thread to unit mapping");
+  static_assert(KF ? TGP % BK == 0 : TGP % CPK == 0, "thread to unit mapping");
   const device uint32_t* w;
   const device half* s;
   const device half* b;
@@ -326,12 +328,12 @@ struct Q8Loader {
   METAL_FUNC Q8Loader(const device uint32_t* w_, const device half* s_, const device half* b_,
                       int wt_, int st_, int bt_, threadgroup half* dst_, uint sg, uint ln) thread
       : w(w_), s(s_), b(b_), wt(wt_), st(st_), bt(bt_), dst(dst_),
-        key0(TRANS ? short((sg * 32 + ln) % BK) : short((sg * 32 + ln) / CPK)),
-        c0(TRANS ? short((sg * 32 + ln) / BK) : short((sg * 32 + ln) % CPK)) {}
+        key0(KF ? short((sg * 32 + ln) % BK) : short((sg * 32 + ln) / CPK)),
+        c0(KF ? short((sg * 32 + ln) / BK) : short((sg * 32 + ln) % CPK)) {}
 
   METAL_FUNC void unit(short p, bool valid) const thread {
-    const short key = TRANS ? key0 : short(key0 + p * (TGP / CPK));
-    const short c = TRANS ? short(c0 + p * (TGP / BK)) : c0;
+    const short key = KF ? key0 : short(key0 + p * (TGP / CPK));
+    const short c = KF ? short(c0 + p * (TGP / BK)) : c0;
     half v[16];
     if (valid) {
       const uint4 q = *(const device uint4*)(w + key * wt + c * 4);
@@ -363,7 +365,7 @@ struct Q8Loader {
   }
   METAL_FUNC void load_safe(short2 dims) const thread {     // dims.y keys valid; zeros past them
     STEEL_PRAGMA_UNROLL
-    for (short p = 0; p < PASSES; p++) unit(p, (TRANS ? key0 : short(key0 + p * (TGP / CPK))) < dims.y);
+    for (short p = 0; p < PASSES; p++) unit(p, (KF ? key0 : short(key0 + p * (TGP / CPK))) < dims.y);
   }
   METAL_FUNC void next() thread {
     w += BK * wt;
@@ -382,19 +384,19 @@ struct KVQ8 {
   size_t kwh, ksh, kbh, vwh, vsh, vbh;      // head strides
   int kwt, kst, kbt, vwt, vst, vbt;         // token strides
   template <short BK, short BD, short LD, short TGP>
-  struct KLoader : Q8Loader<BK, BD, true, LD, TGP> {
-    METAL_FUNC KLoader(thread const KVQ8& s, int h, int start, threadgroup half* dst, uint sg, uint ln) thread
-        : Q8Loader<BK, BD, true, LD, TGP>(
-              s.kw + size_t(h) * s.kwh + size_t(start) * s.kwt, s.ks + size_t(h) * s.ksh + size_t(start) * s.kst,
-              s.kb + size_t(h) * s.kbh + size_t(start) * s.kbt, s.kwt, s.kst, s.kbt, dst, sg, ln) {}
-  };
+  METAL_FUNC Q8Loader<BK, BD, true, LD, TGP> kloader(
+      int h, int start, threadgroup half* dst, uint sg, uint ln) const thread {
+    return Q8Loader<BK, BD, true, LD, TGP>(
+        kw + size_t(h) * kwh + size_t(start) * kwt, ks + size_t(h) * ksh + size_t(start) * kst,
+        kb + size_t(h) * kbh + size_t(start) * kbt, kwt, kst, kbt, dst, sg, ln);
+  }
   template <short BK, short BD, short LD, short TGP>
-  struct VLoader : Q8Loader<BK, BD, false, LD, TGP> {
-    METAL_FUNC VLoader(thread const KVQ8& s, int h, int start, threadgroup half* dst, uint sg, uint ln) thread
-        : Q8Loader<BK, BD, false, LD, TGP>(
-              s.vw + size_t(h) * s.vwh + size_t(start) * s.vwt, s.vs + size_t(h) * s.vsh + size_t(start) * s.vst,
-              s.vb + size_t(h) * s.vbh + size_t(start) * s.vbt, s.vwt, s.vst, s.vbt, dst, sg, ln) {}
-  };
+  METAL_FUNC Q8Loader<BK, BD, false, LD, TGP> vloader(
+      int h, int start, threadgroup half* dst, uint sg, uint ln) const thread {
+    return Q8Loader<BK, BD, false, LD, TGP>(
+        vw + size_t(h) * vwh + size_t(start) * vwt, vs + size_t(h) * vsh + size_t(start) * vst,
+        vb + size_t(h) * vbh + size_t(start) * vbt, vwt, vst, vbt, dst, sg, ln);
+  }
 };
 """
 
@@ -454,7 +456,8 @@ _LOCK = threading.Lock()
 def _header() -> str:
     global _HEADER
     if _HEADER is None:
-        _HEADER = _cm.steel_headers() + _cm._OPS + _IMPL
+        _HEADER = (_cm.steel_headers() + _cm._OPS
+                   + f"#define VATT_Q8_KFAST {'false' if Q8_KMAP == 'c' else 'true'}\n" + _IMPL)
     return _HEADER
 
 
