@@ -149,8 +149,16 @@ def _lcp(a, b):
     return lo
 
 
+def _qlayer(c):
+    """A quantized KV layer: (packed, scales, biases) keys, or a
+    QuantizedKVCache whose buffers _Seg.take already handed to a segment
+    (keys None: a dying row's cache, still described by store)."""
+    k = getattr(c, "keys", None)
+    return isinstance(k, (tuple, list)) or (k is None and hasattr(c, "bits") and hasattr(c, "group_size"))
+
+
 def _quantized(cache):
-    return any(isinstance(getattr(c, "keys", None), (tuple, list)) for c in cache)
+    return any(_qlayer(c) for c in cache)
 
 
 def _state_arrays(ckpts):
@@ -285,8 +293,8 @@ def _layout(cache):
     for c in cache:
         if hasattr(c, "cache"):
             out.append(("arr", type(c), len(c.cache)))
-        elif isinstance(c.keys, (tuple, list)):
-            out.append(("q", type(c), c.group_size, c.bits, type(c.keys)))
+        elif _qlayer(c):
+            out.append(("q", type(c), c.group_size, c.bits, tuple if c.keys is None else type(c.keys)))
         else:
             out.append(("kv", type(c)))
     return out
