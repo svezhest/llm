@@ -312,6 +312,18 @@ DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
 # With QWEN_DRAFT_BITS=0 the weights stay as loaded (bf16: correct, but ~10x
 # slower per block on M1/M2; fp32 weights would be 2x the memory).
 DRAFT_FP32 = os.environ.get("QWEN_DRAFT_FP32", "")
+# QWEN_DRAFT_MRQMM (0 / 1): the fp32 drafter's quantized linears (QWEN_DRAFT_FP32
+# with QWEN_DRAFT_BITS 4 / 5 / 8) through mrqmm's wide variant for 1..16 rows:
+# each row prescaled by an exact power of two to max |x| in [2^10, 2^11), cast
+# to fp16, the kernel's fp32 sums written in fp32 times the inverse scale
+# (kernels._drafter_linear). Instead of quantized_matmul in fp32
+# (dequantization-bound at 8 rows). Only the drafter: the target verifies, so
+# acceptance is all it can move. Read at call time (cfg.DRAFT_MRQMM: tools flip it).
+DRAFT_MRQMM = os.environ.get("QWEN_DRAFT_MRQMM", "0") == "1"
+# QWEN_DRAFT_COMPILE (0 / 1): the DFlash2 drafter's grouped dynamic causal
+# convolution (2 per layer and call, ~8 elementwise ops each) as one compiled
+# function. Read at call time (cfg.DRAFT_COMPILE).
+DRAFT_COMPILE = os.environ.get("QWEN_DRAFT_COMPILE", "0") == "1"
 # QWEN_DRAFT_TAIL: with the prompt cache, every checkpoint a DFlash row
 # stores (the entry's end: QWEN_DRAFT_TAIL_END) carries the drafter's context there:
 # the target's hidden states (the drafter's layers) of the last N positions.

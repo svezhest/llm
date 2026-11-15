@@ -29,12 +29,53 @@ from .sizing import _batch_budget, _batch_cap, _fixed_slab, _prefill_reserve
 from .stream import _BPEDetokenizer, _Control, _done, _eos_ids, _GenState, _Reject, _StopFilter
 from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks, JSON_MAX_WS
 from .rows import _install_rows_attention
-from .kernels import (_draft_wide, _install_fast_paths, _install_gdn_fuse, _invariant_check,
-                      _log_invariant, _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
+from .kernels import (_draft_wide, _install_drafter_compile, _install_drafter_mrqmm,
+                      _install_fast_paths, _install_gdn_fuse, _invariant_check, _log_invariant,
+                      _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
 from .request import _Req
 from .scheduler import _Scheduler
+
+
+def _load_drafter(model, path, bits):
+    """A DFlash drafter as the worker runs it: loaded, checked against the
+    target, its linears quantized to `bits` (0 = as loaded), fp32 activations
+    for drafters that need them (QWEN_DRAFT_FP32). -> (draft, wide). Also
+    for tools that load a second drafter next to the engine's (D2 A/B)."""
+    from mlx_vlm.speculative.drafters import load_drafter, validate_drafter_compatibility
+    draft, kind = load_drafter(path)
+    if kind != "dflash":
+        raise RuntimeError(f"unsupported drafter kind {kind!r} (only dflash)")
+    validate_drafter_compatibility(model, draft, kind)
+    wide = _draft_wide(draft)
+    if FP16 and not wide:
+        draft.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
+    if bits:
+        import mlx.nn as nn
+        nn.quantize(draft, group_size=64, bits=bits,
+                    class_predicate=lambda _p, m: isinstance(m, nn.Linear)
+                    and m.weight.shape[1] % 64 == 0)
+    if wide:
+        _widen_drafter(draft, bool(bits))
+    mx.eval(draft.parameters())
+    if cfg.DRAFT_BLOCK:
+        draft.prefer_requested_block_size = True
+    return draft, wide
+
+
+def _setup_drafter_fast(draft, wide, keep_fp32=False):
+    """QWEN_DRAFT_MRQMM / QWEN_DRAFT_COMPILE at load (after the target's
+    mrqmm install: the 4-bit self-test): mrqmm_wide on the fp32 drafter's
+    linears, the compiled DFlash2 convolution. -> what the load log says."""
+    out = []
+    if _install_drafter_compile():
+        out.append(f"conv compiled: {'on' if cfg.DRAFT_COMPILE else 'off'} (QWEN_DRAFT_COMPILE)")
+    if wide:
+        import mrqmm
+        n = _install_drafter_mrqmm(draft, keep_fp32) if mrqmm.enabled() else 0
+        out.append(f"linears on mrqmm_wide: {n} modules")
+    return "; ".join(out) or "nothing"
 
 
 def _load_model(model_path, text_only=False):
@@ -132,24 +173,7 @@ class Engine:
             # which runs an fp16 cache anyway.
             log.warning("QWEN_DRAFT ignored: speculative decoding needs QWEN_KV_BITS=0")
         elif DRAFT:
-            from mlx_vlm.speculative.drafters import load_drafter, validate_drafter_compatibility
-            draft, kind = load_drafter(DRAFT)
-            if kind != "dflash":
-                raise RuntimeError(f"unsupported drafter kind {kind!r} (only dflash)")
-            validate_drafter_compatibility(self.model, draft, kind)
-            wide = _draft_wide(draft)
-            if FP16 and not wide:
-                draft.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
-            if DRAFT_BITS:
-                import mlx.nn as nn
-                nn.quantize(draft, group_size=64, bits=DRAFT_BITS,
-                            class_predicate=lambda _p, m: isinstance(m, nn.Linear)
-                            and m.weight.shape[1] % 64 == 0)
-            if wide:
-                _widen_drafter(draft, bool(DRAFT_BITS))
-            mx.eval(draft.parameters())
-            if cfg.DRAFT_BLOCK:
-                draft.prefer_requested_block_size = True
+            draft, wide = _load_drafter(self.model, DRAFT, DRAFT_BITS)
             self.draft, self.draft_wide = draft, wide
             log.info("dflash drafter loaded: %s (%s %s, %s, block %s, target layers %s)", DRAFT,
                      type(draft).__name__, f"{DRAFT_BITS}-bit" if DRAFT_BITS else
@@ -262,6 +286,8 @@ class Engine:
             # never with QWEN_BATCH_INVARIANT (it loads no drafter)
             how = _setup_verify_mrqmm(lm, self.draft)
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
+        if self.draft is not None and (cfg.DRAFT_MRQMM or cfg.DRAFT_COMPILE):
+            log.info("drafter fast paths: %s", _setup_drafter_fast(self.draft, self.draft_wide))
         if self.draft is not None:
             nq = _probe_verify_attention(lm)
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",

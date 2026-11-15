@@ -264,6 +264,136 @@ def _widen_drafter(draft, quantized):
     draft._embed_input_tokens = lambda ids: embed(ids).astype(mx.float32)
 
 
+# QWEN_DRAFT_MRQMM: a row's prescale puts max |x| in [2^PRESCALE, 2^(PRESCALE+1)):
+# far from fp16's max (a product with a dequantized weight stays finite even if
+# the MMA rounded it to fp16 for |w| < 32) and from its subnormals (elements
+# 2^-24 below the row's max still keep 11 bits).
+_PRESCALE = 10.0
+
+
+def _prescale_rows(x):
+    """(rows, 1, K) fp32 -> (fp16 x * 2^e per row, fp32 2^-e per row): e such
+    that the row's max |x| * 2^e is in [2^10, 2^11) — the power of two of the
+    max's exponent field, so scaling and un-scaling are exact."""
+    m = mx.max(mx.abs(x), axis=-1, keepdims=True)
+    p = mx.maximum(mx.view(mx.view(m, mx.uint32) & 0x7F800000, mx.float32), 2.0 ** -100)
+    return (x * (2.0 ** _PRESCALE / p)).astype(mx.float16), (p * 2.0 ** -_PRESCALE).reshape(-1)
+
+
+_prescale_c = mx.compile(_prescale_rows)
+
+
+def _drafter_linear(m, x):
+    """QWEN_DRAFT_MRQMM: x (..., K) fp32 (or fp16) with 1..16 rows through
+    mrqmm_wide on the module's fp16 copies of its scales / biases; else None."""
+    f = m.__dict__.get("_mr_wide")
+    K = x.shape[-1]
+    rows = x.size // K
+    mr = sys.modules.get("mrqmm")
+    if f is None or mr is None or not 1 <= rows <= mr.MAX_ROWS or x.dtype not in (mx.float32, mx.float16):
+        return None
+    w, sc, b = f
+    x = x.reshape(rows, 1, K)
+    if x.dtype == mx.float32:
+        xs, rs = _prescale_c(x)
+    else:
+        xs, rs = x, mx.ones((rows,), mx.float32)
+    return mr.mrqmm_wide(xs, w, sc, b, rs)
+
+
+def _drafter_call(self, x):
+    """__call__ of a drafter's quantized linear (_install_drafter_mrqmm)."""
+    y = _drafter_linear(self, x) if cfg.DRAFT_MRQMM else None
+    if y is None:
+        return type(self).__mro__[1].__call__(self, x)
+    y = y.reshape(*x.shape[:-1], y.shape[-1])
+    if "bias" in self:
+        y = y + self["bias"]
+    return y
+
+
+def _install_drafter_mrqmm(draft, keep_fp32=True):
+    """At load, after _widen_drafter: every quantized linear of the drafter
+    mrqmm has a kernel for (4 / 5 / 8 bits, g64, N % 8 == 0; a 4-bit width
+    once its self-test passed) whose scales and biases are exactly fp16
+    (checked) gets fp16 copies of them and a __call__ that takes mrqmm_wide
+    while cfg.DRAFT_MRQMM is on (read per call). keep_fp32: the fp32 scales
+    stay the module's parameters (the off path unchanged; +2 B per 64
+    weights); else they are replaced by the fp16 ones (quantized_matmul
+    promotes them back for the rows mrqmm does not take). -> modules covered."""
+    mr = sys.modules.get("mrqmm")
+    if mr is None:
+        return 0
+    import mlx.nn as nn
+    n = 0
+    for _, m in draft.named_modules():
+        if type(m) is not nn.QuantizedLinear or getattr(m, "mode", "affine") != "affine":
+            continue
+        sc, b = m["scales"], m.get("biases")
+        if b is None:
+            continue
+        sc16, b16 = sc.astype(mx.float16), b.astype(mx.float16)
+        if not (mx.array_equal(sc16.astype(sc.dtype), sc).item()
+                and mx.array_equal(b16.astype(b.dtype), b).item()):
+            log.info("drafter mrqmm: %s scales / biases not exact in fp16: left on quantized_matmul",
+                     tuple(m["weight"].shape))
+            continue
+        if not (mr._layout_ok(m["weight"], sc16, b16, m.bits, m.group_size)
+                and mr._tested(m.bits, m["weight"], sc16, b16, "drafter")):
+            continue
+        if not keep_fp32:
+            m["scales"], m["biases"] = sc16, b16
+        m.__dict__["_mr_wide"] = (m["weight"], sc16, b16)
+        m.__class__ = _DraftQuantizedLinear
+        n += 1
+    return n
+
+
+def _draft_linear_class():
+    import mlx.nn as nn
+
+    class _DraftQL(nn.QuantizedLinear):
+        __call__ = _drafter_call
+    _DraftQL.__name__ = _DraftQL.__qualname__ = "_DraftQuantizedLinear"
+    return _DraftQL
+
+
+_DraftQuantizedLinear = _draft_linear_class()
+
+
+_GROUPED_CONV = None                  # mlx-vlm dflash2 _grouped_dynamic_convolve
+_CONV_C = {}                          # group_size -> its compiled graph
+
+
+def _grouped_conv(hidden, dynamic, base, group_size):
+    """dflash2._grouped_dynamic_convolve, compiled per group size while
+    cfg.DRAFT_COMPILE is on (the library's graph: ~8 elementwise ops per
+    kernel tap, 20 calls per block on the 27B's drafter, fused into one)."""
+    if not cfg.DRAFT_COMPILE:
+        return _GROUPED_CONV(hidden, dynamic, base, group_size)
+    f = _CONV_C.get(group_size)
+    if f is None:
+        import functools
+        f = _CONV_C[group_size] = mx.compile(functools.partial(_GROUPED_CONV, group_size=group_size))
+    return f(hidden, dynamic, base)
+
+
+def _install_drafter_compile():
+    """Point mlx-vlm's dflash2 module at _grouped_conv (once; it reads the
+    knob per call). -> whether the module has the function."""
+    global _GROUPED_CONV
+    try:
+        from mlx_vlm.speculative.drafters.dflash2 import dflash2 as d2
+    except ImportError:
+        return False
+    if _GROUPED_CONV is None:
+        if not hasattr(d2, "_grouped_dynamic_convolve"):
+            return False
+        _GROUPED_CONV = d2._grouped_dynamic_convolve
+        d2._grouped_dynamic_convolve = _grouped_conv
+    return True
+
+
 def _verify_head(head):
     """QWEN_VERIFY_MRQMM 1 / head: the drafter's lm_head (bound to the
     target's at every draft.reset) with 3..16-row blocks on mrqmm."""

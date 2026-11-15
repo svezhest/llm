@@ -352,6 +352,23 @@ def _src(bits: int) -> str:
 
 _SRC = _src(BITS)             # the 8-bit kernel's source
 
+# The wide variant (mrqmm_wide, the fp32 DFlash2 drafter: QWEN_DRAFT_MRQMM):
+# the same kernel, fp32 output scaled per row on the way out (y = acc *
+# rs[m]); fp16 x is the caller's row-prescaled input (power-of-two scale, so
+# the un-scale is exact).
+_STORE = ("if (m < M0) y[size_t(m) * N + n] = T(acc[i][mb].x);",
+          "if (m + 1 < M0) y[size_t(m + 1) * N + n] = T(acc[i][mb].y);")
+_STORE_WIDE = ("if (m < M0) y[size_t(m) * N + n] = acc[i][mb].x * rs[m];",
+               "if (m + 1 < M0) y[size_t(m + 1) * N + n] = acc[i][mb].y * rs[m + 1];")
+
+
+def _src_wide(bits: int) -> str:
+    s = _src(bits)
+    for a, b in zip(_STORE, _STORE_WIDE):
+        assert s.count(a) == 1, a
+        s = s.replace(a, b)
+    return s
+
 
 # Batch-invariant mode (set_invariant): one K split for every row count, 1..16
 # rows and any N take the kernel. Off = the speed rules above, bit for bit.
@@ -359,7 +376,7 @@ INVARIANT = False
 INVARIANT_KS = 8
 INVARIANT_NA16 = 2            # NA at 9..16 rows (placement only: free to retune)
 
-_KERNELS = {}                 # (K, N, MB, NA, KS, bits) -> compiled metal_kernel
+_KERNELS = {}                 # (K, N, MB, NA, KS, bits[, "wide"]) -> compiled metal_kernel
 _CALLS = {}                   # (x.shape, x.dtype, w.shape, cfg) -> (kernel, kwargs, m0 array)
 _LOCK = threading.Lock()      # cache misses only (warm-up at load vs the scheduler thread)
 
@@ -391,28 +408,31 @@ def _config(K: int, N: int, MB: int, bits: int = BITS) -> tuple[int, int]:
     return na, ks
 
 
-def _get_kernel(K, N, MB, na, ks, bits=BITS):
+def _get_kernel(K, N, MB, na, ks, bits=BITS, wide=False):
     """One metal_kernel per shape/config with the constants baked into the
     source: template arguments cost ~6 us of host time per call (mlx 0.31),
-    a plain call ~1.5 us."""
-    key = (K, N, MB, na, ks, bits)
+    a plain call ~1.5 us. wide: the fp32-output variant (_src_wide)."""
+    key = (K, N, MB, na, ks, bits) + (("wide",) if wide else ())
     k = _KERNELS.get(key)
     if k is None:
         consts = (f"using T = half;\n    constexpr int K = {K}, N = {N}, MB = {MB}, NA = {na}, "
                   f"KS = {ks};\n")
         k = _KERNELS[key] = mx.fast.metal_kernel(
-            name=f"mrqmm{bits}_g64_k{K}_n{N}_mb{MB}_a{na}_s{ks}",
-            input_names=["x", "w", "scales", "biases", "m0"], output_names=["y"],
-            source=consts + _src(bits), header=_HEADER)
+            name=f"mrqmm{bits}{'w' if wide else ''}_g64_k{K}_n{N}_mb{MB}_a{na}_s{ks}",
+            input_names=["x", "w", "scales", "biases", "m0"] + (["rs"] if wide else []),
+            output_names=["y"],
+            source=consts + (_src_wide(bits) if wide else _src(bits)), header=_HEADER)
     return k
 
 
-def _call(K, N, rows, cfg=None, bits=BITS):
+def _call(K, N, rows, cfg=None, bits=BITS, wide=False):
     MB = 1 if rows <= 8 else 2
     na, ks = cfg or _config(K, N, MB, bits)
     tiles = -(-N // (8 * na))
     kw = dict(grid=(32 * ks * tiles, 1, 1), threadgroup=(32 * ks, 1, 1),
-              output_shapes=[(rows, N)], output_dtypes=[mx.float16])
+              output_shapes=[(rows, N)], output_dtypes=[mx.float32 if wide else mx.float16])
+    if wide:
+        return _get_kernel(K, N, MB, na, ks, bits, True), kw
     return _get_kernel(K, N, MB, na, ks, bits), kw
 
 
@@ -566,6 +586,33 @@ def mrqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, cfg=None
     return kernel(inputs=[x, w, scales, biases, m0], **kw)[0]
 
 
+_WIDE_CALLS = {}              # (x.shape, w.shape, cfg) -> (kernel, kwargs, m0 array)
+
+
+def mrqmm_wide(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, rs: mx.array,
+               cfg=None) -> mx.array:
+    """mrqmm with an fp32 output scaled per row: y[m] = (x[m] @ dequant(w)^T)
+    * rs[m]. x fp16 (..., K), 1..16 rows; rs fp32 with one value per row (the
+    inverse of the caller's power-of-two prescale: _drafter_linear). The sums
+    are the fp32 accumulators of mrqmm, never rounded to fp16."""
+    N = w.shape[0]
+    key = (x.shape, w.shape, cfg)
+    c = _WIDE_CALLS.get(key)
+    if c is None:
+        K = x.shape[-1]
+        rows = x.size // K
+        bits = _bits_of(K, w.shape[1])
+        if not (1 <= rows <= MAX_ROWS and x.dtype == mx.float16 and bits is not None
+                and K % GROUP == 0 and scales.shape[-1] * GROUP == K):
+            raise ValueError(f"mrqmm_wide: x {x.shape} {x.dtype} vs w {w.shape}")
+        with _LOCK:
+            kernel, kw = _call(K, N, rows, cfg, bits, wide=True)
+            kw["output_shapes"] = [(*x.shape[:-1], N)]
+            c = _WIDE_CALLS[key] = (kernel, kw, mx.array([rows], dtype=mx.int32))
+    kernel, kw, m0 = c
+    return kernel(inputs=[x, w, scales, biases, m0, rs], **kw)[0]
+
+
 def _use(x: mx.array, n: int | None = None) -> bool:
     """Decode-shaped fp16 input with MIN_ROWS..MAX_ROWS rows for a layer of n
     outputs (>= MIN_N; None: vetted by the caller); batch-invariant:
@@ -587,6 +634,7 @@ def set_invariant(on: bool):
     with _LOCK:
         INVARIANT = bool(on)
         _CALLS.clear()
+        _WIDE_CALLS.clear()
 
 
 class MRQuantizedLinear(nn.QuantizedLinear):

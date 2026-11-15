@@ -783,3 +783,47 @@ def test_worker_gdn_fuse4(B, monkeypatch):
         assert calls.count((784, 16)) == 3, calls
         assert mx.abs(y - ref).max().item() <= 3e-2 * max(1.0, mx.abs(ref).max().item())
         assert (y.argmax(-1) == ref.argmax(-1)).all().item()
+
+
+# The wide variant (mrqmm_wide, QWEN_DRAFT_MRQMM: the fp32 DFlash2 drafter).
+@pytest.mark.parametrize("bits", [4, 5, 8])
+@pytest.mark.parametrize("M", [1, 3, 8, 9, 16])
+def test_wide_equals_narrow_sums_scaled(bits, M):
+    """mrqmm_wide = the same fp32 sums as mrqmm, written in fp32 times rs[m]
+    (power-of-two rs: exact), on the drafter's shapes (K 5120 / 17408)."""
+    for K, N in ((5120, 1280), (17408, 5120)):
+        w, s, b = qweights(N, K, seed=K + M, bits=bits)
+        x = (mx.random.normal((M, 1, K), key=mx.random.key(M)) * 300).astype(mx.float16)
+        rs = mx.array([2.0 ** (-3 - i) for i in range(M)], dtype=mx.float32)
+        y = mrqmm.mrqmm_wide(x, w, s, b, rs)
+        assert y.dtype == mx.float32 and y.shape == (M, 1, N)
+        ref = ref32(x.reshape(M, K), w, s, b, bits) * rs[:, None]
+        err = mx.abs(y.reshape(M, N) - ref).max().item()
+        assert err <= 2e-4 * mx.abs(ref).max().item(), (K, N, err)
+        # the fp16 kernel's rows are these sums rounded to fp16 (unscaled: rs = 1)
+        y1 = mrqmm.mrqmm_wide(x, w, s, b, mx.ones((M,), mx.float32))
+        assert mx.array_equal(y1.astype(mx.float16), mrqmm.mrqmm(x, w, s, b)).item()
+
+
+def test_wide_drafter_linear_past_fp16_range(monkeypatch):
+    """kernels._drafter_linear: fp32 rows whose values and outputs overflow
+    fp16 (max |x| 1e5) come out within fp16 input rounding of
+    quantized_matmul in fp32 — the drafter's fp32 path (QWEN_DRAFT_FP32)."""
+    import sys
+    from qwen_worker import kernels
+    monkeypatch.setitem(sys.modules, "mrqmm", mrqmm)
+    K, N = 5120, 4096
+    wf = (mx.random.normal((N, K), key=mx.random.key(1)) * 0.05).astype(mx.bfloat16)
+    w, s, b = mx.quantize(wf, group_size=64, bits=4)
+    s32, b32 = s.astype(mx.float32), b.astype(mx.float32)
+    lin = nn.QuantizedLinear(K, N, bias=False, group_size=64, bits=4)
+    lin.weight, lin.scales, lin.biases = w, s32, b32
+    lin.__dict__["_mr_wide"] = (w, s.astype(mx.float16), b.astype(mx.float16))
+    for M, mag in ((8, 1e5), (5, 1e-3), (1, 3.0)):
+        x = mx.random.normal((1, M, K), key=mx.random.key(M)) * mag
+        x[0, 0, 0] = 0.0
+        y = kernels._drafter_linear(lin, x).reshape(1, M, N)
+        ref = mx.quantized_matmul(x, w, s32, b32, transpose=True, group_size=64, bits=4)
+        assert mx.isfinite(y).all().item()
+        err = (mx.abs(y - ref).max() / mx.abs(ref).max()).item()
+        assert err < 2e-3, (M, mag, err)
