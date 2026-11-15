@@ -295,10 +295,13 @@ def test_adaptive_k(dense, spec, monkeypatch):
     # measured round times (the 27B's: 2-token verify on exact qmv, 3.. on mrqmm)
     monkeypatch.setattr(worker.MTPDraft, "MS", {1: 66.0, 2: 88.0, 3: 92.0, 4: 97.0})
     mt.start(0)
-    mt.p = [0.46] * 4
+    mt.p, mt.seen = [0.46] * 4, [1] * 4
     assert mt.next_k() == 1                              # 1.46 / 66 > 1.77 / 92
     mt.p = [0.85] * 4
     assert mt.next_k() == 4                              # 3.70 / 97 > 1.85 / 66
+    mt.p, mt.seen = [0.9, 0.5, 0.5, 0.5], [9, 0, 0, 0]                  # only k = 1 drafted so far:
+    monkeypatch.setattr(worker.MTPDraft, "MS", {1: 66.0, 2: 88.0, 3: 92.0, 4: 97.0})
+    assert mt.next_k() == 4                              # deeper depths inherit 0.9, not the prior
     monkeypatch.setattr(worker.MTPDraft, "MS", {1: 66.0})
     assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * worker.MTP_COST) / (1 + worker.MTP_COST))
     ids = prompts([25], 35)[0]

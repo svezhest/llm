@@ -73,6 +73,7 @@ class MTPDraft:
         self.seed = None                # (token (1, 1), hidden (1, 1, H)) or None
         self.accept_lens, self.draft_lens = [], []
         self.t0 = None                  # the current round's start (draft)
+        self.seen = [0] * self.KMAX     # rounds that drafted depth i
         self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
 
     # QWEN_MTP_K=0: the draft count per round from the request's own acceptance
@@ -101,9 +102,13 @@ class MTPDraft:
         the neighbours would go stale)."""
         if cfg.MTP_K > 0:
             return cfg.MTP_K
-        best, bk, e, q = -1.0, 1, 1.0, 1.0
+        best, bk, e, q, pk = -1.0, 1, 1.0, 1.0, self.P0
         for k in range(1, self.KMAX + 1):
-            q *= self.p[k - 1]
+            # a depth this request has not drafted yet takes the shallower
+            # one's estimate (else a request that started at k = 1 stays
+            # there: its deeper averages never move from the prior)
+            pk = self.p[k - 1] if self.seen[k - 1] else pk
+            q *= pk
             e += q
             v = e / self._ms(k)
             if v > best:
@@ -203,6 +208,7 @@ class MTPDraft:
         self.draft_lens.append(int(drafted))
         for i in range(min(int(accepted) + 1, int(drafted), self.KMAX)):
             hit = 1.0 if i < accepted else 0.0
+            self.seen[i] += 1
             self.p[i] += self.ALPHA * (hit - self.p[i])
 
     # ---- the head ----
