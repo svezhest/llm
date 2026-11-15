@@ -367,6 +367,15 @@ LOOKUP_N = int(os.environ.get("QWEN_LOOKUP_N", "3"))
 LOOKUP_NMAX = int(os.environ.get("QWEN_LOOKUP_NMAX", "8"))
 LOOKUP_MIN = int(os.environ.get("QWEN_LOOKUP_MIN", "3"))
 LOOKUP_K = min(15, int(os.environ.get("QWEN_LOOKUP_K", "15")))
+# QWEN_LOOKUP_K0: adaptive drafts per lookup round: start at K0, 2k+1 after a
+# round whose drafts were all accepted (up to QWEN_LOOKUP_K), back to K0 after
+# one that was not (a match into text that does not copy costs a short block).
+# 0 = always QWEN_LOOKUP_K.
+LOOKUP_K0 = int(os.environ.get("QWEN_LOOKUP_K0", "0"))
+# QWEN_LOOKUP_BACKOFF: a lookup round that kept fewer than half its drafts
+# doubles the match length the next one needs (up to QWEN_LOOKUP_NMAX), a fully
+# accepted one resets it to QWEN_LOOKUP_MIN (_Gate). 0 = off.
+LOOKUP_BACKOFF = os.environ.get("QWEN_LOOKUP_BACKOFF", "0") == "1"
 LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by

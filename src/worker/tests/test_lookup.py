@@ -283,3 +283,47 @@ def test_lookup_without_drafter_quantized_kv_is_plain(dense, look, caplog):
     sched = scheduler(dense, max_batch=1, kv_bits=8, kv_start=0)
     run(sched, [request(p, 20, "a")])
     assert FakeLookup.made is None
+
+
+@pytest.mark.parametrize("k0", [2, 3])
+def test_lookup_adaptive_k(dense, look, caplog, k0):
+    """QWEN_LOOKUP_K0: rounds start at k0 drafts, grow after a full accept,
+    restart at k0 after a miss; answers unchanged."""
+    caplog.set_level(logging.INFO)
+    look.setattr(worker, "LOOKUP_K", 15)
+    look.setattr(worker, "LOOKUP_K0", k0)
+    FakeLookup.every = 1
+    sizes = []
+    real = FakeLookup.propose
+
+    def spy(self, k):
+        sizes.append(k)
+        return real(self, k)
+    look.setattr(FakeLookup, "propose", spy)
+    p = prompts([25], 38)[0]
+    plain = answer_of(dense, p, 60)
+    assert run(scheduler(dense, max_batch=1), [request(p, 60, "a")])["a"] == plain
+    assert sizes[0] == k0 and max(sizes) > k0
+
+
+def test_gate():
+    g = worker._Gate(3, 15, 3, 32, True)
+    assert g.size(100) == 3 and g.size(2) == 2
+    assert g.ok(3, [1, 2]) and not g.ok(2, [1, 2]) and not g.ok(9, [1])
+    g.after(3, 3)                                # full: 2k + 1
+    assert (g.k, g.need) == (7, 3)
+    g.after(7, 7)
+    g.after(15, 15)
+    assert g.k == 15
+    g.after(1, 15)                               # a miss: k0, need x2
+    assert (g.k, g.need) == (3, 6)
+    g.after(2, 3)                                # kept >= half: need stays
+    assert g.need == 6
+    for _ in range(5):
+        g.after(0, 3)
+    assert g.need == 32                          # capped at n_max
+    g.after(3, 3)
+    assert g.need == 3
+    g = worker._Gate(0, 15, 3, 8, False)         # fixed K, no backoff
+    g.after(0, 15)
+    assert (g.k, g.need) == (15, 3)

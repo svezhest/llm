@@ -5,9 +5,10 @@ import copy
 import mlx.core as mx
 
 from . import config as cfg
-from .config import (CLEAR_CACHE, DRAFT_TAIL, DRAFT_TAIL_END, log, LOOKUP, LOOKUP_BURST, LOOKUP_K,
-                     LOOKUP_MIN, LOOKUP_N, LOOKUP_NMAX, PROMPT_CACHE_REPLY, VERIFY_MR_HEAD)
-from .lookup import _DraftCtx, _Lookup, _lstat
+from .config import (CLEAR_CACHE, DRAFT_TAIL, DRAFT_TAIL_END, log, LOOKUP, LOOKUP_BACKOFF,
+                     LOOKUP_BURST, LOOKUP_K, LOOKUP_K0, LOOKUP_MIN, LOOKUP_N, LOOKUP_NMAX,
+                     PROMPT_CACHE_REPLY, VERIFY_MR_HEAD)
+from .lookup import _DraftCtx, _Gate, _Lookup, _lstat
 from .pcache import _own_states, _resume_tail, _tail_copy
 from .sizing import _slab
 from .kernels import _verify_head
@@ -268,6 +269,12 @@ class _SpecMixin:
 
         finish, n, acc, drafted = "length", 0, 0, 0
         lstat = [0, 0, 0, 0]                    # lookup rounds, drafts, accepted; plain steps
+        drounds = 0                             # the drafter's rounds
+
+        def stats():
+            req.spec_stats = dict(dflash_rounds=drounds, dflash_drafted=drafted, dflash_accepted=acc,
+                                  lookup_rounds=lstat[0], lookup_drafted=lstat[1],
+                                  lookup_accepted=lstat[2], plain_steps=lstat[3])
         fa = lm.model.fa_idx
 
         def step(x):
@@ -313,13 +320,15 @@ class _SpecMixin:
                     return tok, False
                 y = nxt
 
+        gate = _Gate(LOOKUP_K0, LOOKUP_K, LOOKUP_MIN, LOOKUP_NMAX, LOOKUP_BACKOFF)
+
         def propose(left):
             """The lookup's drafts after the last emitted token (<= `left`), or
-            None: no match of QWEN_LOOKUP_MIN tokens leaving >= 2 drafts."""
+            None: no match the gate takes (_Gate)."""
             if lk is None or left < 2:
                 return None
-            m, p = lk.propose(min(LOOKUP_K, left))
-            return p if m >= LOOKUP_MIN and len(p) >= 2 else None
+            m, p = lk.propose(gate.size(left))
+            return p if gate.ok(m, p) else None
 
         if max_tokens > 0 and not emit(first):
             finish = "stop"
@@ -364,6 +373,7 @@ class _SpecMixin:
                              "demoted to a batch row (another request is waiting)",
                              n, 100.0 * acc / max(1, drafted), acc, drafted, _lstat(lstat))
                     row.y, row.first, row.n = mx.array([b]), True, n
+                    stats()
                     self._join(row)
                     return
                 look = propose(max_tokens - n)
@@ -426,9 +436,10 @@ class _SpecMixin:
                     raise
                 if look is None:
                     _record_speculative_round(draft, hit, bs - 1)
-                    acc, drafted = acc + hit, drafted + bs - 1
+                    acc, drafted, drounds = acc + hit, drafted + bs - 1, drounds + 1
                 else:                           # (not the drafter's: its adaptive block, stats)
                     lstat[0], lstat[1], lstat[2] = lstat[0] + 1, lstat[1] + bs - 1, lstat[2] + hit
+                    gate.after(hit, bs - 1)
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
                 if hidden is not None:
                     if accepted < bs - 1:       # the positions the commit kept
@@ -465,6 +476,7 @@ class _SpecMixin:
             if drafted >= 64 and not acc:
                 log.warning("dflash: none of %d drafts accepted: the drafter's output is "
                             "unusable (NaN from an fp16 overflow? try QWEN_DRAFT_FP32=1)", drafted)
+        stats()
         self._finish(row, finish)
         self._spec_reply(row, recent)
 

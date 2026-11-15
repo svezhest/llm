@@ -76,6 +76,41 @@ class _Lookup:
 
 
 
+
+class _Gate:
+    """When and how long a lookup round is (per request). A match of `need`
+    tokens (QWEN_LOOKUP_MIN at first) leaving >= 2 drafts proposes `k` drafts.
+    QWEN_LOOKUP_K0 > 0: k starts at K0 and becomes 2k + 1 after a round whose
+    drafts were all accepted (up to K), K0 again after one that was not.
+    QWEN_LOOKUP_BACKOFF: a round that kept fewer than half its drafts doubles
+    `need` (up to n_max, the longest match the index scores), a fully accepted
+    one resets it — coincidental matches (boilerplate, repeated identifiers)
+    then stop costing rounds while a real copy, whose match grows a token per
+    token, comes back."""
+
+    __slots__ = ("k", "need", "k0", "kmax", "min", "nmax", "backoff")
+
+    def __init__(self, k0, kmax, mn, nmax, backoff):
+        self.k0, self.kmax, self.min, self.nmax, self.backoff = k0, kmax, mn, nmax, backoff
+        self.k, self.need = min(k0 or kmax, kmax), mn
+
+    def size(self, left):
+        return min(self.k, left)
+
+    def ok(self, m, p):
+        return m >= self.need and len(p) >= 2
+
+    def after(self, hit, drafted):
+        full = hit == drafted
+        if self.k0:
+            self.k = min(self.kmax, 2 * self.k + 1) if full else min(self.k0, self.kmax)
+        if self.backoff:
+            if full:
+                self.need = self.min
+            elif 2 * hit < drafted:
+                self.need = min(2 * self.need, self.nmax)
+
+
 class _DraftCtx:
     """The drafter's context for its next block after rounds it did not
     draft (lookup rounds, the thinking budget's plain steps): every position
