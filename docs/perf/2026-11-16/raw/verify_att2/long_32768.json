@@ -1,0 +1,573 @@
+{
+ "args": {
+  "tokens": 32768,
+  "turns": 1,
+  "max_tokens": 256,
+  "no_thinking": true,
+  "cold_ref": false,
+  "ab": 3,
+  "ab_variants": "plain,plain+d,vector,vatt,vatt+d",
+  "ab_mode": "",
+  "alt": "",
+  "gc": false,
+  "json": "docs/perf/2026-11-16/raw/verify_att2/long_32768.json"
+ },
+ "env": {
+  "QWEN_MODEL": "weights/qwen38-27b-mlx-4bit",
+  "QWEN_TEXT_ONLY": "1",
+  "QWEN_MRQMM4": "1",
+  "QWEN_KV_BITS": "0",
+  "QWEN_MAX_BATCH": "1",
+  "QWEN_WIRED_LIMIT_GB": "27",
+  "QWEN_CACHE_LIMIT_GB": "1",
+  "QWEN_SDPA_FUSED_MIN_KV": "8192",
+  "QWEN_PREFILL_BUDGET": "16777216",
+  "QWEN_VERIFY_ATT": "2",
+  "QWEN_DECODE_ATT": "8192",
+  "QWEN_PRESENCE_PENALTY": "0",
+  "QWEN_DRAFT": "weights/qwen38-27b-dflash2",
+  "QWEN_PROMPT_CACHE": "1",
+  "QWEN_PROMPT_CACHE_MOVE": "1",
+  "QWEN_PROMPT_CACHE_GB": "6",
+  "QWEN_PROMPT_CACHE_CKPTS": "4",
+  "QWEN_MAX_CONTEXT": "90112"
+ },
+ "runs": [
+  {
+   "id": "turn1",
+   "prompt": 32834,
+   "reused": 0,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 236.35,
+   "tps": 29.24,
+   "rounds": 56,
+   "accepted": 3.55,
+   "peak_gib": 20.71,
+   "prefill_peak_gib": 20.71,
+   "decode_peak_gib": 19.86,
+   "active_first_gib": 18.6,
+   "round_ms": 155.7,
+   "active_gib": 18.25,
+   "cache_gib": 2.86,
+   "entries": [
+    33089
+   ],
+   "log": [
+    "id=turn1 prompt cache MISS (common prefix 0, 0 entries)",
+    "dflash: 256 tokens, accept rate 51% (199/392 drafts)",
+    "id=turn1 prompt cache store: 32833 tokens, 4 checkpoints, 3052.5 MB (1 entries, 3052.5 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=900.7 MB (moved: the row's own buffers)",
+    "id=turn1 prompt cache reply kept: 33089 tokens (+255 generated), 4 checkpoints, 3069.3 MB (1 entries, 3069.3 MB total) absorbed=1 pieces=2"
+   ],
+   "verify_att_q": 5,
+   "drafter": true
+  },
+  {
+   "id": "plain1",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.82,
+   "tps": 15.11,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 18.69,
+   "prefill_peak_gib": 18.62,
+   "decode_peak_gib": 18.69,
+   "active_first_gib": 18.54,
+   "round_ms": null,
+   "active_gib": 18.16,
+   "cache_gib": 2.76,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=plain1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "id=plain1 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)",
+    "id=plain1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "plain",
+   "round": 0,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "plain+d1",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.84,
+   "tps": 16.63,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 18.59,
+   "prefill_peak_gib": 18.52,
+   "decode_peak_gib": 18.59,
+   "active_first_gib": 18.44,
+   "round_ms": null,
+   "active_gib": 18.16,
+   "cache_gib": 2.76,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=plain+d1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "id=plain+d1 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)",
+    "id=plain+d1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "plain+d",
+   "round": 0,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vector1",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.82,
+   "tps": 22.52,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.88,
+   "prefill_peak_gib": 18.53,
+   "decode_peak_gib": 19.88,
+   "active_first_gib": 18.46,
+   "round_ms": 202.2,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vector1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vector1 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vector1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vector",
+   "round": 0,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vatt1",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.76,
+   "tps": 30.92,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.79,
+   "prefill_peak_gib": 18.55,
+   "decode_peak_gib": 19.79,
+   "active_first_gib": 18.48,
+   "round_ms": 147.3,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vatt1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vatt1 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vatt1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vatt",
+   "round": 0,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vatt+d1",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.75,
+   "tps": 30.44,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.79,
+   "prefill_peak_gib": 18.55,
+   "decode_peak_gib": 19.79,
+   "active_first_gib": 18.48,
+   "round_ms": 149.6,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vatt+d1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vatt+d1 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vatt+d1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vatt+d",
+   "round": 0,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "plain+d2",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.81,
+   "tps": 16.53,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 18.61,
+   "prefill_peak_gib": 18.54,
+   "decode_peak_gib": 18.61,
+   "active_first_gib": 18.46,
+   "round_ms": null,
+   "active_gib": 18.16,
+   "cache_gib": 2.76,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=plain+d2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "id=plain+d2 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)",
+    "id=plain+d2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "plain+d",
+   "round": 1,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vector2",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.85,
+   "tps": 22.31,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.88,
+   "prefill_peak_gib": 18.53,
+   "decode_peak_gib": 19.88,
+   "active_first_gib": 18.46,
+   "round_ms": 204.1,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vector2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vector2 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vector2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vector",
+   "round": 1,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vatt2",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.76,
+   "tps": 30.13,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.92,
+   "prefill_peak_gib": 18.55,
+   "decode_peak_gib": 19.92,
+   "active_first_gib": 18.48,
+   "round_ms": 151.1,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vatt2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vatt2 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vatt2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vatt",
+   "round": 1,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vatt+d2",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.75,
+   "tps": 30.06,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.79,
+   "prefill_peak_gib": 18.55,
+   "decode_peak_gib": 19.79,
+   "active_first_gib": 18.48,
+   "round_ms": 151.5,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vatt+d2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vatt+d2 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vatt+d2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vatt+d",
+   "round": 1,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "plain2",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.82,
+   "tps": 14.87,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 18.73,
+   "prefill_peak_gib": 18.54,
+   "decode_peak_gib": 18.73,
+   "active_first_gib": 18.47,
+   "round_ms": null,
+   "active_gib": 18.16,
+   "cache_gib": 2.76,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=plain2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "id=plain2 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)",
+    "id=plain2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "plain",
+   "round": 1,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vector3",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.81,
+   "tps": 22.06,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.88,
+   "prefill_peak_gib": 18.53,
+   "decode_peak_gib": 19.88,
+   "active_first_gib": 18.46,
+   "round_ms": 206.5,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vector3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vector3 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vector3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vector",
+   "round": 2,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vatt3",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.75,
+   "tps": 29.7,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.86,
+   "prefill_peak_gib": 18.55,
+   "decode_peak_gib": 19.86,
+   "active_first_gib": 18.48,
+   "round_ms": 153.3,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vatt3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vatt3 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vatt3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vatt",
+   "round": 2,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "vatt+d3",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.75,
+   "tps": 29.55,
+   "rounds": 56,
+   "accepted": 3.57,
+   "peak_gib": 19.92,
+   "prefill_peak_gib": 18.55,
+   "decode_peak_gib": 19.92,
+   "active_first_gib": 18.48,
+   "round_ms": 154.1,
+   "active_gib": 18.18,
+   "cache_gib": 2.78,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=vatt+d3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "dflash: 256 tokens, accept rate 51% (200/389 drafts)",
+    "id=vatt+d3 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)",
+    "id=vatt+d3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "vatt+d",
+   "round": 2,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "plain3",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.82,
+   "tps": 14.76,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 18.67,
+   "prefill_peak_gib": 18.54,
+   "decode_peak_gib": 18.67,
+   "active_first_gib": 18.47,
+   "round_ms": null,
+   "active_gib": 18.16,
+   "cache_gib": 2.76,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=plain3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "id=plain3 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)",
+    "id=plain3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "plain",
+   "round": 2,
+   "same": true,
+   "same_as_plain": true
+  },
+  {
+   "id": "plain+d3",
+   "prompt": 32834,
+   "reused": 32788,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.89,
+   "tps": 15.98,
+   "rounds": 0,
+   "accepted": null,
+   "peak_gib": 18.71,
+   "prefill_peak_gib": 18.52,
+   "decode_peak_gib": 18.71,
+   "active_first_gib": 18.44,
+   "round_ms": null,
+   "active_gib": 18.16,
+   "cache_gib": 2.76,
+   "entries": [
+    33090
+   ],
+   "log": [
+    "id=plain+d3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)",
+    "id=plain+d3 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)",
+    "id=plain+d3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2"
+   ],
+   "variant": "plain+d",
+   "round": 2,
+   "same": true,
+   "same_as_plain": true
+  }
+ ]
+}

@@ -5,6 +5,7 @@ against the gaps of all steps.
 
   cd src/worker && PYTHONPATH=. .venv/bin/python ../../scripts/perf/dflash2/diverge_margin.py \\
     ../../docs/perf/2026-11-10/raw/ab27_kern5_thinking.json
+DM_MODEL=<weights dir> picks another checkpoint (default the 5-bit 27B).
 """
 import json
 import os
@@ -24,7 +25,7 @@ res = json.load(open(sys.argv[1]))
 thinking = bool(res.get("thinking"))
 bad = [(o["task"], o["variant"], o["diverge"]) for o in res["ident"] if not o["same"]]
 prompts = {o["task"]: o["prompt"] for o in res["speed"] if "prompt" in o}
-model, proc = load(os.path.join(ROOT, "weights/qwen38-27b-mlx-5bit"))
+model, proc = load(os.environ.get("DM_MODEL") or os.path.join(ROOT, "weights/qwen38-27b-mlx-5bit"))
 lm = model.language_model
 lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
 mx.eval(lm.parameters())
