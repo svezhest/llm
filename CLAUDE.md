@@ -288,8 +288,8 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   (≥ 2 of them); a projection alone at its width keeps its own weights and call.
   `_fused_in` is a tuple of `_InGroup`s (a uniform layer: one group of four, the old
   concatenation and split); a group takes mrqmm only with N ≥ `MIN_N` (b+a, N = 96,
-  stays on `quantized_matmul`). B = 1 bit-identical to the unfused calls (CPU-tested;
-  B = 2 on the GPU: `test_worker_gdn_fuse_mixed`).
+  stays on `quantized_matmul`). B ≤ 2 bit-identical to the unfused calls on the GPU
+  (`test_worker_gdn_fuse_mixed`, tiny mixed model through the worker; the CPU suite checks B = 1).
 - **Multi-row 8-bit matmul (`mrqmm.py`, `QWEN_MRQMM=1`, measured 2026-10-12)**:
   `mx.fast.metal_kernel`, simdgroup MMA computing `Cᵀ = W·xᵀ` for ≤16 rows,
   A fragments built in registers from one 16-byte weight load per 8 rows × 64 k
@@ -319,16 +319,19 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 - **oQ4e / mixed precision (2026-11-15, `docs/perf/2026-11-15/design/oq4e_speed.md`, GPU gate
   `scripts/perf/dflash2/gate_oq4e.sh` pending)**: measured that day (separate processes, ~2K prompt):
   plain 11.6–11.9 vs 17.2 tok/s (uniform 4-bit), DFlash 16.6–17.6 vs 37.7 (round 259–274 vs 153 ms,
-  3.57 vs 4.8 drafts accepted). By code + the 2026-11-10 per-width qmv table (1 row ~280 GB/s at
-  4/5/6/8 bits) the plain gap should be bytes (+5 %) + 4 GDN launches per layer (2–4 %): the rest is
-  probably GPU drift between the two processes (to be re-measured with `decode_probe.py`). DFlash
-  costs found: mlx-vlm's exact verify kernels take 4/5/8 bits only, so the 6-bit lm_head went
+  3.57 vs 4.8 drafts accepted). Measured drift-free (gate steps 1–3, `oq4e_bench.py`, both
+  checkpoints' tensors in one process): the linears of a 1-row forward 48.4 vs 45.2 ms (×1.07; 5 / 6-bit
+  qmv streams as fast as 4-bit, the 6-bit head 349 vs 352 GB/s), so ~25 % of the measured plain gap
+  is outside the kernels: drift between the processes or the weights' residency, to be split by
+  `decode_probe.py` (step 5, a model run). DFlash costs found: mlx-vlm's exact verify kernels take 4/5/8 bits only, so the 6-bit lm_head went
   through per-token qmv (~8 head reads per round) and the drafter's head (the target's) through
   `quantized_matmul`; fixed by `QWEN_MRQMM6` (6-bit weight side `_WSIDE[6]`: 3 aligned words per
   thread, 4 lane words, one shift + mask per step; self-tested at load). The GDN in-projections
   were never fused (mixed widths); now by width groups (30 layers qkv+z 4 + b+a 5, 15 qkv alone +
   z+b+a 5, 2 qkv+z + b+a 8, 1 qkv+z + b, a alone). Re-quantizing the head to 8 bits was rejected
-  (+0.3 GiB, a second rounding, +1.2 ms per plain token). `oq4e_bench.py`: per-width qmv, verify
+  (+0.3 GiB, a second rounding, +0.9 ms per plain token). Verify block T = 8, linears: 117.8 →
+  87.6 ms (head 22.8 → 4.0 via mrqmm6, drafter head 11.6 → 4.0, GDN in 17.5 → 15.0) vs 80.8 for
+  the uniform 4-bit; the 6-bit kernel 2.65e-4 rms rel (≤ qmm), 4×8 config kept. `oq4e_bench.py`: per-width qmv, verify
   block per kind, lm_head paths, kernel accuracy, both checkpoints in one process.
 - **Decode step profile (2026-10-12, B ≥ 2)**: the worker's step was GPU-bound but
   the step-ahead was broken. The token read `mx.concatenate([r.y…]).tolist()` queued

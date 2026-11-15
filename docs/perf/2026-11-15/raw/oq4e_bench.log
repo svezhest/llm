@@ -1,0 +1,92 @@
+loaded oq4e/none    gdn_in       (4, 5, 5, 5) x15: 4 copies, 196 MB
+loaded oq4e/none    gdn_out      (5,) x48: 8 copies, 165 MB
+loaded oq4e/none    mlp_gate_up  (4, 4) x64: 2 copies, 191 MB
+loaded oq4e/none    mlp_down     (5,) x18: 3 copies, 175 MB
+loaded oq4e/none    attn_q       (5,) x16: 4 copies, 165 MB
+loaded oq4e/none    attn_kv      (5, 5) x15: 15 copies, 103 MB
+loaded oq4e/none    attn_o       (5,) x16: 8 copies, 165 MB
+loaded oq4e/none    mlp_down     (4,) x46: 4 copies, 191 MB
+loaded oq4e/none    gdn_in       (4, 4, 5, 5) x30: 4 copies, 181 MB
+loaded oq4e/none    gdn_in       (4, 4, 8, 8) x2: 2 copies, 91 MB
+loaded oq4e/none    gdn_in       (4, 4, 5, 6) x1: 1 copies, 45 MB
+loaded oq4e/none    attn_kv      (6, 6) x1: 1 copies, 8 MB
+loaded oq4e/none    lm_head      (6,) x1: 1 copies, 985 MB
+loaded oq4e/groups  gdn_in       (4, 5, 5, 5) x15: 4 copies, 196 MB
+loaded oq4e/groups  gdn_in       (4, 4, 5, 5) x30: 4 copies, 181 MB
+loaded oq4e/groups  gdn_in       (4, 4, 8, 8) x2: 2 copies, 91 MB
+loaded oq4e/groups  gdn_in       (4, 4, 5, 6) x1: 1 copies, 45 MB
+loaded u4/none      gdn_in       (4, 4, 4, 4) x48: 4 copies, 181 MB
+loaded u4/none      gdn_out      (4,) x48: 10 copies, 169 MB
+loaded u4/none      mlp_gate_up  (4, 4) x64: 2 copies, 191 MB
+loaded u4/none      mlp_down     (4,) x64: 4 copies, 191 MB
+loaded u4/none      attn_q       (4,) x16: 5 copies, 169 MB
+loaded u4/none      attn_kv      (4, 4) x16: 16 copies, 90 MB
+loaded u4/none      attn_o       (4,) x16: 10 copies, 169 MB
+loaded u4/none      lm_head      (4,) x1: 1 copies, 682 MB
+loaded u4/groups    gdn_in       (4, 4, 4, 4) x48: 4 copies, 181 MB
+qmv1 oq4e/none    gdn_in       (4, 5, 5, 5)   x15     165.9 us/unit     310 GB/s  calls 4 N=[10240, 6144, 48, 48]
+qmv1 oq4e/none    gdn_out      (5,)           x48      82.4 us/unit     262 GB/s  calls 1 N=[5120]
+qmv1 oq4e/none    mlp_gate_up  (4, 4)         x64     302.7 us/unit     331 GB/s  calls 2 N=[17408, 17408]
+qmv1 oq4e/none    mlp_down     (5,)           x18     184.1 us/unit     333 GB/s  calls 1 N=[5120]
+qmv1 oq4e/none    attn_q       (5,)           x16     134.0 us/unit     323 GB/s  calls 1 N=[12288]
+qmv1 oq4e/none    attn_kv      (5, 5)         x15      40.7 us/unit     177 GB/s  calls 2 N=[1024, 1024]
+qmv1 oq4e/none    attn_o       (5,)           x16      77.7 us/unit     278 GB/s  calls 1 N=[5120]
+qmv1 oq4e/none    mlp_down     (4,)           x46     160.0 us/unit     313 GB/s  calls 1 N=[5120]
+qmv1 oq4e/none    gdn_in       (4, 4, 5, 5)   x30     157.1 us/unit     302 GB/s  calls 4 N=[10240, 6144, 48, 48]
+qmv1 oq4e/none    gdn_in       (4, 4, 8, 8)   x 2     160.1 us/unit     298 GB/s  calls 4 N=[10240, 6144, 48, 48]
+qmv1 oq4e/none    gdn_in       (4, 4, 5, 6)   x 1     133.5 us/unit     356 GB/s  calls 4 N=[10240, 6144, 48, 48]
+qmv1 oq4e/none    attn_kv      (6, 6)         x 1      40.1 us/unit     212 GB/s  calls 2 N=[1024, 1024]
+qmv1 oq4e/none    lm_head      (6,)           x 1    2961.5 us/unit     349 GB/s  calls 1 N=[248320]
+qmv1 oq4e/groups  gdn_in       (4, 5, 5, 5)   x15     163.3 us/unit     315 GB/s  calls 2 N=[10240, 6240]
+qmv1 oq4e/groups  gdn_in       (4, 4, 5, 5)   x30     150.6 us/unit     315 GB/s  calls 2 N=[16384, 96]
+qmv1 oq4e/groups  gdn_in       (4, 4, 8, 8)   x 2     150.7 us/unit     317 GB/s  calls 2 N=[16384, 96]
+qmv1 oq4e/groups  gdn_in       (4, 4, 5, 6)   x 1     120.0 us/unit     396 GB/s  calls 3 N=[16384, 48, 48]
+qmv1 u4/none      gdn_in       (4, 4, 4, 4)   x48     169.1 us/unit     281 GB/s  calls 4 N=[10240, 6144, 48, 48]
+qmv1 u4/none      gdn_out      (4,)           x48      66.4 us/unit     267 GB/s  calls 1 N=[5120]
+qmv1 u4/none      mlp_gate_up  (4, 4)         x64     301.3 us/unit     333 GB/s  calls 2 N=[17408, 17408]
+qmv1 u4/none      mlp_down     (4,)           x64     158.1 us/unit     317 GB/s  calls 1 N=[5120]
+qmv1 u4/none      attn_q       (4,)           x16     112.9 us/unit     313 GB/s  calls 1 N=[12288]
+qmv1 u4/none      attn_kv      (4, 4)         x16      38.4 us/unit     154 GB/s  calls 2 N=[1024, 1024]
+qmv1 u4/none      attn_o       (4,)           x16      65.8 us/unit     269 GB/s  calls 1 N=[5120]
+qmv1 u4/none      lm_head      (4,)           x 1    2030.7 us/unit     352 GB/s  calls 1 N=[248320]
+qmv1 u4/groups    gdn_in       (4, 4, 4, 4)   x48     147.2 us/unit     323 GB/s  calls 1 N=[16480]
+forward linears, 1 row, oq4e/none   :   48.66 ms (GDN in-projections   7.65 ms)
+forward linears, 1 row, oq4e/groups :   48.39 ms (GDN in-projections   7.39 ms)
+forward linears, 1 row, u4/none     :   46.21 ms (GDN in-projections   8.12 ms)
+forward linears, 1 row, u4/groups   :   45.16 ms (GDN in-projections   7.06 ms)
+oq4e / u4 (fused): today 1.078, with width groups 1.072; u4 unfused / fused 1.023
+verify block T=8, oq4e/none   : total  117.84 ms  gdn_in  17.45  gdn_out   6.00  mlp_gate_up  33.43  mlp_down  19.01  attn_q   4.33  attn_kv   1.20  attn_o   2.00  lm_head  22.83  drafter_head  11.58
+verify block T=8, oq4e/groups : total   87.58 ms  gdn_out   6.55  mlp_gate_up  33.17  mlp_down  18.24  attn_q   3.56  attn_kv   1.07  attn_o   2.00  lm_head   4.02  gdn_in  14.97  drafter_head   3.99
+verify block T=8, u4/none     : total   89.10 ms  gdn_in  19.45  gdn_out   6.04  mlp_gate_up  33.55  mlp_down  17.63  attn_q   3.01  attn_kv   0.88  attn_o   1.70  lm_head   3.47  drafter_head   3.36
+verify block T=8, u4/groups   : total   80.80 ms  gdn_out   5.37  mlp_gate_up  32.47  mlp_down  17.97  attn_q   3.01  attn_kv   1.09  attn_o   1.80  lm_head   3.43  gdn_in  12.29  drafter_head   3.37
+lm_head 6bit|qmv1            3.00 ms
+lm_head 6bit|singleton8     24.10 ms
+lm_head 6bit|qmm7           14.49 ms
+lm_head 6bit|qmm8           14.41 ms
+lm_head 6bit|mrqmm7          4.94 ms
+lm_head 6bit|mrqmm8          5.05 ms
+lm_head 8bit|qmv1            3.88 ms
+lm_head 8bit|mrqmm8          4.81 ms
+lm_head 6bit|mrqmm8:2x8      5.48 ms
+lm_head 6bit|mrqmm8:4x8      5.05 ms
+lm_head 6bit|mrqmm8:4x4      5.03 ms
+lm_head bytes 6-bit 0.962 GiB, 8-bit 1.258 GiB; re-quantization weight rms rel error 5.57e-03
+acc group b+a              5-bit K= 5120 N=    96 rows_equal=True M3: 2.29e-04 (qmm 1.30e-03) M8: 2.37e-04 (qmm 6.26e-04) M16: 2.36e-04 (qmm 6.18e-04)
+acc group b+a              8-bit K= 5120 N=    96 rows_equal=False M3: 2.72e-04 (qmm 2.04e-04) M8: 2.71e-04 (qmm 6.38e-04) M16: 2.90e-04 (qmm 6.33e-04)
+acc group qkv+z            4-bit K= 5120 N= 16384 rows_equal=True M3: 2.09e-04 (qmm 6.83e-04) M8: 2.09e-04 (qmm 2.09e-04) M16: 2.09e-04 (qmm 2.09e-04)
+acc group z+b+a            5-bit K= 5120 N=  6240 rows_equal=True M3: 2.36e-04 (qmm 1.04e-03) M8: 2.36e-04 (qmm 3.31e-04) M16: 2.36e-04 (qmm 3.29e-04)
+acc linear_attn.in_proj_qkv 4-bit K= 5120 N= 10240 rows_equal=True M3: 2.07e-04 (qmm 6.96e-04) M8: 2.09e-04 (qmm 2.09e-04) M16: 2.08e-04 (qmm 2.08e-04)
+acc linear_attn.in_proj_z  4-bit K= 5120 N=  6144 rows_equal=True M3: 2.10e-04 (qmm 6.77e-04) M8: 2.10e-04 (qmm 3.07e-04) M16: 2.10e-04 (qmm 3.08e-04)
+acc linear_attn.in_proj_z  5-bit K= 5120 N=  6144 rows_equal=True M3: 2.35e-04 (qmm 1.04e-03) M8: 2.36e-04 (qmm 3.30e-04) M16: 2.36e-04 (qmm 3.29e-04)
+acc linear_attn.out_proj   5-bit K= 6144 N=  5120 rows_equal=True M3: 2.28e-04 (qmm 1.05e-03) M8: 2.26e-04 (qmm 4.05e-04) M16: 2.30e-04 (qmm 3.94e-04)
+acc lm_head                6-bit K= 5120 N=248320 rows_equal=True M3: 2.65e-04 (qmm 8.71e-04) M8: 2.65e-04 (qmm 2.65e-04) M16: 2.65e-04 (qmm 2.65e-04)
+acc mlp.down_proj          4-bit K=17408 N=  5120 rows_equal=True M3: 2.10e-04 (qmm 8.00e-04) M8: 2.08e-04 (qmm 3.04e-04) M16: 2.08e-04 (qmm 3.05e-04)
+acc mlp.down_proj          5-bit K=17408 N=  5120 rows_equal=True M3: 2.43e-04 (qmm 1.30e-03) M8: 2.42e-04 (qmm 3.33e-04) M16: 2.43e-04 (qmm 3.33e-04)
+acc mlp.gate_proj          4-bit K= 5120 N= 17408 rows_equal=True M3: 2.06e-04 (qmm 6.79e-04) M8: 2.07e-04 (qmm 2.07e-04) M16: 2.08e-04 (qmm 2.08e-04)
+acc self_attn.k_proj       5-bit K= 5120 N=  1024 rows_equal=True M3: 2.43e-04 (qmm 1.10e-03) M8: 2.39e-04 (qmm 5.68e-04) M16: 2.36e-04 (qmm 5.65e-04)
+acc self_attn.k_proj       6-bit K= 5120 N=  1024 rows_equal=True M3: 2.66e-04 (qmm 9.27e-04) M8: 2.65e-04 (qmm 5.86e-04) M16: 2.67e-04 (qmm 5.86e-04)
+acc self_attn.o_proj       5-bit K= 6144 N=  5120 rows_equal=True M3: 2.31e-04 (qmm 1.03e-03) M8: 2.27e-04 (qmm 3.83e-04) M16: 2.33e-04 (qmm 3.82e-04)
+acc self_attn.q_proj       5-bit K= 5120 N= 12288 rows_equal=True M3: 2.39e-04 (qmm 1.04e-03) M8: 2.39e-04 (qmm 2.39e-04) M16: 2.39e-04 (qmm 2.39e-04)
+acc self_attn.v_proj       5-bit K= 5120 N=  1024 rows_equal=True M3: 2.42e-04 (qmm 1.07e-03) M8: 2.40e-04 (qmm 5.71e-04) M16: 2.39e-04 (qmm 5.64e-04)
+acc self_attn.v_proj       6-bit K= 5120 N=  1024 rows_equal=True M3: 2.65e-04 (qmm 8.75e-04) M8: 2.69e-04 (qmm 5.75e-04) M16: 2.67e-04 (qmm 5.72e-04)
+-> $PERF_OUT/oq4e/oq4e_bench.json

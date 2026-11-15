@@ -1,8 +1,10 @@
 # oQ4e 27B: why it decodes slower than the uniform 4-bit, and what was done (2026-11-15)
 
-Status: code and CPU tests done; **GPU gate not run yet** (`scripts/perf/dflash2/gate_oq4e.sh`).
-Every number below that is not marked "measured" is an estimate from code, tensor headers and
-the 2026-11-10 per-width kernel tables (`docs/perf/2026-11-10/dflash2_27b.md` §3).
+Status: code and CPU tests done; GPU gate steps 1–3 (no model: kernel tests, real tensors,
+microbench) **passed** on 2026-11-15, results in "Measured" below (raw: `../raw/oq4e_bench.*`);
+steps 4–8 (one 27B per process) not run yet. Sections before "Measured" were written from code,
+tensor headers and the 2026-11-10 per-width kernel tables (`docs/perf/2026-11-10/dflash2_27b.md`
+§3) before any of it ran; "Measured" corrects them where they disagree.
 
 ## The problem
 
@@ -96,7 +98,7 @@ accepted beyond near-ties. The gate measures both builds on the same corpus (ab2
    `quantized_matmul`. Every mrqmm user (`MRQuantizedLinear`, `_gdn_call`, `_verify_linear(s)`,
    `_verify_head`) takes it through `mrqmm._bits_on` + `supported`, unchanged.
    *Rejected alternative*: re-quantize the head to 8 bits at load (+0.3 GiB, a second rounding of
-   the weights, and +1.2 ms on every plain token since plain decode reads the same head).
+   the weights, and +0.9 ms on every plain token since plain decode reads the same head: measured).
 2. **GDN in-projection fusion by width groups** (`src/worker/qwen_worker/kernels.py`):
    `_gdn_groups` partitions qkv / z / b / a by (bits, group_size, mode) among eligible modules
    (QuantizedLinear, no bias, fp16 scales / biases); every key with ≥ 2 modules becomes one
@@ -112,8 +114,51 @@ accepted beyond near-ties. The gate measures both builds on the same corpus (ab2
    5-bit, qkv alone]; 2 x [qkv+z 4-bit, b+a 8-bit]; 1 x [qkv+z 4-bit, b alone, a alone]` and
    `... fused (QWEN_GDN_FUSE): 48 layers`.
    Numerics: B = 1 bit-identical to the unfused calls (qmv rows do not depend on N; CPU-tested on
-   a tiny model in the oQ4e layout); B = 2 bit-identical on the GPU (qmv_wide) is a GPU test
-   (`test_worker_gdn_fuse_mixed`); 3..16 rows on mrqmm = the batched-decode class as before.
+   a tiny model in the oQ4e layout); B = 2 bit-identical on the GPU too (qmv_wide; passed in
+   `test_worker_gdn_fuse_mixed`, gate step 1); 3..16 rows on mrqmm = the batched-decode class as before.
+
+## Measured: gate steps 1–3 (2026-11-15, M1 Max, no model, both checkpoints' tensors in one process)
+
+- Step 1: `tests/test_mrqmm.py` on Metal 390 passed, 4 skipped (the skips are the real-weights
+  tests). Step 2: `test_real_oq4e_weights` passed (self-test + `check_close` on the real 6-bit
+  head, layer 63 k / v, layer 52 qkv+z 4-bit, layer 0 z+b+a 5-bit).
+- **Plain decode, the linears of one forward at 1 row** (`oq4e_bench.py` qmv phase, interleaved,
+  5 rounds): oq4e unfused 48.66 ms, oq4e width groups 48.39, u4 unfused 46.21, u4 fused (today)
+  45.16. **oq4e / u4 = 1.078 today, 1.072 with the groups**; the u4 fusion is worth ×1.023 (as on
+  the 9B), oQ4e's groups only 0.27 ms (0.6 %): the 4-launch cost was smaller than H1 assumed.
+  The 6-bit head's qmv streams at 349 GB/s vs 352 for the 4-bit head (H3 refuted); 5-bit modules
+  run 262–333 GB/s against 267–333 for the same 4-bit shapes (H4 refuted). So the linears predict
+  oQ4e plain at ~0.93 of the uniform model (17.2 → ~16 tok/s), not the 0.68 measured
+  (11.7 vs 17.2): **~25 % of the plain gap is outside the linears' kernels** — the cross-process
+  drift (H0) or the residency of the loaded weights (H5), which only a model run can tell (step 5,
+  `decode_probe.py`: tok/s per probe GB/s in the same process, A B A B).
+- **DFlash verify block, T = 8, linears of one forward:**
+
+  | | total | lm_head | drafter head | GDN in | rest |
+  |---|---|---|---|---|---|
+  | oq4e before (mlx-vlm 6-bit singleton, qmm head, unfused) | 117.84 ms | 22.83 | 11.58 | 17.45 | 65.98 |
+  | oq4e after (`QWEN_MRQMM6=1` + width groups) | **87.58** | 4.02 | 3.99 | 14.97 | 64.60 |
+  | u4 unfused | 89.10 | 3.47 | 3.36 | 19.45 | 62.82 |
+  | u4 today (fused) | 80.80 | 3.43 | 3.37 | 12.29 | 61.71 |
+
+  −30.3 ms per round on oQ4e (×1.35 on the block's linears); oq4e / u4 1.458 → 1.084. The round
+  gap measured end-to-end was ~110 ms (259–274 vs 153), of which the linears explain 37 ms
+  before the change and 7 ms after: as for plain decode, the rest is H0 / H5 or outside the
+  linears. Expected round after: ~153 + 7 ms if the rest of the round matched the uniform model
+  (step 6 measures it).
+- **lm_head paths (6-bit, 248320 × 5120):** qmv 1 row 3.00 ms; mlx-vlm singleton × 8 24.10 ms;
+  `quantized_matmul` at 7 / 8 rows 14.49 / 14.41 ms; mrqmm 7 / 8 rows 4.94 / 5.05 ms. Config
+  sweep at 8 rows: 4×8 5.05, 4×4 5.03, 2×8 5.48 → the 4 / 5-bit choice (4×8) stays. The rejected
+  8-bit re-quantized head: qmv 3.88 ms (+0.88 ms on every plain token), mrqmm 8 rows 4.81 ms
+  (−0.24 ms per round), +0.30 GiB, weight rms rel error of the second rounding 5.6e-3.
+- **Accuracy** (rms rel vs an fp32 reference at 3 / 8 / 16 rows): mrqmm 2.1–2.7e-4 at every width
+  and shape (6-bit 2.65e-4), ≤ `quantized_matmul`'s own error everywhere (qmm 2.1e-4–1.3e-3; qmm
+  at 3 rows runs per-row qmv, hence its larger 5 / 6-bit error); rows independent of the row
+  count everywhere mrqmm is used. The one exception, `b+a` 8-bit (N = 96), is below `MIN_N` and
+  never takes mrqmm in the worker (it stays on `quantized_matmul`).
+
+Re-ranked plain-decode diagnosis: **H0 (drift) / H5 (residency)** — together ~25 %, to be split
+by step 5; H2 (bytes) ~5–7 % (inherent); H1 (fusion) 0.6 %; H3, H4 ≈ 0.
 
 ## Tests
 
@@ -165,12 +210,12 @@ Steps (the script's header has the details and the expected outcomes):
 
 ## Uncertain
 
-- How much of the plain gap H0 really is: the prediction (0.90–0.95 of the uniform model) rests
-  on the 2026-11-10 qmv table at other shapes; step 3 measures it drift-free, step 5 end-to-end.
-- The 6-bit kernel's speed at 8 rows on the 1 GiB head (expected near 4/5-bit: MMA-bound, the
-  regroup is per 64-group, not per step) and whether 4×8 is still the best config (`--sweep`).
-- B = 2 bitwise of the grouped fusion holds on the GPU only by the qmv_wide argument; the CPU's
-  multi-row qmm rounds by N, so the CPU tests check B ≥ 2 to tolerance only.
+- What the remaining ~25 % of the plain gap (and most of the DFlash round gap) is: the linears
+  measured drift-free say 0.93, the separate-process runs said 0.68. Drift (H0) or the loaded
+  weights' residency (H5) — step 5 splits them; if the probe-normalized ratio stays ~0.7, look at
+  page-ins / `footprint` during decode and at what the loader keeps mmap'd.
+- B ≤ 2 bitwise of the grouped fusion is shown on the tiny mixed model on the GPU (step 1); on the
+  real model it is step 7 (`plainnf` == `plain`, B = 1).
 - The acceptance gap (3.57 vs 4.8) is attributed to the model; step 6 measures it on ab27's corpus
   for oQ4e and the uniform model's earlier numbers come from other prompts.
 - The 27B 4-bit / 5-bit batched decode (B ≥ 3) through mrqmm is still ungated in general
