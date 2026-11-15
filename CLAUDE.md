@@ -295,6 +295,14 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
   5-bit: none), only (rows, 1, K) inputs with 3 ≤ rows ≤ 16 — B ≤ 2 stays
   bit-exact qmv, prefill and DFlash (always (1, T, K)) never take it. Tried: NA 8
   fragments per simdgroup spills (×5 slower); 2×8 / 4×4 / 2×4 tiles are within 3%.
+- **4-bit mrqmm (`QWEN_MRQMM4`, 2026-11-15)**: `_WSIDE[4]` (existed since 2026-11-10 for the bench, now dispatched):
+  a 64-group is 8 aligned words, a thread loads 2 (one uint2) and regroups them into 16-bit lanes once per group;
+  config as 5 bits (4×8 at ≤ 8 rows, 2×8 above: KS 8 in both buckets, a row's bits the same at 3..16 rows). GPU unit
+  tests (synthetic, the 27B 4-bit shapes incl. lm_head): within fp16 rounding of fp32 and ≤ `quantized_matmul`'s
+  error, rows independent of the row count, self-test passes. Selection is `mrqmm._bits_on` + `supported` only, so
+  every 5-bit user (MRQuantizedLinear, `_gdn_call`, `_verify_linear(s)`, `_verify_head`) takes 4 bits unchanged.
+  Random 4-bit weights (2026-11-10): 8 rows ×1.64 of a solo row, MMA-bound like 5 bits — a 4-bit build gains its
+  smaller weights (solo row 46.5 vs 55 ms of linears), not a cheaper kernel. Model-level gate pending.
 - **Decode step profile (2026-10-12, B ≥ 2)**: the worker's step was GPU-bound but
   the step-ahead was broken. The token read `mx.concatenate([r.y…]).tolist()` queued
   a new kernel *behind* the step just submitted, so the read waited for step k+1 too,
@@ -874,6 +882,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_PFQMM` | worker | `1` — prefill matmul (`pfqmm.py`): MLX's own qmm_t code with 64-row tiles (a 32-row last tile when ≤ 32 rows are left), ≥ 64 rows where MLX runs qmm_t; ×1.03–1.28 per matmul (8-bit ×1.10–1.14), bit-identical, self-tested per key at load; `0` = MLX `quantized_matmul`. Needs fp16 scales: `QWEN_FP16=0` leaves it off |
 | `QWEN_MRQMM` | worker | `1` — multi-row 8-bit matmul kernel (`mrqmm.py`) for batched decode with 3..16 rows (8-bit affine g64 fp16 modules with N ≥ 512 only); `0` = MLX `quantized_matmul` |
 | `QWEN_MRQMM5` | worker | `0` — the same multi-row kernel for 5-bit affine g64 modules (the 27B: every linear incl. lm_head and the fused GDN in-projection), 3..16 rows: batched decode, the fused GDN in-projection and the DFlash verify block + drafter lm_head. Linears of one 27B forward at 8 rows 249 → 89 ms (×1.61 of a solo row, stock ×4.5). Off by default: the 27B's batched decode (B ≥ 3) is not gated yet; DFlash2 on the 27B needs it (`docs/perf/2026-11-10/dflash2_27b.md`). Ignored with `QWEN_BATCH_INVARIANT=1` |
+| `QWEN_MRQMM4` | worker | `0` — the same multi-row kernel for 4-bit affine g64 modules (`weights/qwen38-27b-mlx-4bit`, lmstudio-community: every linear 4-bit), everywhere `QWEN_MRQMM5` takes 5-bit ones (batched decode 3..16 rows, fused GDN in-projection, DFlash verify block + drafter lm_head). Own knob: separate GPU gate, and a mixed-width model (35B: 4-bit shared expert) is not pulled in by `QWEN_MRQMM5`. Self-tested on the GPU at load before its first dispatch (`mrqmm._selftest`: unpack exact on one-hot x at every in-group offset, both row buckets + real-scale rows 3/8/9/16 vs fp32 and `quantized_matmul`); a failure logs `self-test FAILED` and leaves 4-bit on `quantized_matmul`. Off until the gate (`scripts/perf/dflash2/gate_mrqmm4.sh`). Ignored with `QWEN_BATCH_INVARIANT=1` |
 | `QWEN_GDN_FUSE` | worker | `1` — one matmul for a decode step's 4 GDN in-projections (weights concatenated at load, modules hold views); `0` = 4 launches. Needs fp16 scales (`QWEN_FP16=1`): with `QWEN_FP16=0` it fuses nothing |
 | `QWEN_SDPA_FUSED` | worker | `1` — force MLX's fused SDPA for fp16-KV prefill slabs ≥ 512 over ≥ 32K keys (per call ×0.89 at 2048 × 32K, ×0.6–0.7 at 64K+; 64K prefill −3…5%, −1.3 GB peak) |
 | `QWEN_SDPA_FUSED_MIN_KV` | worker | `32768` — keys from which a long fp16 prefill slab takes the fused SDPA kernel (the gate of `QWEN_SDPA_FUSED`); `8192` + `QWEN_PREFILL_BUDGET=16777216` cap the unfused scores at 0.75 GiB and the prefill reserve at 1.15 GiB instead of 3.4 (27B, 24 heads: the hump just under 32K keys is 2.8 GiB) — for the 27B + drafter at long context |

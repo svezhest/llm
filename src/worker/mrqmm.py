@@ -57,8 +57,22 @@ the same rows (2.3e-4..1.4e-3) and 4-6x below a solo qmv row's (0.9-1.4e-3);
 rows are NOT bit-equal to a solo qmv row (15-23 % of the elements are), but a
 row's bits are the same at every row count 3..16 and whatever sits beside it
 (KS 8 in both buckets, _config).
-4 bits: the weight side exists (_WSIDE[4]) for that comparison only; it is
-never dispatched.
+4 bits (QWEN_MRQMM4=1, default 0 until a GPU gate; the lmstudio-community
+4-bit 27B, every linear 4-bit g64): the weight side _WSIDE[4] (a 64-group is
+8 aligned words; a thread's 16 weights are 2 of them, regrouped once per group
+into 16-bit lanes, so step st is one shift and one mask), dispatched exactly
+where 5 bits is (the knobs are per width: a model with 4-bit layers next to
+others, e.g. the 35B's 4-bit shared expert, is not pulled in by
+QWEN_MRQMM5). Ungated, so it is self-tested on the GPU before it is
+dispatched (`_selftest`, once per process on the first 4-bit weights offered:
+install's first covered-size module, else whatever `supported` is asked
+about): the unpack exactly (unit scales, one-hot x at every in-group offset,
+both row buckets) and real-scale rows 3 / 8 / 9 / 16 within an fp32
+reference's tolerance and no worse than quantized_matmul; a failure (or an
+error) leaves every 4-bit call on quantized_matmul, logged. Random 4-bit
+weights of the 27B's shapes (2026-11-10): 76 ms at 8 rows, x1.64 of their
+own solo row (46.5 ms) -- the kernel is MMA-bound there like the 5-bit one,
+so a 4-bit build gains its smaller weights only (solo row / plain decode).
 
 Batch-invariant mode (set_invariant, the worker's QWEN_BATCH_INVARIANT=1): row m
 of the output is then the same bits whatever the number of rows (1..16) and
@@ -86,6 +100,7 @@ route, is gone).
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 
@@ -103,24 +118,40 @@ MAX_ROWS = 16
 MIN_N = 512
 BITS = 8
 GROUP = 64
-# Bit widths the kernel exists for. 8 is always dispatched; 5 (the 27B) only
-# with QWEN_MRQMM5=1 (default 0: every 5-bit call stays on quantized_matmul,
-# the worker is unchanged bit for bit) and never in batch-invariant mode (its
-# guarantee is gated on the 8-bit kernel only: 5-bit modules stay "uncovered"
-# there, max_batch 2 as before). 4 is never dispatched (no model here is 4-bit
-# throughout; the 35B's 4-bit shared expert is not worth a kernel): the weight
-# side exists so that scripts/perf/dflash2/kern5_bench.py can price a 4-bit
-# build against the 5-bit one, `mrqmm()` called directly takes it.
+# Bit widths the kernel exists for. 8 is always dispatched; 5 (the 27B 5-bit)
+# only with QWEN_MRQMM5=1 and 4 (the 27B 4-bit) only with QWEN_MRQMM4=1
+# (default 0 both: every such call stays on quantized_matmul, the worker is
+# unchanged bit for bit), never in batch-invariant mode (its guarantee is gated
+# on the 8-bit kernel only: 5- / 4-bit modules stay "uncovered" there,
+# max_batch 2 as before). One knob per width: each width's kernel is gated on
+# its own, and a model mixing widths (the 35B: 4-bit shared expert) takes only
+# the widths asked for.
 KERNEL_BITS = (8, 5, 4)
+KNOBS = {5: "QWEN_MRQMM5", 4: "QWEN_MRQMM4"}
+# Widths self-tested on the GPU before their first dispatch (`_selftest`): 4
+# (new, no GPU gate yet). 5 is not (gated by tests/test_mrqmm.py and the
+# 2026-11-10 runs; adding it here would change its load, not its numbers).
+SELFTEST_BITS = (4,)
+_TESTED = {}                  # bits -> (passed, detail): once per process
+
+
+def knob(bits: int) -> bool:
+    """QWEN_MRQMM5 / QWEN_MRQMM4 for 5 / 4 bits (read at every call: tests set them)."""
+    return bits in KNOBS and os.environ.get(KNOBS[bits], "0") == "1"
 
 
 def bits5() -> bool:
-    return os.environ.get("QWEN_MRQMM5", "0") == "1"
+    return knob(5)
+
+
+def bits4() -> bool:
+    return knob(4)
 
 
 def _bits_on(bits: int) -> bool:
-    """Bit widths install / supported dispatch to the kernel now."""
-    return bits == BITS or (bits == 5 and not INVARIANT and bits5())
+    """Bit widths install / supported dispatch to the kernel now (a width in
+    SELFTEST_BITS also needs its self-test passed: `supported`)."""
+    return bits == BITS or (not INVARIANT and knob(bits))
 
 _HEADER = """
 #include <metal_simdgroup_matrix>
@@ -394,10 +425,10 @@ def _bits_of(K: int, words: int):
     return None
 
 
-def supported(w: mx.array, scales: mx.array, biases, bits: int, group_size: int, mode="affine") -> bool:
-    """Weights the kernel can take (any row count): 8-bit, and 5-bit with
-    QWEN_MRQMM5=1 (`_bits_on`)."""
-    if not _bits_on(bits) or group_size != GROUP or mode != "affine" or biases is None:
+def _layout_ok(w: mx.array, scales: mx.array, biases, bits: int, group_size: int, mode="affine") -> bool:
+    """The packing / dtypes / shapes the kernel of `bits` takes (whatever the
+    knobs say)."""
+    if bits not in KERNEL_BITS or group_size != GROUP or mode != "affine" or biases is None:
         return False
     if w.dtype != mx.uint32 or w.ndim != 2 or scales.dtype != mx.float16 or biases.dtype != mx.float16:
         return False
@@ -406,11 +437,113 @@ def supported(w: mx.array, scales: mx.array, biases, bits: int, group_size: int,
             and scales.shape == (N, K // GROUP))
 
 
+def supported(w: mx.array, scales: mx.array, biases, bits: int, group_size: int, mode="affine") -> bool:
+    """Weights the kernel can take (any row count): 8-bit, 5-bit with
+    QWEN_MRQMM5=1, 4-bit with QWEN_MRQMM4=1 (`_bits_on`) once its self-test
+    passed (run here on these weights if no weights of that width were
+    tested yet: `_tested`)."""
+    return (_bits_on(bits) and _layout_ok(w, scales, biases, bits, group_size, mode)
+            and _tested(bits, w, scales, biases))
+
+
+def _test_device():
+    """The device of the self-test (the kernel's: tests on the CPU suite
+    replace it, and the kernel, by CPU stand-ins)."""
+    return mx.gpu
+
+
+def _tested(bits: int, w, scales, biases, where: str = "") -> bool:
+    """A width outside SELFTEST_BITS: True. Else the self-test's verdict,
+    running it (logged) on these weights the first time."""
+    if bits not in SELFTEST_BITS:
+        return True
+    r = _TESTED.get(bits)
+    if r is None:
+        N, K = w.shape[0], scales.shape[-1] * GROUP
+        try:
+            with mx.stream(_test_device()):
+                why = _selftest(w, scales, biases, bits)
+        except Exception as e:  # noqa: BLE001 — compile / launch error: stay on quantized_matmul
+            why = f"{type(e).__name__}: {str(e)[:300]}"
+        what = f"{where + ' ' if where else ''}K={K} N={N}"
+        r = _TESTED[bits] = (why is None, what if why is None else f"{what}: {why}")
+        if why is None:
+            log.info("mrqmm %d-bit g%d self-test passed (%s): %s on the kernel", bits, GROUP, r[1], KNOBS[bits])
+        else:
+            log.warning("mrqmm %d-bit g%d self-test FAILED (%s): every %d-bit call stays on quantized_matmul",
+                        bits, GROUP, r[1], bits)
+    return r[0]
+
+
+SELFTEST_ROWS = (3, 8, 9, 16)     # real-scale rows: both buckets, their edges
+SELFTEST_SLICE = 256              # output rows compared at each end of N (fp32 reference)
+
+
+def _selftest(w, scales, biases, bits: int) -> str | None:
+    """None when the kernel is right on these weights, else why not:
+      1. the unpack, exactly: unit scales, zero biases, one-hot x rows, so
+         y[m, n] must be the packed integer q[n, k_m] itself (sums of zeros
+         and one q: exact in fp32 and fp16). 8- and 16-row calls (both row
+         buckets) put the ones at every in-group offset 0..63, spread over
+         the groups (every simdgroup of the K split), all N outputs checked
+         against mx.dequantize of those groups;
+      2. the real scales / biases at SELFTEST_ROWS rows of a random x: finite,
+         and on the first / last SELFTEST_SLICE outputs within fp16 rounding
+         of an fp32 reference (max |d| <= 1.5e-3 max|ref| + 1e-4) and no
+         worse than mx.quantized_matmul at the same rows + one fp16 ulp (the
+         rules of tests/test_mrqmm.py's check_close).
+    Runs on the current default stream (`_tested` picks it). ~30 kernel
+    calls over the full weights (each reads them once)."""
+    N, K = w.shape[0], scales.shape[-1] * GROUP
+    G, wpg = K // GROUP, GROUP * bits // 32          # uint32 words per 64-group
+    one, zero = mx.ones_like(scales), mx.zeros_like(biases)
+    cols = {}
+
+    def col(k):                                      # q[:, k], fp32 (N,)
+        g = k // GROUP
+        if g not in cols:
+            cols[g] = mx.dequantize(w[:, wpg * g:wpg * (g + 1)], one[:, g:g + 1], zero[:, g:g + 1],
+                                    group_size=GROUP, bits=bits).astype(mx.float32)
+        return cols[g][:, k % GROUP]
+    for rows in (8, 16):
+        for j in range(GROUP // rows):
+            ks = [GROUP * ((7 * m + j) % G) + rows * j + m for m in range(rows)]
+            x = (mx.arange(K)[None, :] == mx.array(ks)[:, None]).astype(mx.float16).reshape(rows, 1, K)
+            y = mrqmm(x, w, one, zero).reshape(rows, N).astype(mx.float32)
+            want = mx.stack([col(k) for k in ks])
+            if not mx.array_equal(y, want).item():
+                bad = mx.argmax((y != want).any(axis=1).astype(mx.int32)).item()
+                return (f"unpack: {rows} rows, one-hot k={ks[bad]} (offset {ks[bad] % GROUP} of group "
+                        f"{ks[bad] // GROUP}) differs from the packed weights")
+        cols.clear()
+    spans = sorted({(0, min(N, SELFTEST_SLICE)), (max(0, N - SELFTEST_SLICE), N)})
+    for rows in SELFTEST_ROWS:
+        x = (mx.random.normal((rows, 1, K), key=mx.random.key(rows)) * 0.5).astype(mx.float16)
+        y = mrqmm(x, w, scales, biases).reshape(rows, N).astype(mx.float32)
+        if not mx.isfinite(y).all().item():
+            return f"{rows} rows: non-finite output"
+        xf = x.reshape(rows, K).astype(mx.float32)
+        for lo, hi in spans:
+            deq = mx.dequantize(w[lo:hi], scales[lo:hi].astype(mx.float32), biases[lo:hi].astype(mx.float32),
+                                group_size=GROUP, bits=bits)
+            ref = xf @ deq.T
+            q = mx.quantized_matmul(x, w[lo:hi], scales[lo:hi], biases[lo:hi], transpose=True,
+                                    group_size=GROUP, bits=bits).reshape(rows, hi - lo).astype(mx.float32)
+            mref = mx.abs(ref).max().item()
+            err = mx.abs(y[:, lo:hi] - ref).max().item()
+            qerr = mx.abs(q - ref).max().item()
+            ulp = 2.0 ** (math.ceil(math.log2(max(mref, 1e-6))) - 11)
+            if err > 1.5e-3 * mref + 1e-4 or err > qerr + ulp:
+                return (f"{rows} rows, outputs [{lo}, {hi}): max |d| {err:.3g} vs fp32 (|ref| max {mref:.3g}), "
+                        f"quantized_matmul's {qerr:.3g}")
+    return None
+
+
 def mrqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, cfg=None) -> mx.array:
-    """x[..., K] (fp16, 1..16 rows) @ dequant(w)^T for 8-bit (or 5-bit) g64
-    affine weights -> [..., N]. The bit width is the packed row's: w.shape[1]
-    words for x's K values (8: K / 4, 5: K * 5 / 32; whatever QWEN_MRQMM5 says:
-    the knob is the dispatch's, `supported`). Checks only the x side (rows,
+    """x[..., K] (fp16, 1..16 rows) @ dequant(w)^T for 8-bit (or 5- / 4-bit)
+    g64 affine weights -> [..., N]. The bit width is the packed row's: w.shape[1]
+    words for x's K values (8: K / 4, 5: K * 5 / 32, 4: K / 8; whatever
+    QWEN_MRQMM5 / 4 say: the knobs are the dispatch's, `supported`). Checks only the x side (rows,
     dtype, K) once per x / w shape: call `supported` on the weights first. x
     is made row-contiguous by metal_kernel (a strided x is copied); a
     contiguous view starts on a row, so its 16-byte loads stay aligned
@@ -470,8 +603,9 @@ class MRQuantizedLinear(nn.QuantizedLinear):
 
 
 def _module_ok(m) -> bool:
-    """Weights the kernel takes (8-bit, or 5-bit with QWEN_MRQMM5=1; affine
-    g64, fp16 scales and biases)."""
+    """Weights the kernel takes (8-bit, or 5- / 4-bit with QWEN_MRQMM5 /
+    QWEN_MRQMM4 = 1, 4-bit after its self-test; affine g64, fp16 scales and
+    biases)."""
     return (type(m) in (nn.QuantizedLinear, MRQuantizedLinear)
             and supported(m["weight"], m["scales"], m.get("biases"), m.bits, m.group_size,
                           getattr(m, "mode", "affine")))
@@ -483,15 +617,28 @@ def enabled() -> bool:
 
 def install(model, warmup: bool = True) -> int:
     """Swap every supported nn.QuantizedLinear of `model` (8-bit, with
-    QWEN_MRQMM5=1 and not batch-invariant also 5-bit; g64, fp16
-    scales/biases, N >= MIN_N; any N in batch-invariant mode) to
-    MRQuantizedLinear; every other module is left alone. Logs the coverage
+    QWEN_MRQMM5=1 / QWEN_MRQMM4=1 and not batch-invariant also 5- / 4-bit;
+    g64, fp16 scales/biases, N >= MIN_N; any N in batch-invariant mode) to
+    MRQuantizedLinear; every other module is left alone. A width in
+    SELFTEST_BITS is self-tested first on its first module of N >= MIN_N
+    (else its first module) and left alone if that fails. Logs the coverage
     once. Returns the number of modules covered (0 = no-op). The GDN decode
     in-projections fused into one matmul are the worker's
     (`_install_gdn_fuse`, after this; it calls `warm` for its shapes)."""
     if not enabled():
         log.info("mrqmm: off (QWEN_MRQMM=0 or no Metal)")
         return 0
+    for bits in SELFTEST_BITS:
+        if bits in _TESTED or not _bits_on(bits):
+            continue
+        mods = [(n, m) for n, m in model.named_modules()
+                if type(m) in (nn.QuantizedLinear, MRQuantizedLinear) and m.bits == bits
+                and _layout_ok(m["weight"], m["scales"], m.get("biases"), bits, m.group_size,
+                               getattr(m, "mode", "affine"))]
+        pick = next(((n, m) for n, m in mods if m.weight.shape[0] >= MIN_N), mods[0] if mods else None)
+        if pick is not None:
+            n, m = pick
+            _tested(bits, m["weight"], m["scales"], m["biases"], where=n)
     covered, skipped = [], {}
     for name, m in model.named_modules():
         if not isinstance(m, nn.QuantizedLinear):
@@ -502,7 +649,8 @@ def install(model, warmup: bool = True) -> int:
         elif type(m) is nn.QuantizedLinear:
             why = "" if not _bits_on(m.bits) or m.group_size != GROUP else (
                 " N % 8" if m.weight.shape[0] % 8 else " not fp16" if m.scales.dtype != mx.float16
-                else f" N < {MIN_N}" if m.weight.shape[0] < MIN_N else "")
+                else f" N < {MIN_N}" if m.weight.shape[0] < MIN_N
+                else " self-test failed" if not _TESTED.get(m.bits, (True,))[0] else "")
             k = f"{m.bits}-bit g{m.group_size}{why}"
             skipped[k] = skipped.get(k, 0) + 1
     if not covered:
@@ -518,7 +666,8 @@ def install(model, warmup: bool = True) -> int:
     widths = sorted({m.bits for _, m in covered})
     log.info("mrqmm: %d modules on the multi-row kernel%s for %d..%d decode rows (%s); "
              "left on quantized_matmul: %s", len(covered),
-             "" if widths == [BITS] else f" ({'/'.join(map(str, widths))}-bit, QWEN_MRQMM5)",
+             "" if widths == [BITS] else
+             f" ({'/'.join(map(str, widths))}-bit, {', '.join(KNOBS[b] for b in widths if b in KNOBS)})",
              1 if INVARIANT else MIN_ROWS, MAX_ROWS,
              ", ".join(f"{k} x{v}" for k, v in sorted(kinds.items())),
              ", ".join(f"{k} x{v}" for k, v in skipped.items()) or "none")

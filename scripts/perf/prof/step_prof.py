@@ -27,7 +27,10 @@ Attention variants for --ab (alternated with --ab-steps): base (the worker's
 step), nosdpa (per-row update_and_fetch kept, SDPA skipped), noattn (both
 skipped), rattn (per-row update_and_fetch + one src/worker/rattn.py launch,
 PROF_RATTN=chunk:ns); a "/s" suffix runs that variant with a sync after every step (GPU
-time), e.g. --ab base,nosdpa,noattn,base/s,nosdpa/s,noattn/s.
+time), e.g. --ab base,nosdpa,noattn,base/s,nosdpa/s,noattn/s. nomr: the step with
+mrqmm off (every linear and the fused GDN in-projection on quantized_matmul, as
+QWEN_MRQMM=0 / QWEN_MRQMM5=0 / QWEN_MRQMM4=0 would run it), e.g. --ab base,nomr
+--ab-steps 32 for the kernel's A/B in one process.
 """
 import argparse, collections, json, os, statistics, sys, threading, time
 sys.path.insert(0, os.getcwd())
@@ -268,6 +271,23 @@ def _oldall(self):
 
 
 IMPL["oldall"] = _oldall
+
+
+def _nomr(self):
+    """the step with mrqmm's row range emptied: MRQuantizedLinear and the fused
+    GDN in-projection (mr._use) fall back to quantized_matmul at graph build"""
+    mr = sys.modules.get("mrqmm")
+    if mr is None:
+        return _iter(self)
+    keep = mr.MAX_ROWS
+    mr.MAX_ROWS = 0
+    try:
+        return _iter(self)
+    finally:
+        mr.MAX_ROWS = keep
+
+
+IMPL["nomr"] = _nomr
 MODE = {"attn": "base", "sync": False}
 RATTN_CFG = tuple(int(x) for x in os.environ.get("PROF_RATTN", "512:4").split(":"))     # attention variant + per-step sync of the current variant
 for _v in ("base", "nosdpa", "noattn", "rattn"):

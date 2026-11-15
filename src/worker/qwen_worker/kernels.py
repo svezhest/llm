@@ -223,7 +223,8 @@ def _install_verify_mrqmm(lm):
 def _setup_verify_mrqmm(lm, draft):
     """At load, with a drafter and QWEN_VERIFY_MRQMM 1 / head: nothing when
     mrqmm covers no module (QWEN_MRQMM=0, QWEN_FP16=0, the 5-bit 27B without
-    QWEN_MRQMM5=1); else
+    QWEN_MRQMM5=1, the 4-bit 27B without QWEN_MRQMM4=1 or with its self-test
+    failed); else
     the fused GDN verify (1) and, unless QWEN_DRAFT_BLOCK is set, the fixed
     block VERIFY_MR_BLOCK. -> what the load log says."""
     mr = sys.modules.get("mrqmm")
@@ -341,7 +342,8 @@ def _install_gdn_fuse(lm):
         for l, (lo, hi) in zip(ls, offs):     # row views: the old buffers are freed
             l.weight, l.scales, l.biases = w[lo:hi], s[lo:hi], b[lo:hi]
             mx.eval(l.weight, l.scales, l.biases)
-        # the kernel's bit widths: 8, and 5 with QWEN_MRQMM5=1 (mr.supported)
+        # the kernel's bit widths: 8, 5 with QWEN_MRQMM5=1, 4 with QWEN_MRQMM4=1
+        # once self-tested (mr.supported)
         use_mr = (mr is not None and mr.enabled() and f.group_size == mr.GROUP
                   and mr.supported(w, s, b, f.bits, f.group_size, getattr(f, "mode", "affine")))
         m.__dict__["_fused_in"] = (w, s, b, [hi for _, hi in offs[:-1]], f.group_size, f.bits,

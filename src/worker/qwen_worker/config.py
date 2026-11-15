@@ -358,6 +358,16 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # as they do on 8-bit ones. 0 = 5-bit calls stay on quantized_matmul, bit for
 # bit as before. Ignored with QWEN_BATCH_INVARIANT=1 (5-bit modules stay
 # uncovered there: max_batch 2). Kernel numbers: scripts/perf/dflash2/.
+#
+# QWEN_MRQMM4 (default 0, read by mrqmm at load): the same for 4-bit affine g64
+# modules (the lmstudio-community 4-bit 27B, weights/qwen38-27b-mlx-4bit: every
+# linear 4-bit), everywhere QWEN_MRQMM5 takes 5-bit ones. A knob of its own:
+# no GPU gate yet, and a model mixing widths (the 35B's 4-bit shared expert)
+# must not be pulled in by QWEN_MRQMM5. Self-tested on the GPU at load before
+# its first dispatch (mrqmm._selftest: the unpack exactly + real-scale rows vs
+# an fp32 reference); a failure leaves every 4-bit call on quantized_matmul
+# (load log "self-test FAILED"). Ignored with QWEN_BATCH_INVARIANT=1. Gate:
+# scripts/perf/dflash2/gate_mrqmm4.sh.
 
 # Prefill matmul (QWEN_PFQMM, default 1, read by pfqmm.install at load; 0 =
 # always quantized_matmul): on M1/M2 MLX's qmm_t uses 32x32 output tiles and
@@ -651,7 +661,7 @@ VERIFY_MR_BLOCK = 8
 
 # QWEN_GDN_FUSE (1): a decode step's four GDN in-projections (qkv, z, b, a)
 #   as ONE quantized matmul (qmv for 1..2 rows, mrqmm for 3..16 rows on 8-bit
-#   models and, with QWEN_MRQMM5=1, 5-bit ones, otherwise quantized_matmul's
+#   models and, with QWEN_MRQMM5=1 / QWEN_MRQMM4=1, 5- / 4-bit ones, otherwise quantized_matmul's
 #   own qmv/qmm) over their weights
 #   concatenated at load; the four modules keep row views of the concatenation
 #   (no extra memory). Needs fp16 scales/biases: with QWEN_FP16=0 (bf16) it

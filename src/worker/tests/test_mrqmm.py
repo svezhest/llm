@@ -15,9 +15,14 @@ modules untouched), a tiny 5-bit model's decode step and the worker's fused
 GDN in-projection. The CPU part (dispatch, pinned 8-bit source) is
 tests/test_mrqmm_bits.py.
 
+The 4-bit kernel (QWEN_MRQMM4, the 4-bit 27B): the same, at the 27B's shapes
+(random weights), plus the load self-test (mrqmm._selftest) on them, lm_head
+included.
+
 Real weights (slow, optional): MRQMM_REAL_WEIGHTS=1 pytest tests/test_mrqmm.py
 (9B: weights/ornith15-9b-mlx-8bit; 27B: weights/qwen38-27b-mlx-5bit or
-MRQMM_WEIGHTS_27B=<dir>)
+MRQMM_WEIGHTS_27B=<dir>; 27B 4-bit: weights/qwen38-27b-mlx-4bit or
+MRQMM_WEIGHTS_27B4=<dir>)
 """
 import json
 import math
@@ -34,6 +39,8 @@ pytestmark = pytest.mark.skipif(not mx.metal.is_available(), reason="needs Metal
 W9B = os.path.join(os.path.dirname(__file__), "..", "..", "..", "weights", "ornith15-9b-mlx-8bit")
 W27B = os.environ.get("MRQMM_WEIGHTS_27B") or os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "weights", "qwen38-27b-mlx-5bit")
+W27B4 = os.environ.get("MRQMM_WEIGHTS_27B4") or os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "weights", "qwen38-27b-mlx-4bit")
 
 
 @pytest.fixture(autouse=True)
@@ -47,9 +54,12 @@ def gpu():
 @pytest.fixture(autouse=True)
 def narrow(monkeypatch):
     """The test layers are tiny: let install() take N >= 8 (default MIN_N 512).
-    QWEN_MRQMM5 is off unless a test sets it."""
+    QWEN_MRQMM5 / QWEN_MRQMM4 are off unless a test sets them; the 4-bit
+    self-test verdict is per test."""
     monkeypatch.setattr(mrqmm, "MIN_N", 8)
     monkeypatch.delenv("QWEN_MRQMM5", raising=False)
+    monkeypatch.delenv("QWEN_MRQMM4", raising=False)
+    monkeypatch.setattr(mrqmm, "_TESTED", {})
 
 
 def qweights(N, K, seed=0, outlier_rows=0, bits=8, dtype=mx.float16):
@@ -567,6 +577,18 @@ def test_real_27b_weights():
     """Layer 2 (GDN + MLP), layer 3 (attention) and lm_head of the 27B, loaded
     lazily from the safetensors (~1.3 GB, not the model); scales / biases cast
     bf16 -> fp16 as the worker does."""
+    real_27b(W27B, 5)
+
+
+@pytest.mark.skipif(os.environ.get("MRQMM_REAL_WEIGHTS") != "1" or not os.path.isdir(W27B4),
+                    reason="slow: set MRQMM_REAL_WEIGHTS=1 (needs weights/qwen38-27b-mlx-4bit "
+                           "or MRQMM_WEIGHTS_27B4)")
+def test_real_27b_4bit_weights():
+    """test_real_27b_weights on the 4-bit 27B, + the load self-test per shape."""
+    real_27b(W27B4, 4)
+
+
+def real_27b(W27B, bits):
     idx = json.load(open(os.path.join(W27B, "model.safetensors.index.json")))["weight_map"]
     files = {}
 
@@ -588,8 +610,10 @@ def test_real_27b_weights():
     ws.append([mx.concatenate([g[i] for g in gdn]) for i in range(3)])
     mx.random.seed(1)
     for w, s, b in ws:
-        K = w.shape[1] * 32 // 5
-        assert mrqmm._bits_of(K, w.shape[1]) == 5 and s.shape == (w.shape[0], K // 64)
+        K = w.shape[1] * 32 // bits
+        assert mrqmm._bits_of(K, w.shape[1]) == bits and s.shape == (w.shape[0], K // 64)
+        if bits in mrqmm.SELFTEST_BITS:
+            assert mrqmm._selftest(w, s, b, bits) is None
         for M in (3, 8, 9, 16):
             x = mx.random.normal((M, 1, K))
             x[..., ::211] = x[..., ::211] * 30.0
@@ -597,7 +621,7 @@ def test_real_27b_weights():
             y = mrqmm.mrqmm(x, w, s, b)
             for lo in range(0, w.shape[0], 32768):         # the fp32 reference in chunks (lm_head)
                 hi = lo + 32768
-                check_close(y[..., lo:hi], x, w[lo:hi], s[lo:hi], b[lo:hi], bits=5)
+                check_close(y[..., lo:hi], x, w[lo:hi], s[lo:hi], b[lo:hi], bits=bits)
 
 
 # --- 4 bits (kernel only: never dispatched, scripts/perf/dflash2/kern5_bench.py --bits 4) ---
@@ -626,8 +650,136 @@ def test_kernel4_unpacks_every_k():
             assert mx.array_equal(y.astype(mx.float32), q[:, k0:k0 + M].T).item(), (M, k0)
 
 
-def test_4bit_is_never_dispatched(monkeypatch):
+def test_4bit_needs_its_knob(monkeypatch):
+    """QWEN_MRQMM5 does not take 4-bit modules; QWEN_MRQMM4 does (self-tested
+    first), and not in batch-invariant mode."""
     monkeypatch.setenv("QWEN_MRQMM5", "1")
     m = Holder(b=make_linear(256, 64, bits=4))
     assert mrqmm.install(m, warmup=False) == 0 and type(m.b) is nn.QuantizedLinear
-    assert not mrqmm.supported(m.b.weight, m.b.scales, m.b.biases, 4, 64)
+    assert not mrqmm.supported(m.b.weight, m.b.scales, m.b.biases, 4, 64) and mrqmm._TESTED == {}
+    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    assert mrqmm.install(m, warmup=True) == 1 and type(m.b) is mrqmm.MRQuantizedLinear
+    assert mrqmm._TESTED[4][0], mrqmm._TESTED
+    mrqmm.uninstall(m)
+    mrqmm.set_invariant(True)
+    try:
+        assert mrqmm.install(m, warmup=False) == 0
+    finally:
+        mrqmm.set_invariant(False)
+
+
+# the 4-bit 27B (weights/qwen38-27b-mlx-4bit): (K, N) of every linear a decode
+# step runs; the fused GDN in-projection is qkv + z + b + a = 10240 + 6144 + 48 + 48
+SHAPES27 = [(5120, 17408), (17408, 5120), (5120, 16480), (6144, 5120), (5120, 12288), (5120, 1024)]
+
+
+@pytest.mark.parametrize("K,N", SHAPES27)
+@pytest.mark.parametrize("M", [3, 4, 8, 9, 16])
+def test_kernel4_27b_shapes(K, N, M):
+    w, s, b = qweights(N, K, seed=K + N + M, bits=4)
+    x = mx.random.normal((M, 1, K))
+    x[..., ::211] = x[..., ::211] * 30.0
+    x = x.astype(mx.float16)
+    check_close(mrqmm.mrqmm(x, w, s, b), x, w, s, b, bits=4)
+
+
+@pytest.mark.parametrize("K,N", SHAPES27 + [(5120, 248320)])
+def test_selftest4_27b_shapes(K, N):
+    """The load self-test passes at every 27B shape, lm_head included (random
+    packed words: every 4-bit value occurs)."""
+    mx.random.seed(N)
+    w = mx.random.randint(0, 256, (N, K // 2), dtype=mx.uint8).view(mx.uint32)
+    s = (mx.random.uniform(shape=(N, K // 64)) * 2e-3 + 1e-4).astype(mx.float16)
+    b = (mx.random.normal((N, K // 64)) * 3e-2).astype(mx.float16)
+    assert mrqmm._selftest(w, s, b, 4) is None
+
+
+@pytest.mark.parametrize("K,N", [(5120, 4096), (640, 200)])
+def test_kernel4_rows_do_not_depend_on_the_batch(K, N):
+    """As at 5 bits: KS 8 in both row buckets, a row's bits are the same at
+    every row count 3..16 and whatever sits beside it."""
+    w, s, b = qweights(N, K, seed=13, bits=4)
+    X = mx.random.normal((16, 1, K)).astype(mx.float16)
+    Z = mx.random.normal((16, 1, K)).astype(mx.float16)
+    assert mrqmm._config(K, N, 1, 4)[1] == mrqmm._config(K, N, 2, 4)[1]
+    base = mrqmm.mrqmm(X, w, s, b)
+    for M in (3, 4, 6, 8, 9, 12, 16):
+        assert mx.array_equal(mrqmm.mrqmm(X[:M], w, s, b), base[:M]).item(), M
+        y2 = mrqmm.mrqmm(mx.concatenate([Z[:1], X[1:2], Z[2:M]]), w, s, b)
+        assert mx.array_equal(y2[1], base[1]).item(), M
+
+
+@pytest.mark.parametrize("M", list(range(1, 18)))
+def test_dispatch_boundaries4(M, monkeypatch):
+    K, N = 256, 128
+    lin = make_linear(K, N, bits=4)
+    x = mx.random.normal((M, 1, K)).astype(mx.float16)
+    before = lin(x)
+    assert mrqmm.install(Holder(l=lin), warmup=False) == 0          # knob off: untouched
+    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    assert mrqmm.install(Holder(l=lin), warmup=False) == 1
+    after = lin(x)
+    if 3 <= M <= 16:
+        assert mx.array_equal(after, mrqmm.mrqmm(x, lin.weight, lin.scales, lin.biases)).item()
+        check_close(after, x, lin.weight, lin.scales, lin.biases, bits=4)
+    else:
+        assert mx.array_equal(after, before).item()
+    xs = mx.random.normal((1, M, K)).astype(mx.float16)
+    assert mx.array_equal(lin(xs), qmm(xs, lin.weight, lin.scales, lin.biases, bits=4)).item()
+    mrqmm.uninstall(Holder(l=lin))
+
+
+@pytest.mark.parametrize("B", [2, 5, 16])
+def test_tiny_model_decode_step4(B, monkeypatch):
+    lm = tiny_lm(wbits=4)
+    ids = mx.random.randint(0, 512, (B, 1))
+    ref = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+    assert mrqmm.install(lm) == 0
+    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    assert mrqmm.install(lm) > 0 and mrqmm._TESTED[4][0]
+    calls = []
+    orig = mrqmm.mrqmm
+    mrqmm.mrqmm = lambda x, w, *a, **k: calls.append((x.shape[-1], w.shape)) or orig(x, w, *a, **k)
+    try:
+        y = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+    finally:
+        mrqmm.mrqmm = orig
+        mrqmm.uninstall(lm)
+    if B < 3:
+        assert not calls and mx.array_equal(y, ref).item()
+    else:
+        assert len(calls) == 3 * (4 + 1) + 4 + 4 * 3 + 1, calls
+        assert all(mrqmm._bits_of(K, ws[1]) == 4 for K, ws in calls)
+        assert mx.abs(y - ref).max().item() <= 3e-2 * max(1.0, mx.abs(ref).max().item())
+        assert (y.argmax(-1) == ref.argmax(-1)).all().item()
+
+
+@pytest.mark.parametrize("B", [1, 2, 5, 16])
+def test_worker_gdn_fuse4(B, monkeypatch):
+    """worker._install_gdn_fuse on a 4-bit model with QWEN_MRQMM4=1: the fused
+    in-projection takes the 4-bit kernel for 3..16 rows; B <= 2 is
+    bit-identical to the unfused model."""
+    import worker
+    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    lm = tiny_lm(wbits=4)
+    ids = mx.random.randint(0, 512, (B, 1))
+    ref = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+    mrqmm.install(lm)
+    try:
+        assert worker._install_gdn_fuse(lm) == 3
+        assert all(x.linear_attn.__dict__["_fused_in"][7] is mrqmm for x in lm.model.layers if x.is_linear)
+        calls = []
+        orig = mrqmm.mrqmm
+        mrqmm.mrqmm = lambda x, w, *a, **k: calls.append(w.shape) or orig(x, w, *a, **k)
+        try:
+            y = lm(ids, cache=lm.make_cache()).logits.astype(mx.float32)
+        finally:
+            mrqmm.mrqmm = orig
+    finally:
+        mrqmm.uninstall(lm)
+    if B < 3:
+        assert not calls and mx.array_equal(y, ref).item()
+    else:
+        assert calls.count((784, 16)) == 3, calls
+        assert mx.abs(y - ref).max().item() <= 3e-2 * max(1.0, mx.abs(ref).max().item())
+        assert (y.argmax(-1) == ref.argmax(-1)).all().item()

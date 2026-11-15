@@ -10,6 +10,9 @@ Per shape and row count M (x fp16: normal * 0.5 with outliers):
     (determinism in the row count: equal inside a row bucket when the bucket's
     K split is fixed, see mrqmm._config) and with other rows beside it.
 
+The bit width is the checkpoint's (config.json "quantization"): 5 for
+weights/qwen38-27b-mlx-5bit, 4 for weights/qwen38-27b-mlx-4bit (QWEN_MRQMM4).
+
   cd src/worker && PYTHONPATH=. python ../../scripts/perf/dflash2/kern5_accuracy.py \\
       [--weights DIR] --out $PERF_OUT/kern5_accuracy.json
 """
@@ -33,7 +36,9 @@ ap.add_argument("--out", default=os.path.join(os.environ.get("PERF_OUT", "/tmp/p
 a = ap.parse_args()
 mx.set_default_device(mx.gpu)
 
-BITS, GS = 5, 64
+_q = json.load(open(os.path.join(a.weights, "config.json")))["quantization"]
+BITS, GS = _q["bits"], _q["group_size"]
+assert GS == 64 and BITS in (5, 4), _q
 ROWS = [int(x) for x in a.rows.split(",")]
 _idx = json.load(open(os.path.join(a.weights, "model.safetensors.index.json")))["weight_map"]
 _files = {}
