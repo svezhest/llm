@@ -679,6 +679,11 @@ What each setting does:
   2.8 GiB.
 - **Fewer resident states.** `QWEN_PROMPT_CACHE_CKPTS=4` bounds the recurrent-state
   checkpoints (147 MiB each), and `QWEN_CACHE_LIMIT_GB=1` bounds the buffer pool.
+- **Faster long-context attention.** Add `QWEN_VERIFY_ATT=2 QWEN_DECODE_ATT=8192`
+  (2026-11-16): a one-pass kernel for the verify block and for plain decode steps over
+  ≥ 8K keys. Measured on the 4-bit 27B at 60K: DFlash 18.0 → 26.5 tok/s, plain 10.6 →
+  14.4 tok/s, the same tokens. The attention shapes are those of the 5-bit model; the
+  5-bit end-to-end gain was not measured.
 
 Measured results for a 60.1K-token conversation:
 
@@ -1244,7 +1249,8 @@ Measured:
 | `QWEN_DRAFT_BLOCK` | 0 | 0 = automatic: a fixed block of 8 with `QWEN_VERIFY_MRQMM=1`, else adaptive |
 | `QWEN_VERIFY_MRQMM` | 1 | verify rows through the multi-row kernel (fast; output ≠ plain greedy bitwise, 15/16 identical on the test corpus); `head` = only the drafter's head (exact); `0` = old path |
 | `QWEN_VERIFY_EXACT_MAX_T` | 8 | on the exact path, blocks up to this size use bit-exact verify kernels |
-| `QWEN_VERIFY_ATT` | 1 | verify attention reads the KV once per block (27B at 60K keys: 570 → 296 ms per round) |
+| `QWEN_VERIFY_ATT` | 1 | verify attention reads the KV once per block (27B at 60K keys: 570 → 296 ms per round); **`2`** = a one-pass kernel for the whole block (`vatt.py`): 27B 4-bit at 60K, round 284 → 192 ms, DFlash 18.0 → 26.5 tok/s |
+| `QWEN_DECODE_ATT` | 0 | `N`: plain decode steps over ≥ N keys through the same kernel (27B 4-bit at 60K: 10.6 → 14.4 tok/s); `8192` in the long-context recipe |
 | `QWEN_DRAFT_FP32` | auto | drafter activations in fp32; auto-on for DFlash2, whose activations overflow fp16 |
 | `QWEN_DRAFT_TAIL` / `_TAIL_END` | 128 / 2048 | the prompt cache stores the drafter's context with each state, so cache hits draft as well as cold runs |
 | `QWEN_DRAFT_SAMPLING` | 0 | speculative path for sampled requests too (exact, but ×0.8–1.2) |
@@ -1267,6 +1273,7 @@ All of these are on by default. Each was measured on M1 Max.
 | `QWEN_SDPA_FUSED` / `_MIN_KV` | fused attention for long fp16 prefill slabs | 64K prefill −3…5 %, −1.3 GB peak | KL 7e-6 |
 | `QWEN_SAMPLER_TOPK_FAST` (default **0**) | top-k sampling over the k survivors | −7 % step with top_k at B=16 | same distribution, different random stream per seed |
 | `QWEN_GDN_FAST` (default **0**) | MLX's fused gated-delta prefill | ×1.02 per slab | rejected: KL 0.013 on 8K real tokens |
+| `QWEN_VERIFY_ATT=2` / `QWEN_DECODE_ATT` (default `1` / **0**) | one-pass attention for a DFlash verify block / a decode step over a long fp16 KV (`vatt.py`, steel MMA loop over key chunks, the KV read once) | one layer at 60K keys: verify 8.1 → 2.4 ms, decode 2.8 → 0.9 ms; 27B at 60K: DFlash ×1.48, plain ×1.35 (2026-11-16) | fused-attention class: KL 1.3e-5, top-1 100 % (teacher-forced); self-tested at load |
 
 `pfqmm`, `mrqmm` and `QWEN_GDN_FUSE` need fp16 scales, so they turn themselves off with
 `QWEN_FP16=0`. Turn a kernel off (`=0`) only to bisect a problem or to compare.
@@ -1282,6 +1289,7 @@ documented and switchable:
 | cascade groups | ≥ 8 rows sharing a long prefix | `QWEN_CASCADE=0` (also off under the options above) |
 | hits through a stored reply | prompt cache on | `QWEN_PROMPT_CACHE_REPLY=0` |
 | DFlash verify through mrqmm | drafter loaded | `QWEN_VERIFY_MRQMM=head` (verify stays exact) |
+| one-pass attention (`vatt.py`) | `QWEN_VERIFY_ATT=2`: verify blocks; `QWEN_DECODE_ATT`: decode steps over long KV | `QWEN_VERIFY_ATT=1` (bit-equal to the library's verify calls), `QWEN_DECODE_ATT=0` |
 
 What stays exact regardless:
 
@@ -1844,7 +1852,8 @@ unless noted.
 | `QWEN_DRAFT_FP32` | auto |
 | `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | `128` / `2048` |
 | `QWEN_DRAFT_SAMPLING` | `0` |
-| `QWEN_VERIFY_MRQMM` / `QWEN_VERIFY_EXACT_MAX_T` / `QWEN_VERIFY_ATT` | `1` / `8` / `1` |
+| `QWEN_VERIFY_MRQMM` / `QWEN_VERIFY_EXACT_MAX_T` / `QWEN_VERIFY_ATT` | `1` / `8` / `1` (`2` = one-pass kernel) |
+| `QWEN_DECODE_ATT` | `0` (min keys for the one-pass decode attention; `8192` for long contexts) |
 
 **Worker: kernels, determinism, debugging**
 
