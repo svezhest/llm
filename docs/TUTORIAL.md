@@ -232,13 +232,14 @@ change is picked up by the next `cargo build`.
 The worker needs mlx-vlm's `qwen3_5` architecture (`qwen3_5_moe` for the MoE). This is a
 **hybrid**: Gated DeltaNet (linear-attention) layers with a fixed-size recurrent state, plus
 a full-attention layer every 4th layer, which holds a KV cache that grows with the context.
-The four checkpoints the project was built on:
+The checkpoints the project was built on and measured:
 
 | weights dir | model | quant | size | notes |
 |---|---|---|---|---|
 | `ornith15-9b-mlx-8bit` | Ornith-1.5-9B (`ornith-ai/Ornith-1.5-9B-MLX-8bit`) | MLX 8-bit g64 | ~9.5 GB | dense, **text-only** (images → 400); the everyday model; ~37 tok/s solo decode |
 | `ornith10-9b-mlx-8bit` | Ornith-1.0-9B | MLX 8-bit g64 | ~10.4 GB | dense, vision-language |
-| `qwen38-27b-mlx-5bit` | Qwen3.8-27B (`lmstudio-community/Qwen3.8-27B-MLX-5bit`) | MLX 5-bit g64 | ~18.1 GB | dense hybrid VL, 64 layers, native 256K context |
+| `qwen38-27b-mlx-5bit` | Qwen3.8-27B (`lmstudio-community/Qwen3.8-27B-MLX-5bit`) | MLX 5-bit g64 | ~18.1 GB | dense hybrid VL, 64 layers, native 256K context; DFlash needs `QWEN_MRQMM5=1` |
+| `qwen38-27b-mlx-4bit` | Qwen3.8-27B (`lmstudio-community/Qwen3.8-27B-MLX-4bit`) | MLX 4-bit g64 | ~16.1 GB on disk, 14.1 GiB loaded text-only | the long-context 27B: with `QWEN_TEXT_ONLY=1` + the drafter 15.4 GiB resident, an 80K-token prompt peaks at 23.7 GiB; DFlash needs `QWEN_MRQMM4=1` |
 | `qwen36-35b-a3b-mlx-ud3` | Qwen3.6-35B-A3B | MLX 3-bit "Unsloth Dynamic" (mixed per layer) | ~16 GB | VL MoE, 256 experts, ~3B active |
 
 Optional DFlash **drafters** for speculative decoding (see [§7.7](#77-dflash-speculative-decoding)):
@@ -248,8 +249,31 @@ Optional DFlash **drafters** for speculative decoding (see [§7.7](#77-dflash-sp
 | `qwen35-9b-dflash` | `z-lab/Qwen3.5-9B-DFlash` | the 9B models (trained on base Qwen3.5-9B; works on the Ornith finetunes) |
 | `qwen38-27b-dflash2` | `z-lab/Qwen3.8-27B-DFlash2` | the 27B |
 
-Any other MLX quantization of a `qwen3_5` / `qwen3_5_moe` checkpoint should load, but only
-these four were measured. Other architectures are not supported. At best the worker runs
+**27B: 5-bit or 4-bit?** Measured on an M1 Max 32 GB (2026-11-15, greedy, ~2K-token
+prompt, no thinking, in one process): the 4-bit model decodes 17.2 tok/s plain and 37.7 tok/s
+with the DFlash2 drafter (4.8 tokens accepted per round, output identical to plain greedy), where
+the 5-bit one did 13.3 / 23.4 (2026-11-11). The 4-bit weights are 3.1 GiB smaller, which is
+~50K tokens of fp16 KV. The 5-bit model is the more faithful one (5 vs 4 bits per weight); a
+teacher-forced comparison of the two is in progress (`scripts/perf/prof/kl_models.py`). The
+three popular 4-bit MLX uploads of this model (lmstudio-community, mlx-community, TensorFold)
+use the same plain round-to-nearest 4-bit g64 scheme; mlx-community's and TensorFold's files are
+byte-identical.
+
+**Text-only use of a vision-language checkpoint.** `QWEN_TEXT_ONLY=1` skips the vision tower
+(333 tensors, ~0.86 GiB on the 27B, never read from disk); image requests then get the same 400
+as on a text-only checkpoint.
+
+**Which quantizations run fast.** Any MLX affine quantization of a `qwen3_5` /
+`qwen3_5_moe` checkpoint should load, including mixed-precision ones (per-module bits in
+`config.json`). The custom decode kernel (`mrqmm`, multi-row matmul for batched decode and
+DFlash verify blocks) covers 8-bit modules by default and 5-bit / 4-bit modules behind
+`QWEN_MRQMM5` / `QWEN_MRQMM4`; modules at any other width (3, 6 bits) fall back to MLX's
+`quantized_matmul`, which makes a DFlash verify block several times slower on them. The fused
+decode in-projection of a Gated DeltaNet layer (`QWEN_GDN_FUSE`) needs its four projections at
+the same bit width; mixed layers keep four separate matmuls. The prefill kernel (`pfqmm`) is
+self-tested per (bits, group) and covers 3, 4, 5, 6 and 8 bits.
+
+Only the checkpoints above were measured. Other architectures are not supported. At best the worker runs
 them without batching: it logs `… is not a qwen3_5 / qwen3_5_moe model: no batching` and
 falls back to `QWEN_MAX_BATCH=1`.
 
