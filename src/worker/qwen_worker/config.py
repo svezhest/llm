@@ -638,7 +638,16 @@ VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
 #   one-query calls (checked at load on random data, _probe_verify_attention:
 #   else off) and reads the KV once: 3.4 / 4.6 ms for 3 / 5 queries. A longer
 #   block goes in chunks. fp16 KV, a lone row. 0 = the library's calls.
-VERIFY_ATT = os.environ.get("QWEN_VERIFY_ATT", "1") == "1"
+#   "2": the block's G x T query rows per kv head attend the KV together in one
+#   pass (vatt.py: steel-attention MMA loop over key chunks with the block's
+#   causal tail, fp32 partials + merge), the KV read once a round whatever T
+#   (<= 16, head_dim 256) -- not the per-query calls' bits (the fused-attention
+#   numerics class: fp32 throughout, error vs an fp32 reference <= MLX's own
+#   kernel's); self-tested at load against an fp32 reference for every block
+#   size (_probe_verify_attention), else "1". docs/perf/2026-11-16/verify_att2.md
+_VERIFY_ATT_MODE = os.environ.get("QWEN_VERIFY_ATT", "1")
+VERIFY_ATT = _VERIFY_ATT_MODE in ("1", "2")
+VERIFY_ATT2 = _VERIFY_ATT_MODE == "2"
 
 
 # QWEN_VERIFY_MRQMM (1): DFlash rounds through mrqmm, the batched-decode

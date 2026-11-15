@@ -9,7 +9,8 @@ import mlx.core as mx
 from . import config as cfg
 from .config import (DRAFT_FP32, GDN_FAST, GDN_FAST_MIN_T, GDN_FUSE, GIB, log, PREFILL_BUDGET,
                      PROMPT_CACHE, PROMPT_CACHE_REPLY, SDPA_FUSED_MIN_KV, SDPA_FUSED_MIN_Q,
-                     VERIFY_ATT, VERIFY_EXACT_MAX_T, VERIFY_MR, VERIFY_MR_BLOCK, VERIFY_MR_HEAD)
+                     VERIFY_ATT, VERIFY_ATT2, VERIFY_EXACT_MAX_T, VERIFY_MR, VERIFY_MR_BLOCK,
+                     VERIFY_MR_HEAD)
 from .sizing import _act_dtype
 
 
@@ -18,6 +19,7 @@ _GDN_KERNEL = None                    # the library's gated_delta_kernel
 _VERIFY_LINEAR = _VERIFY_LINEARS = None   # Qwen3_5BatchInvariantForward._linear / _linears
 _VERIFY_ATTENTION = None                  # ... ._attention
 _VERIFY_ATT_Q = 0                         # queries per call; 0 = off (set at load)
+_VATT = False                             # QWEN_VERIFY_ATT=2: one-pass kernel (vatt.py), set at load
 
 
 def _fused_sdpa(queries, keys, values, cache, scale, mask, sinks=None):
@@ -138,9 +140,11 @@ def _block_attention(queries, keys, values, scale, step):
 def _probe_verify_attention(lm):
     """At load with a drafter: -> queries per vector-kernel call (0 = off:
     QWEN_VERIFY_ATT=0, no kernel, or its output is not bit-equal to the
-    one-query calls' on a random block of this model's heads)."""
+    one-query calls' on a random block of this model's heads). With
+    QWEN_VERIFY_ATT=2 also the one-pass kernel's self-test (_probe_vatt)."""
     global _VERIFY_ATT_Q
     _VERIFY_ATT_Q = 0
+    _probe_vatt(lm)
     a = lm.args
     H, HK, D = a.num_attention_heads, a.num_key_value_heads, a.head_dim
     T = min(32 // max(1, H // HK), 16)
@@ -164,20 +168,90 @@ def _probe_verify_attention(lm):
     return _VERIFY_ATT_Q
 
 
+def _rel_rms(a, ref):
+    d = a.astype(mx.float32) - ref
+    return (mx.sqrt(mx.mean(d * d)) / mx.sqrt(mx.mean(ref * ref))).item()
+
+
+def _probe_vatt(lm):
+    """QWEN_VERIFY_ATT=2: the one-pass kernel on random blocks of this model's
+    heads, every block size 2..vatt.MAX_T (each compiles its tile's pipelines
+    now, not on the scheduler's first round), over a buffer with garbage past
+    its keys and a tail crossing a chunk: on (-> _VATT) only if every output is
+    finite and within max(1.05 x the per-query calls' error, 4e-4) of an fp32
+    reference (rms relative), else off (the vector kernel's path, logged)."""
+    global _VATT
+    _VATT = False
+    if not VERIFY_ATT2:
+        return False
+    import vatt
+    a = lm.args
+    H, HK, D = a.num_attention_heads, a.num_key_value_heads, a.head_dim
+    why = ""
+    if D not in vatt.D_OK or H % HK:
+        why = f"head_dim {D}, {H} / {HK} heads"
+    elif (_act_dtype(lm) or mx.float16) != mx.float16:
+        why = f"activations {_act_dtype(lm)}"
+    worst = 0.0
+    try:
+        key = mx.random.key(1)
+        ks = mx.random.split(key, 3)
+        n, cap = 600, 700
+        k = mx.random.normal((1, HK, cap, D), key=ks[1]).astype(mx.float16)
+        v = mx.random.normal((1, HK, cap, D), key=ks[2]).astype(mx.float16)
+        k[..., n:, :] = 1000.0
+        v[..., n:, :] = float("nan")
+        for T in range(2, vatt.MAX_T + 1):
+            if why:
+                break
+            q = (mx.random.normal((1, H, T, D), key=mx.random.split(ks[0], vatt.MAX_T + 1)[T]) * 2
+                 ).astype(mx.float16)
+            out = vatt.attention(q, k, v, n, D ** -0.5)
+            ref = vatt.reference(q, k, v, n, D ** -0.5)
+            rows = mx.concatenate(_rows_sdpa(q, k[:, :, :n], v[:, :, :n], D ** -0.5, 0, T), axis=2)
+            e, e_rows = _rel_rms(out, ref), _rel_rms(rows, ref)
+            worst = max(worst, e)
+            if mx.any(mx.isnan(out)).item() or not e <= max(1.05 * e_rows, 4e-4):
+                why = f"T={T}: rms rel error {e:.2e} vs the per-query calls' {e_rows:.2e}"
+    except (ValueError, RuntimeError, TypeError) as e:
+        why = f"{type(e).__name__}: {e}"
+    if why:
+        log.warning("QWEN_VERIFY_ATT=2 off (one-pass kernel self-test failed: %s); the vector kernel's path",
+                    why)
+        return False
+    _VATT = True
+    log.info("DFlash verify attention: one-pass kernel (QWEN_VERIFY_ATT=2, vatt), blocks of 1..%d, "
+             "self-test rms rel error <= %.2e", vatt.MAX_T, worst)
+    return True
+
+
 def _verify_attention(self, attention, x, mask, cache, position_ids, position_embeddings):
     """Qwen3_5BatchInvariantForward._attention; a verify block (1, T >= 2, K)
-    of a lone row over a plain fp16 KVCache attends _VERIFY_ATT_Q queries per
-    call (QWEN_VERIFY_ATT) instead of one. Decided before the cache is
-    touched; anything else is the library's call."""
+    of a lone row over a plain fp16 KVCache attends through the one-pass
+    kernel (QWEN_VERIFY_ATT=2: vatt over the cache's own buffers) or
+    _VERIFY_ATT_Q queries per call (QWEN_VERIFY_ATT) instead of one. Decided
+    before the cache is touched; anything else is the library's call. A
+    one-pass call that raises turns it off (the vector kernel's path from then on)."""
+    global _VATT
     T = x.shape[1]
-    if not (_VERIFY_ATT_Q and x.shape[0] == 1 and T >= 2
+    if not ((_VERIFY_ATT_Q or _VATT) and x.shape[0] == 1 and T >= 2
             and (mask is None or (isinstance(mask, str) and mask == "causal"))
             and type(cache).__name__ == "KVCache" and not hasattr(cache, "bits")):
         return _VERIFY_ATTENTION(self, attention, x, mask, cache, position_ids, position_embeddings)
     q, k, v = self._linears((attention.q_proj, attention.k_proj, attention.v_proj), x)
     queries, keys, values, gate, _ = attention._prepare_projected_qkv(
         q, k, v, cache, position_ids, position_embeddings, mask)
-    out = _block_attention(queries, keys, values, attention.scale, _VERIFY_ATT_Q)
+    out = None
+    if _VATT and T <= sys.modules["vatt"].MAX_T:
+        try:
+            # the cache's own buffers (keys / values are their [..., :n, :] views)
+            out = sys.modules["vatt"].attention(queries, cache.keys, cache.values, keys.shape[2],
+                                                attention.scale)
+        except (ValueError, RuntimeError, TypeError) as e:
+            _VATT = False
+            log.warning("QWEN_VERIFY_ATT=2 off: %s", e)
+    if out is None:
+        out = _block_attention(queries, keys, values, attention.scale, _VERIFY_ATT_Q or T)
     out = out.transpose(0, 2, 1, 3).reshape(1, T, -1)
     return self._linear(attention.o_proj, out * mx.sigmoid(gate))
 
