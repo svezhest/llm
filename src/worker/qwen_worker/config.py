@@ -357,6 +357,9 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # second (mtp.Chooser), "dflash" / "mtp" = always that one.
 DRAFT_MTP = os.environ.get("QWEN_DRAFT_MTP", "")
 MTP_K = int(os.environ.get("QWEN_MTP_K") or "3")
+# QWEN_MTP_K=0: adaptive (mtp.MTPDraft.next_k), QWEN_MTP_COST = one draft's cost
+# as a fraction of a round's verify
+MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
 MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
 DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
 

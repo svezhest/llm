@@ -306,7 +306,7 @@ class _SpecMixin:
                 if pick_kind is not None:
                     kind = pick_kind.pick(force)
                 if kind == "mtp":
-                    bs = min(max(1, cfg.MTP_K) + 1, max_tokens - n + 1)
+                    bs = min(mt.next_k() + 1, max_tokens - n + 1)
                 else:
                     bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
                 if bs <= 1:

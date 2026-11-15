@@ -214,3 +214,26 @@ def test_prompt_cache_context(dense, spec, monkeypatch):
     x = request(ids, 16, "y")
     assert run(sched, [x])["y"] == ref
     assert x.reused == len(ids) - 1 and starts == [len(ids) - 1 - 16]
+
+
+def test_adaptive_k(dense, spec, monkeypatch):
+    """QWEN_MTP_K=0: high acceptance -> the deepest block, none -> one draft
+    (+ one every EXPLORE-th round); the answer stays plain greedy's."""
+    monkeypatch.setattr(worker, "MTP_K", 0)
+    mt = worker.MTPDraft(head(dense), dense)
+    mt.start(0)
+    for _ in range(20):
+        mt.record(4, 4)
+    assert mt.next_k() == 4
+    mt.start(0)
+    for _ in range(19):
+        mt.record(0, mt.next_k())
+    assert mt.next_k() == 1
+    for _ in range(4):
+        mt.record(0, 1)
+    assert mt.next_k() == 2                              # the 24th round explores
+    ids = prompts([25], 35)[0]
+    ref = plain(dense, ids, 40)
+    mt = Oracle(head(dense), dense, ids + ref[0], wrong=False)
+    assert with_mtp(dense, ids, 40, mt) == ref
+    assert max(mt.draft_lens) == 4

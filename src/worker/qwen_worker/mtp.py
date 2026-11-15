@@ -63,6 +63,28 @@ class MTPDraft:
         self.appended = 0               # approximate entries of the current round
         self.seed = None                # (token (1, 1), hidden (1, 1, H)) or None
         self.accept_lens, self.draft_lens = [], []
+        self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
+
+    # QWEN_MTP_K=0: the draft count per round from the request's own acceptance
+    KMAX, P0, ALPHA, EXPLORE = 4, 0.5, 0.25, 8
+
+    def next_k(self):
+        """Drafts for the next round: QWEN_MTP_K, or (0) the k in 1..KMAX with
+        the most expected tokens per unit of round time, (1 + sum_i prod_{j<=i}
+        p_j) / (1 + QWEN_MTP_COST * k), from per-depth acceptance averages; every
+        EXPLORE-th round one more (deeper averages would go stale)."""
+        if cfg.MTP_K > 0:
+            return cfg.MTP_K
+        best, bk, e, q = -1.0, 1, 1.0, 1.0
+        for k in range(1, self.KMAX + 1):
+            q *= self.p[k - 1]
+            e += q
+            v = e / (1.0 + cfg.MTP_COST * k)
+            if v > best:
+                best, bk = v, k
+        if len(self.accept_lens) % self.EXPLORE == self.EXPLORE - 1:
+            bk = min(self.KMAX, bk + 1)
+        return bk
 
     def push(self, h):
         """Hidden states (1, n, H, the target's post-norm) of the next n
@@ -146,6 +168,9 @@ class MTPDraft:
     def record(self, accepted, drafted):
         self.accept_lens.append(int(accepted))
         self.draft_lens.append(int(drafted))
+        for i in range(min(int(accepted) + 1, int(drafted), self.KMAX)):
+            hit = 1.0 if i < accepted else 0.0
+            self.p[i] += self.ALPHA * (hit - self.p[i])
 
     # ---- the head ----
 
