@@ -289,13 +289,19 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # Speculative decoding (QWEN_DRAFT=<dir>): a DFlash block-diffusion drafter
 # (e.g. z-lab/Qwen3.5-9B-DFlash, trained on the base Qwen3.5-9B — it also works
 # on the Ornith finetunes, ~60% token acceptance). Exact-greedy walk, so it is
-# only used when the request is greedy (temperature 0, no presence penalty) and
-# text-only; otherwise the plain loop runs. A thinking budget is honoured
+# only used when the request is greedy (temperature 0, no presence / frequency /
+# repetition penalty: _Penalties.active) and text-only; otherwise the plain loop
+# runs. The default QWEN_PRESENCE_PENALTY is 1.5, so set it to 0 (or the request
+# must) for DFlash to run at all. A thinking budget is honoured
 # inside the rounds (2026-11-11: the block is cut where the budget forces the
 # next token, \n</think> go through plain steps; _Scheduler._spec).
 # Output is identical to the plain greedy loop up to fp16 noise.
 DRAFT = os.environ.get("QWEN_DRAFT", "")
-DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
+# QWEN_DRAFT_BLOCK: tokens per verify round (the last accepted token + N - 1
+# drafts), fixed. 0 = automatic: VERIFY_MR_BLOCK (8) when QWEN_VERIFY_MRQMM=1 and
+# mrqmm covers the target (kernels._setup_verify_mrqmm sets it at load), else
+# mlx-vlm's adaptive block (up to the drafter's trained size).
+DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))
 # Drafter weight bits (0 = keep fp16). The target verifies every draft, so the
 # drafter's precision only moves acceptance, not output: measured 4-bit ≈ 8-bit
 # ≈ fp16 acceptance (~60%), and the round gets cheaper (fp16 ~100 ms → 4-bit
