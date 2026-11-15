@@ -799,7 +799,7 @@ def test_wide_equals_narrow_sums_scaled(bits, M):
         assert y.dtype == mx.float32 and y.shape == (M, 1, N)
         ref = ref32(x.reshape(M, K), w, s, b, bits) * rs[:, None]
         err = mx.abs(y.reshape(M, N) - ref).max().item()
-        assert err <= 2e-4 * mx.abs(ref).max().item(), (K, N, err)
+        assert err <= 1.5e-3 * mx.abs(ref).max().item(), (K, N, err)   # fp16 dequant, as _selftest
         # the fp16 kernel's rows are these sums rounded to fp16 (unscaled: rs = 1)
         y1 = mrqmm.mrqmm_wide(x, w, s, b, mx.ones((M,), mx.float32))
         assert mx.array_equal(y1.astype(mx.float16), mrqmm.mrqmm(x, w, s, b)).item()

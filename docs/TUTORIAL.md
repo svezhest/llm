@@ -1246,6 +1246,8 @@ Measured:
 | `QWEN_VERIFY_EXACT_MAX_T` | 8 | on the exact path, blocks up to this size use bit-exact verify kernels |
 | `QWEN_VERIFY_ATT` | 1 | verify attention reads the KV once per block (27B at 60K keys: 570 → 296 ms per round) |
 | `QWEN_DRAFT_FP32` | auto | drafter activations in fp32; auto-on for DFlash2, whose activations overflow fp16 |
+| `QWEN_DRAFT_MRQMM` | 1 | the fp32 drafter's linears through the multi-row kernel (rows prescaled by a power of two, fp32 output); 27B 4-bit drafter block 31 → 17 ms, DFlash ×1.12, the same drafts |
+| `QWEN_DRAFT_COMPILE` | 0 | compiled DFlash2 convolution (+0.3 %, below the 3 % bar) |
 | `QWEN_DRAFT_TAIL` / `_TAIL_END` | 128 / 2048 | the prompt cache stores the drafter's context with each state, so cache hits draft as well as cold runs |
 | `QWEN_DRAFT_SAMPLING` | 0 | speculative path for sampled requests too (exact, but ×0.8–1.2) |
 
@@ -1842,6 +1844,7 @@ unless noted.
 | `QWEN_DRAFT` | unset |
 | `QWEN_DRAFT_BITS` / `QWEN_DRAFT_BLOCK` | `4` / `0` (automatic) |
 | `QWEN_DRAFT_FP32` | auto |
+| `QWEN_DRAFT_MRQMM` / `QWEN_DRAFT_COMPILE` | `1` / `0` |
 | `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | `128` / `2048` |
 | `QWEN_DRAFT_SAMPLING` | `0` |
 | `QWEN_VERIFY_MRQMM` / `QWEN_VERIFY_EXACT_MAX_T` / `QWEN_VERIFY_ATT` | `1` / `8` / `1` |
