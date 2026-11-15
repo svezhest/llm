@@ -313,12 +313,14 @@ class _SpecMixin:
                     break
                 if kind == "mtp":
                     if draft is not None:       # DFlash's context: kept for its next round
-                        dpend = [mx.concatenate(dpend + [hidden], axis=1)[:, -win:]]
+                        dpend.append(dfl(hidden))
+                        while sum(t.shape[1] for t in dpend[1:]) >= win:
+                            dpend.pop(0)
                     drafts = mt.draft(bs - 1)
                 else:
-                    if dpend:
-                        hidden, dpend = mx.concatenate(dpend + [hidden], axis=1)[:, -win:], []
                     dh = dfl(hidden)
+                    if dpend:
+                        dh, dpend = mx.concatenate(dpend + [dh], axis=1)[:, -win:], []
                     drafts = draft.draft_block(b, dh.astype(mx.float32) if wide else dh,
                                                draft_cache, bs, argmax, dtype)
                 mx.async_eval(drafts)
