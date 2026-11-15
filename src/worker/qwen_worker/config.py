@@ -21,6 +21,14 @@ DEFAULT_MODEL = os.environ.get(
     os.path.join(_REPO_ROOT, "weights", "qwen36-35b-a3b-mlx-ud3"),
 )
 
+# Text-only mode (QWEN_TEXT_ONLY=1): a VL checkpoint is loaded without its
+# vision tower, as a checkpoint without vision_config is (Ornith-1.5-9B): its
+# `vision_tower.*` tensors (27B 0.86 GiB, 35B 0.83, 9B 0.85, bf16) are never
+# read from disk, image requests are refused with the text-only checkpoint's
+# 400. Text is unaffected (same language model, processor, template).
+# Engine.load / _load_model.
+TEXT_ONLY = os.environ.get("QWEN_TEXT_ONLY", "0") == "1"
+
 
 # Special-token strings inside message TEXT (QWEN_SPLIT_SPECIAL_TOKENS, default
 # 0 = as vLLM v0.30: the rendered prompt goes through tokenizer.encode, which

@@ -200,7 +200,7 @@ cannot do what vLLM does it says so with a 400 instead of ignoring the field.
 - **400 instead of silence**: `n` > 1, `logit_bias`, `top_logprobs` > 20, `prompt_logprobs`
   other than true/false/0/1, legacy
   `functions` / `function_call`, content parts other than text / image, images on a
-  text-only checkpoint, roles the template rejects, `response_format.json_schema`
+  text-only checkpoint (or a VL one loaded with `QWEN_TEXT_ONLY=1`), roles the template rejects, `response_format.json_schema`
   without `name`, a `tool_choice` object whose `type` is not `"function"`, and every
   other vLLM field set to a non-default value (`echo`, `use_beam_search`,
   `truncate_prompt_tokens`, `structured_outputs`, `documents`, …). Fields vLLM does
@@ -781,6 +781,7 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
 | `QWEN_KV_BITS` | worker | `4` (35B); `0` = fp16 cache for the 9B, `8` for the 27B |
 | `QWEN_FP16` | worker | `1` — cast bf16 params to fp16 (M1/M2 have no native bf16: prefill ×1.45; KL vs bf16 0.0003). `0` = bf16 |
+| `QWEN_TEXT_ONLY` | worker | `0` — `1` loads a VL checkpoint without its vision tower (its `vision_tower.*` weights are never read: ~0.85 GiB on the 27B / 35B / 9B); image requests → 400, as on a text-only checkpoint; text unchanged |
 | `QWEN_DRAFT` / `QWEN_DRAFT_BLOCK` | worker | unset / `0` (adaptive) — DFlash drafter dir for speculative decoding (greedy, text-only, fp16 KV) |
 | `QWEN_VERIFY_EXACT_MAX_T` | worker | `8` — DFlash verify blocks up to this many tokens use mlx-vlm's exact verify kernels (output = plain greedy); longer blocks use `quantized_matmul` (the exact kernel is ×9–12 slower at 12–16 rows). 9B coding tasks: 48 tok/s vs 37 plain. Empty = default |
 | `QWEN_WIRED_LIMIT_GB` | worker | `0` (off; clamped to kernel cap) |

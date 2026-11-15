@@ -847,6 +847,7 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
 | `QWEN_KV_BITS` | worker | `4` (35B); `0` (fp16 cache) for the 9B; `8` for the 27B |
 | `QWEN_FP16` | worker | `1` (cast bf16→fp16 after load; `0` = bf16) |
+| `QWEN_TEXT_ONLY` | worker | `0` — `1`: a VL checkpoint loads without its vision tower (`engine._load_model`: `mlx_vlm.load(lazy=True)`, `vision_tower = None` — the text-only checkpoint's state — then the eval, so the `vision_tower.*` tensors are never read from disk: 27B 0.86 GiB, 35B 0.83, 9B 0.85 bf16; CPU test: load peak = the LM's bytes); image requests → 400 (`invalid_request`, as a text-only checkpoint); text bit-identical. Load log: `vision tower not loaded (N tensors, X GiB …)`. GPU memory before/after on the 27B not measured yet |
 | `QWEN_DRAFT` / `QWEN_DRAFT_BLOCK` | worker | unset / `0` — DFlash drafter dir (`weights/qwen35-9b-dflash`), speculative decode for greedy text requests |
 | `QWEN_WIRED_LIMIT_GB` / `QWEN_PREFILL_STEP` | worker | `0` (off; clamped to cap) / `2048`; shrunk so slab×offset ≤ `QWEN_PREFILL_BUDGET` (2048×32K) for quantized KV, and for fp16 KV while the slab stays under 32K keys; fp16 KV + fused SDPA (9B with `QWEN_KV_BITS=0`) keeps it from 32K keys on |
 | `QWEN_TEMPERATURE` / `QWEN_TOP_P` / `QWEN_TOP_K` / `QWEN_MIN_P` | worker | `0.0` (argmax) / `1.0` / `0` / `0.0` |
