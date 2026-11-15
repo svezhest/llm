@@ -4,6 +4,8 @@ Local LLM inference on Apple Silicon (MLX): a **Rust gateway** (OpenAI-compatibl
 HTTP/SSE) talking to thin **Python MLX workers** over **gRPC**, with Prometheus
 metrics, Grafana dashboards, Loki logs, a request queue, and leveled logging.
 
+**New here? Start with the [tutorial](docs/TUTORIAL.md)** — install, first run, memory recipes per model, the API in practice, tuning, observability, benchmarking and development.
+
 ```
 clients ──HTTP/SSE (OpenAI)──► gateway (Rust) ──gRPC stream──► mlx worker(s) (Python)
                                  /metrics, queue, logs           mlx-vlm load + generate
