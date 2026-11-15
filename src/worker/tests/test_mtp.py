@@ -279,6 +279,7 @@ def test_adaptive_k(dense, spec, monkeypatch):
     """QWEN_MTP_K=0: high acceptance -> the deepest block, none -> one draft
     (+ one every EXPLORE-th round); the answer stays plain greedy's."""
     monkeypatch.setattr(worker, "MTP_K", 0)
+    monkeypatch.setattr(worker.MTPDraft, "MS", {})
     mt = worker.MTPDraft(head(dense), dense)
     mt.start(0)
     for _ in range(20):
@@ -291,8 +292,25 @@ def test_adaptive_k(dense, spec, monkeypatch):
     for _ in range(4):
         mt.record(0, 1)
     assert mt.next_k() == 2                              # the 24th round explores
+    # measured round times (the 27B's: 2-token verify on exact qmv, 3.. on mrqmm)
+    monkeypatch.setattr(worker.MTPDraft, "MS", {1: 66.0, 2: 88.0, 3: 92.0, 4: 97.0})
+    mt.start(0)
+    mt.p = [0.46] * 4
+    assert mt.next_k() == 1                              # 1.46 / 66 > 1.77 / 92
+    mt.p = [0.85] * 4
+    assert mt.next_k() == 4                              # 3.70 / 97 > 1.85 / 66
+    monkeypatch.setattr(worker.MTPDraft, "MS", {1: 66.0})
+    assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * worker.MTP_COST) / (1 + worker.MTP_COST))
     ids = prompts([25], 35)[0]
     ref = plain(dense, ids, 40)
     mt = Oracle(head(dense), dense, ids + ref[0], wrong=False)
     assert with_mtp(dense, ids, 40, mt) == ref
     assert max(mt.draft_lens) == 4
+
+
+def test_token_bytes(dense):
+    """The head's own fp16 KV per position (charged to fp16 rows by the scheduler)."""
+    from conftest import COMMON
+    mt = worker.MTPDraft(head(dense), dense)
+    kv, hd = COMMON["num_key_value_heads"], COMMON["head_dim"]
+    assert mt.token_bytes == 2 * 2 * kv * hd * 1

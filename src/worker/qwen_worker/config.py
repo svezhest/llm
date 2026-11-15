@@ -367,6 +367,12 @@ DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
 # (short Russian prose on the 27B: DFlash below plain) decodes mostly plain,
 # re-probing the drafters every mtp.Chooser.EXPLORE tokens.
 SPEC_PLAIN = os.environ.get("QWEN_SPEC_PLAIN", "0") == "1"
+# QWEN_VERIFY_QMV=N (2..8; 0 = off): verify blocks of 2..N tokens (MTP rounds:
+# QWEN_MTP_K + 1) on 4-bit g64 modules through mrqmv.py, a multi-row qmv whose
+# every row is MLX's solo qmv bit for bit (self-tested per shape at load):
+# the weights read once for the T rows, instead of mrqmm's MMA (rows padded
+# to 8, a flat ~x1.6 of a solo row) or mlx-vlm's exact kernels (T unpacks).
+VERIFY_QMV = int(os.environ.get("QWEN_VERIFY_QMV") or "0")
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs

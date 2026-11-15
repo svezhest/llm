@@ -51,6 +51,15 @@ class MTPDraft:
 
     # ---- per request ----
 
+    @property
+    def token_bytes(self):
+        """fp16 K + V bytes per position of the head's own cache (every layer
+        attends: 4 KiB on the 27B's one layer)."""
+        a = self.model.config.text_config
+        heads = getattr(a, "num_key_value_heads", 0)
+        dim = getattr(a, "head_dim", 0) or a.hidden_size // a.num_attention_heads
+        return 2 * 2 * heads * dim * len(self.model.layers)
+
     def start(self, at):
         """A new request whose next pushed hidden state is position `at`."""
         from mlx_vlm.models.cache import KVCache
@@ -63,27 +72,45 @@ class MTPDraft:
         self.appended = 0               # approximate entries of the current round
         self.seed = None                # (token (1, 1), hidden (1, 1, H)) or None
         self.accept_lens, self.draft_lens = [], []
+        self.t0 = None                  # the current round's start (draft)
         self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
 
     # QWEN_MTP_K=0: the draft count per round from the request's own acceptance
+    # and the process's measured round times per k (MS: shared by requests,
+    # a property of the model and machine; the verify cost is not linear in T:
+    # 2 tokens exact qmv, 3..16 mrqmm's flat MMA cost on the 27B)
     KMAX, P0, ALPHA, EXPLORE = 4, 0.5, 0.25, 8
+    MS = {}
+
+    def _ms(self, k):
+        """Expected wall time of a k-draft round: measured, else scaled from
+        the nearest measured k by the linear prior (1 + QWEN_MTP_COST * k)."""
+        if k in self.MS:
+            return self.MS[k]
+        c = cfg.MTP_COST
+        if self.MS:
+            k0 = min(self.MS, key=lambda j: abs(j - k))
+            return self.MS[k0] * (1.0 + c * k) / (1.0 + c * k0)
+        return 1.0 + c * k
 
     def next_k(self):
         """Drafts for the next round: QWEN_MTP_K, or (0) the k in 1..KMAX with
-        the most expected tokens per unit of round time, (1 + sum_i prod_{j<=i}
-        p_j) / (1 + QWEN_MTP_COST * k), from per-depth acceptance averages; every
-        EXPLORE-th round one more (deeper averages would go stale)."""
+        the most expected tokens per ms, (1 + sum_i prod_{j<=i} p_j) / ms(k),
+        from per-depth acceptance averages and the measured round times; every
+        EXPLORE-th round one more or (alternately) one fewer (the averages of
+        the neighbours would go stale)."""
         if cfg.MTP_K > 0:
             return cfg.MTP_K
         best, bk, e, q = -1.0, 1, 1.0, 1.0
         for k in range(1, self.KMAX + 1):
             q *= self.p[k - 1]
             e += q
-            v = e / (1.0 + cfg.MTP_COST * k)
+            v = e / self._ms(k)
             if v > best:
                 best, bk = v, k
-        if len(self.accept_lens) % self.EXPLORE == self.EXPLORE - 1:
-            bk = min(self.KMAX, bk + 1)
+        r = len(self.accept_lens)
+        if r % self.EXPLORE == self.EXPLORE - 1:
+            bk = min(self.KMAX, bk + 1) if (r // self.EXPLORE) % 2 == 0 else max(1, bk - 1)
         return bk
 
     def push(self, h):
@@ -136,6 +163,7 @@ class MTPDraft:
         if self.seed is None:
             raise RuntimeError("mtp: no seed (a pushed position without its successor)")
         tok, h = self.seed
+        self.t0 = time.perf_counter()
         toks = [tok]
         self.appended = 0
         for _ in range(n - 1):
@@ -166,6 +194,11 @@ class MTPDraft:
         self.skip += keep
 
     def record(self, accepted, drafted):
+        """After a round's tokens were read: its acceptance and wall time."""
+        if self.t0 is not None and drafted:
+            ms, d = 1000.0 * (time.perf_counter() - self.t0), int(drafted)
+            self.MS[d] = ms if d not in self.MS else (1 - self.ALPHA) * self.MS[d] + self.ALPHA * ms
+            self.t0 = None
         self.accept_lens.append(int(accepted))
         self.draft_lens.append(int(drafted))
         for i in range(min(int(accepted) + 1, int(drafted), self.KMAX)):

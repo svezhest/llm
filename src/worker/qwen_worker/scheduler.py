@@ -116,7 +116,9 @@ class _Scheduler(_AdmitMixin, _PrefillMixin, _SpecMixin, _StoreMixin, _CascadeMi
         self.quantize = functools.partial(
             maybe_quantize_kv_cache, quantized_kv_start=self.kv["quantized_kv_start"],
             kv_group_size=self.kv["kv_group_size"], kv_bits=self.kv["kv_bits"])
-        self.kv_fp16 = _kv_token_bytes(self.lm, 0)
+        # + an MTP head's own KV (mtp.MTPDraft.token_bytes; fp16 rows only run
+        # drafters): charged to every fp16 row, the rows that draft are not known here
+        self.kv_fp16 = _kv_token_bytes(self.lm, 0) + getattr(getattr(eng, "mtp", None), "token_bytes", 0)
         self.kv_q = _kv_token_bytes(self.lm, self.kv["kv_bits"])
         self.gdn_row = _gdn_row_bytes(self.lm)
         self.cv = threading.Condition()

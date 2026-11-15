@@ -31,7 +31,8 @@ from .stream import _BPEDetokenizer, _Control, _done, _eos_ids, _GenState, _Reje
 from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks, JSON_MAX_WS
 from .rows import _install_rows_attention
 from .kernels import (_draft_wide, _install_fast_paths, _install_gdn_fuse, _invariant_check,
-                      _log_invariant, _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
+                      _log_invariant, _probe_verify_attention, _setup_verify_mrqmm, _setup_verify_qmv,
+                      _widen_drafter)
 from .mtp import load_mtp, mtp_dir
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
@@ -273,6 +274,8 @@ class Engine:
             # never with QWEN_BATCH_INVARIANT (it loads no drafter)
             how = _setup_verify_mrqmm(lm, self.draft)
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
+        if spec and cfg.VERIFY_QMV:
+            log.info("verify through mrqmv (QWEN_VERIFY_QMV=%d): %s", cfg.VERIFY_QMV, _setup_verify_qmv(lm))
         if spec:
             nq = _probe_verify_attention(lm)
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",

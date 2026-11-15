@@ -11,6 +11,8 @@ Variants (comma separated):
   hybK         both, per-round choice (QWEN_DRAFT_HYBRID=1), MTP rounds of K drafts
   <v>+p        any of the above with plain steps as an arm (QWEN_SPEC_PLAIN=1)
   <v>+x        verify blocks through mlx-vlm's exact multi-row qmv (QWEN_VERIFY_MRQMM off)
+  <v>+q        verify blocks of 2..N tokens through mrqmv (load with QWEN_VERIFY_QMV=N; without
+               +q the variant runs with it off)
   K = 0: the adaptive draft count (QWEN_MTP_K=0)
 Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tokens of
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
@@ -69,6 +71,7 @@ print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() /
       f"dflash {type(D).__name__ if D else None} mtp {type(M).__name__ if M else None}; "
       f"DRAFT_BLOCK {W.DRAFT_BLOCK} VERIFY_MR {W.VERIFY_MR}", flush=True)
 REFEED0, SAMPLING0, MR0 = W.MTP_REFEED, W.DRAFT_SAMPLING, (W.VERIFY_MR, W.VERIFY_MR_HEAD)
+QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
 
 
 def set_variant(v):
@@ -79,6 +82,9 @@ def set_variant(v):
     v = v.split("+")[0]
     W.SPEC_PLAIN = "p" in flags
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
+    W.VERIFY_QMV = QMV0 if "q" in flags else 0
+    if "q" in flags and not QMV0:
+        raise SystemExit(f"{v}+q: mrqmv not installed (QWEN_VERIFY_QMV unset or its self-test failed)")
     if v == "plain":
         eng.draft = eng.mtp = None
     elif v == "dflash":
