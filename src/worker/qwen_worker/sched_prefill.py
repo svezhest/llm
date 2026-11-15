@@ -10,7 +10,7 @@ import numpy as np
 from .config import (CLEAR_CACHE, GIB, log, PREEMPT, PROMPT_CACHE, PROMPT_CACHE_CHAIN_FRESH_TOKENS,
                      PROMPT_CACHE_CHAIN_MARKS, PROMPT_CACHE_CHAIN_TAIL, PROMPT_CACHE_CKPTS,
                      PROMPT_CACHE_REPLY, PROMPT_CACHE_STRIDE)
-from .pcache import _Inherit, _lcp, _recurrent_states, _thin, _with_tail
+from .pcache import _Inherit, _lcp, _pins, _recurrent_states, _thin, _with_tail
 from .sizing import _slab
 from .logprobs import _cache_mode, _score, _wants
 from .request import _Own
@@ -61,16 +61,20 @@ class _PrefillMixin:
             """MOVE: an empty batch always admits, without an admission
             check, so the cache gives way to this row's reservation here
             (with one KV copy, the entry the row comes back as fits where
-            the row did). `gone`: the entry about to move into the row (what
-            only it holds is not counted: a segment another entry shares
-            stays, beside the row's copy of it) -> False: still over."""
+            the row did). Down to the budget, not into the prefill reserve:
+            this row's prefill is about to need it (the stand's OOMs of
+            2026-11-14: a 2-3 GiB entry beside a 6-20K-token prefill, the sum
+            inside budget + reserve). `gone`: the entry about to move into
+            the row (what only it holds is not counted: a segment another
+            entry shares stays, beside the row's copy of it) -> False: still
+            over."""
             pc, n = eng._pcache, 0
 
             def over():
                 c = pc.charged()
                 if gone is not None:
                     c -= pc.bytes - pc.bytes_of([e for e in pc.entries if e is not gone])
-                return self.reserved + c > self.budget + self.prefill_reserve
+                return self.reserved + c > self.budget
             while over() and pc.evict(keep=keep, wanted=self._wanted, spill=False):
                 n += 1
             if n:
@@ -102,7 +106,18 @@ class _PrefillMixin:
                 log.info("id=%s prompt cache: the %d-token entry of another branch moves into "
                          "the row (no room for a copy beside it); its part past %d is dropped",
                          req.id, n, reused)
-            inherit = _Inherit([] if taken else parent.cut(reused),
+            pieces = [] if taken else parent.cut(reused)
+            if move and pieces and _pins(pieces):
+                # the row's KV over [0, reused) is a copy of these pieces
+                # anyway (MOVE: its buffers become the entry): its store
+                # keeps those instead of pinning the parent's segments, most
+                # of which it does not use (a 332-token shared system prompt
+                # held a dead 27K-token conversation's 1.6 GB: the stand,
+                # 2026-11-14)
+                pieces = []
+                log.info("id=%s prompt cache: the row keeps its own copy of the %d shared "
+                         "tokens (the parent's segments are mostly past them)", req.id, reused)
+            inherit = _Inherit(pieces,
                                {p: s for p, s in parent.ckpts.items() if p <= reused},
                                parent.end if reused == len(parent.ids) else None,
                                parent.quantized)
@@ -141,7 +156,8 @@ class _PrefillMixin:
         lease = None
         if move:
             lease = row.own = _Own(parent if taken else None, reused,
-                                   0 if taken else reused, len(ids) - 1)
+                                   reused if inherit is not None and inherit.pieces else 0,
+                                   len(ids) - 1)
             room(keep=(parent,) if parent is not None and not taken else ())
         keep, protect, ckpts, live = set(), set(), {}, set()
         if keeps:

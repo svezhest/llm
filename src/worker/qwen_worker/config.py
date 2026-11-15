@@ -472,6 +472,12 @@ PREEMPT = max(0, int(os.environ.get("QWEN_PREEMPT", "2") or "0"))
 MAX_BATCH = max(1, int(os.environ.get("QWEN_MAX_BATCH", "16")))
 PREFILL_SHARE = min(1.0, max(0.05, float(os.environ.get("QWEN_BATCH_PREFILL_SHARE", "0.5"))))
 BATCH_MEM_GB = float(os.environ.get("QWEN_BATCH_MEM_GB", "0") or "0")
+# QWEN_PREFILL_RESERVE_GB: the memory kept outside the batch budget for a
+# prefill slab's activations, instead of the estimate (_prefill_reserve). The
+# estimate counts the attention scores + ~0.4 GiB of MLP; a DFlash prefill of
+# the 27B (the drafter's hidden states, 5120-wide MLP at 2048 rows) peaked
+# 2.0-2.7 GiB above its KV against an estimate of 1.15 (stand log 2026-11-14).
+PREFILL_RESERVE_GB = float(os.environ.get("QWEN_PREFILL_RESERVE_GB", "0") or "0")
 RESERVE_TOKENS = max(1, int(os.environ.get("QWEN_BATCH_RESERVE_TOKENS", "4096")))
 GEN_SLOTS = int(os.environ.get("QWEN_GEN_SLOTS", "0") or "0")
 SCHED_LOG_S = 10.0

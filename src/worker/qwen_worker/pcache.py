@@ -292,6 +292,16 @@ def _layout(cache):
     return out
 
 
+def _pins(pieces, slack=1.0):
+    """Would inheriting `pieces` ((seg, lo, hi) of a parent's chain) pin more
+    than `slack` x their own bytes of segments beyond them? A piece keeps its
+    whole segment alive (segments are immutable buffers), so a short shared
+    prefix of a long entry holds the long one's KV after it is evicted."""
+    segs = {id(s): s for s, _, _ in pieces}
+    used = sum(s.nbytes * (hi - lo) / max(1, s.b - s.a) for s, lo, hi in pieces)
+    return sum(s.nbytes for s in segs.values()) - used > slack * used
+
+
 class _Inherit(typing.NamedTuple):
     """What a resumed prefill needs of its parent entry at store time (the
     snapshot closure holds this, not the entry)."""

@@ -682,3 +682,66 @@ def test_off_with_the_disk_tier(dense, small, monkeypatch):
     sched = scheduler(dense, max_batch=1)
     sched.eng._pcache.disk = object()
     assert not sched._move_on() and "QWEN_PROMPT_CACHE_DISK" in sched.move_state()
+
+
+# --- memory: the stand's OOMs of 2026-11-14 ----------------------------------------
+def test_the_cache_leaves_the_prefill_reserve_to_the_row(dense, small, monkeypatch, caplog):
+    """An empty batch admits without a memory check; the cache gives way to
+    the row down to the batch budget, not into the prefill reserve beyond it
+    (the row's prefill needs that: an entry inside budget + reserve beside a
+    long prefill ran the 27B out of memory)."""
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    monkeypatch.setattr(worker, "PROMPT_CACHE_MOVE", True)
+    p = Play(dense, True)
+    p.do(rk.first(240), 5, "a0")
+    (ea,) = p.pc.entries
+    x = request(rk.first(250), 5, "b0")
+    need = p.sched._reserve(x)
+    p.sched.prefill_reserve = 2 * ea.nbytes
+    p.sched.budget = need + ea.nbytes // 2       # beside it within budget + reserve only
+    out = run(p.sched, [x])["b0"]
+    assert out[2] == ("done", "length")
+    assert all(e is not ea for e in p.pc.entries)
+    assert any("entries evicted for the row of id=b0" in m for m in caplog.messages)
+
+
+def test_a_short_shared_prefix_does_not_pin_a_long_entry(dense, small, monkeypatch, caplog):
+    """A sibling that shares a short system prompt with a long entry keeps
+    its own copy of that prefix (the row has one anyway) instead of pinning
+    the long entry's segment, which would outlive that entry's eviction
+    (a 332-token prefix held a dead conversation's 1.6 GB on the stand).
+    Answers and resume points are those of the copies."""
+    caplog.set_level(logging.INFO, logger="qwen.worker")
+    sys = [IM_START] + prompts([16], 260)[0]
+    a = sys + [IM_START] + prompts([150], 261)[0] + rk.GEN
+    b = sys + [IM_START] + prompts([10], 262)[0] + rk.GEN
+
+    def script(p):
+        p.do(a, 5, "a0")
+        p.do(b, 5, "b0")
+    x = play(monkeypatch, dense, script, False)
+    y = play(monkeypatch, dense, script, True)
+    assert x.trace == y.trace and y.trace[1][2] > 0
+    assert any("keeps its own copy of the" in m for m in caplog.messages)
+    ea, eb = sorted(y.pc.entries, key=lambda e: len(e.ids), reverse=True)
+    assert not {id(s) for s, _, _ in ea.chain} & {id(s) for s, _, _ in eb.chain}
+    for p_ in positions(eb):
+        assert same(y.pc.restore(eb, p_), x.pc.restore(
+            next(e for e in x.pc.entries if e.ids == eb.ids), p_)), p_
+
+
+def test_pins():
+    class S:
+        def __init__(self, a, b, nbytes):
+            self.a, self.b, self.nbytes = a, b, nbytes
+    long, short = S(0, 1000, 1000), S(0, 100, 100)
+    assert worker._pins([(long, 0, 100)])            # 900 pinned past a 100-byte piece
+    assert not worker._pins([(long, 0, 600)])
+    assert not worker._pins([(short, 0, 100), (long, 100, 600)])   # 500 pinned past 600 used
+    assert not worker._pins([(short, 0, 100)])
+
+
+def test_prefill_reserve_override(monkeypatch):
+    est = worker._prefill_reserve(24)
+    monkeypatch.setattr(worker, "PREFILL_RESERVE_GB", 2.5)
+    assert worker._prefill_reserve(24) == int(2.5 * worker.GIB) != est

@@ -2,7 +2,8 @@
 
 from . import config as cfg
 from .config import (BATCH_MEM_GB, CACHE_LIMIT_GB, CLEAR_CACHE, FP16, GIB, KV_KWARGS,
-                     PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_STEP, SDPA_FUSED_MIN_KV)
+                     PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_RESERVE_GB, PREFILL_STEP,
+                     SDPA_FUSED_MIN_KV)
 
 
 _FIXED_SLAB = None    # frozen at load (Engine.load); None = derived from the knobs (tests)
@@ -37,7 +38,10 @@ def _prefill_reserve(heads):
     """Bytes kept outside the batch budget for a prefill slab's activations:
     the unfused attention scores (PREFILL_BUDGET x q heads x 2 B; with the
     fixed fp16 slab, at least PREFILL_STEP x SDPA_FUSED_MIN_KV — a short slab
-    just under the fused threshold) + ~0.4 GiB of MLP."""
+    just under the fused threshold) + ~0.4 GiB of MLP. QWEN_PREFILL_RESERVE_GB
+    replaces the estimate (measured peaks of a model + drafter)."""
+    if PREFILL_RESERVE_GB > 0:
+        return int(PREFILL_RESERVE_GB * GIB)
     fixed = _FIXED_SLAB if _FIXED_SLAB is not None else _fixed_slab()
     scores = max(PREFILL_BUDGET, PREFILL_STEP * SDPA_FUSED_MIN_KV) if fixed else PREFILL_BUDGET
     return scores * heads * 2 + (400 << 20)
