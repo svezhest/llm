@@ -1,10 +1,12 @@
 # oQ4e 27B: why it decodes slower than the uniform 4-bit, and what was done (2026-11-15)
 
-Status: code and CPU tests done; GPU gate steps 1–3 (no model: kernel tests, real tensors,
-microbench) **passed** on 2026-11-15, results in "Measured" below (raw: `../raw/oq4e_bench.*`);
-steps 4–8 (one 27B per process) not run yet. Sections before "Measured" were written from code,
-tensor headers and the 2026-11-10 per-width kernel tables (`docs/perf/2026-11-10/dflash2_27b.md`
-§3) before any of it ran; "Measured" corrects them where they disagree.
+Status: code and CPU tests done; GPU gate steps 1–8 **passed** on 2026-11-15 (steps 1–3 no model,
+4–8 one 27B per process), results in "Measured" below (raw: `../raw/oq4e_bench.*`). On the final
+code (`main` a905163) oQ4e's DFlash decode equals the uniform 4-bit (37.1 vs 37.6 tok/s) with half
+the teacher-forced KL and a better identity, so it is the 27B stand. Sections before "Measured"
+were written from code, tensor headers and the 2026-11-10 per-width kernel tables
+(`docs/perf/2026-11-10/dflash2_27b.md` §3) before any of it ran; "Measured" corrects them where
+they disagree.
 
 ## The problem
 
@@ -160,6 +162,49 @@ accepted beyond near-ties. The gate measures both builds on the same corpus (ab2
 Re-ranked plain-decode diagnosis: **H0 (drift) / H5 (residency)** — together ~25 %, to be split
 by step 5; H2 (bytes) ~5–7 % (inherent); H1 (fusion) 0.6 %; H3, H4 ≈ 0.
 
+## Measured: gate steps 4–8 (2026-11-15, M1 Max, one 27B per process, final code `main` a905163)
+
+- **Step 4** (the fusion at B = 1, `step_prof.py --ab base,nofuse`, each model): oQ4e 58.61 →
+  59.60 ms without it (1.7 %), the uniform model 51.10 → 51.93 (1.6 %) — as step 1 predicted, the
+  width groups had already removed the 4-launch cost, so the fusion adds little.
+- **Step 5** (`decode_probe.py`, three runs per model, A B A B A B with cooldowns): plain decode
+  18.5 (oQ4e) vs 20.0 (u4) tok/s; every run within a few % of the in-process qmv probe of the same
+  model, i.e. **ratio 0.94 per 100 GB/s** of the probe. The cross-process 0.68 was mostly the
+  drift **H0**; nothing points at the weights' residency (**H5**) — closed.
+- **Step 6** (`ab27.py`: 2K prompt, greedy, 256 tokens, DFlash2, one worktree, the two models back
+  to back so the drift cancels): with `QWEN_MRQMM6=1` oQ4e **37.11 tok/s**, 56.8 % accept,
+  3.92 drafts per round, round 133.3 ms; the uniform model on the same corpus **37.62 tok/s**,
+  49.2 %, 3.40, 116.6 ms. Without `QWEN_MRQMM6` oQ4e was 30.2 tok/s: the 6-bit head was the whole
+  loss. **oQ4e / u4 = 0.99 on DFlash**, 0.89 on plain decode.
+- **Step 7** identity (16 tasks × 256 greedy tokens, `--ident plainnf,m8/8`): `plainnf` == `plain`
+  **16/16** — the width-grouped fusion at B = 1 is bit-exact; `m8/8` vs plain **15/16** (the
+  divergence at t9, token 94 — the batched-decode class, near-tie). The uniform model's `m8/8` on
+  the same corpus was 12/16.
+- **Step 8** load log: 4- and 6-bit self-tests `passed`; `GDN in-projections fused by width: 30 x
+  [qkv+z 4-bit, b+a 5-bit]; 15 x [z+b+a 5-bit, qkv alone]; 2 x [qkv+z 4-bit, b+a 8-bit]; 1 x
+  [qkv+z 4-bit, b alone, a alone]`; `48 layers` fused; `QWEN_VERIFY_ATT=2` self-test rel error
+  ≤ 2.1e-4.
+- **Quality** (teacher-forced vs the 5-bit, `scripts/perf/prof/kl_models.py`, 3 × 3072 tokens):
+  KL 0.024 for oQ4e vs 0.053 for the uniform model; top-1 93.6 % vs 90.1 %.
+
+So on the stand's own mode (T = 0, DFlash) the quant is no longer a speed question: 0.99 on decode,
+half the KL, and 3 fewer identities lost. Plain decode stays 11 % behind, and that mode is not used
+by the stand. Decision (author, 2026-11-15): **oQ4e is the final 27B stand**;
+`QWEN_MRQMM6=1` is set by the stand, the default stays `0` until a wider gate (see the knob table).
+
+## The stand on oQ4e: long context (`long_ctx.py`, the stand's env: ctx 98304, prompt cache 6 GB, moving, 4 checkpoints, prefill reserve 2.5 GiB, `QWEN_MAX_BATCH=1`, text-only)
+
+| prompt | turn 1 (cold) TTFT | tok/s | peak | turn 2 (cache hit) TTFT | tok/s | accept 1 / 2 |
+|---|---:|---:|---:|---:|---:|---:|
+| 32 836 | 281.5 s | 29.2 | 21.61 GiB | 0.68 s | 25.2 | 57 % / 47 % |
+| 60 068 | 567.8 s | 26.4 | 23.42 GiB | 0.88 s | 19.1 | 57 % / 37 % |
+
+A hit resumes at a checkpoint and keeps the reply (`33092/33122` and `60324/60354` tokens reused,
+30 tokenized afresh). The cache entry is 3.05 GB at 32K and 4.84 GB at 60K; the process peak 23.42
+GiB of the 27 GiB wired, so a ~75K prompt plus final turns still fits. Cold prefill runs at
+~106–116 tok/s, i.e. a fresh 60K prompt costs ~9.5 min — the number to know before planning long
+sessions.
+
 ## Tests
 
 - CPU (`cd src/worker && .venv/bin/python -m pytest -q --ignore tests/test_mrqmm.py`):
@@ -210,13 +255,11 @@ Steps (the script's header has the details and the expected outcomes):
 
 ## Uncertain
 
-- What the remaining ~25 % of the plain gap (and most of the DFlash round gap) is: the linears
-  measured drift-free say 0.93, the separate-process runs said 0.68. Drift (H0) or the loaded
-  weights' residency (H5) — step 5 splits them; if the probe-normalized ratio stays ~0.7, look at
-  page-ins / `footprint` during decode and at what the loader keeps mmap'd.
-- B ≤ 2 bitwise of the grouped fusion is shown on the tiny mixed model on the GPU (step 1); on the
-  real model it is step 7 (`plainnf` == `plain`, B = 1).
-- The acceptance gap (3.57 vs 4.8) is attributed to the model; step 6 measures it on ab27's corpus
-  for oQ4e and the uniform model's earlier numbers come from other prompts.
+- ~~What the remaining ~25 % of the plain gap (and most of the DFlash round gap) is~~ — answered by
+  step 5: the drift (H0) under a probe of the same process; the residency (H5) is not needed.
+- ~~B ≤ 2 bitwise of the grouped fusion is shown on the tiny mixed model on the GPU (step 1)~~ —
+  step 7: `plainnf` == `plain` 16/16 on the real oQ4e at B = 1.
+- ~~The acceptance gap (3.57 vs 4.8)~~ — step 6 on one corpus: 3.92 (oQ4e) vs 3.40 (u4) drafts per
+  round, 56.8 % vs 49.2 % accept; the model's own, not the kernel's.
 - The 27B 4-bit / 5-bit batched decode (B ≥ 3) through mrqmm is still ungated in general
   (`QWEN_MRQMM4/5` default 0); this work does not change that.
