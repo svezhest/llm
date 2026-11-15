@@ -36,18 +36,33 @@ def hf_ids(text, model_dir):
     return tok.encode(text, add_special_tokens=False)
 
 
+def sanitize(text):
+    """The docs quote control tokens (`<|im_start|>`, `<think>`, ...). HF's encode turns them into
+    the special ids, llama-tokenize too, but llama-perplexity tokenizes without parsing specials:
+    the same text would give different ids. A space after each one's '<' makes them plain text
+    for every tokenizer."""
+    tj = json.load(open(os.path.join(P.weights_dir(), "qwen38-27b-mlx-4bit", "tokenizer.json")))
+    for t in sorted({x["content"] for x in tj["added_tokens"]}, key=len, reverse=True):
+        if t.startswith("<"):
+            text = text.replace(t, "< " + t[1:])
+    return text
+
+
 def cmd_corpus(a):
     man = P.load_manifest()
     text = P.corpus_text(man, a.name)
     want = man["corpora"][a.name].get("sha256")
     assert want is None or P.sha(text) == want, "corpus differs from the manifest's sha256"
+    text = sanitize(text)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
     print(f"wrote {a.out}: {len(text)} chars")
 
 
 def llama_ids(gguf, corpus):
-    r = subprocess.run(["llama-tokenize", "-m", gguf, "-f", corpus, "--ids", "--log-disable", "--no-bos"],
+    # as llama-perplexity reads -f: no escape processing (--no-escape there too), no special parsing
+    r = subprocess.run(["llama-tokenize", "-m", gguf, "-f", corpus, "--ids", "--log-disable", "--no-bos",
+                        "--no-escape", "--no-parse-special"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit(f"llama-tokenize failed: {r.stderr[-2000:]}")
@@ -132,7 +147,7 @@ def cmd_mlx(a):
 
 def cmd_llama(a):
     argv = ["llama-perplexity", "-m", a.gguf, "-f", a.corpus, "-c", str(a.ctx), "-ngl", "99", "-fa", "on",
-            "-b", str(a.ctx)]
+            "-b", str(a.ctx), "--no-escape"]
     if a.chunks > 0:
         argv += ["--chunks", str(a.chunks)]
     t0 = time.time()

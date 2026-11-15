@@ -4,8 +4,11 @@ benchmark (our gateway, llama-server, mlx_vlm.server). Stdlib only.
 
 Per request (POST /v1/chat/completions, stream, stream_options.include_usage):
   ttft_s        send -> first chunk carrying text (content or reasoning)
-  decode_tps    (n - 1) / (t_last - t_first), n = usage.completion_tokens (the server's
-                own count); t_first / t_last = arrival of the first / last text chunk.
+  decode_tps    (n - k) / (t_last - t_first), n = usage.completion_tokens (the server's
+                own count); t_first / t_last = arrival of the first / last text chunk; k =
+                tokens in the first chunk (HF tokenizer when importable, else 1): a streaming
+                detokenizer may send the first token's text only with a later one
+                (decode_tps_raw = (n - 1) / span, for reference).
                 A finish "stop" counts the EOS in n without a chunk: decode_tps_stop_adj
                 uses n - 1 then. decode_tps_chunks = the same over chunk count (equal when
                 a server sends one token per chunk -- `tokens_per_chunk` says).
@@ -107,12 +110,34 @@ def stream(url, payload, timeout=3600.0):
             r = delta.get("reasoning_content") or delta.get("reasoning") or ""
             if c or r:
                 out["chunks"].append((t - t0, len(c) + len(r)))
+                if len(out["chunks"]) == 1:
+                    out["first_text"] = r + c
                 out["text"] += c
                 out["reasoning"] += r
             if ch.get("finish_reason"):
                 out["finish"] = ch["finish_reason"]
     conn.close()
     return out
+
+
+_TOK = []
+
+
+def first_chunk_tokens(text):
+    """Tokens in the first text chunk (a server's detokenizer may hold a token's text back and
+    send it with the next: then t_first is the 2nd+ token's arrival and (n - 1) overcounts).
+    The HF tokenizer of the 27B when `tokenizers` imports (session.py under the worker venv),
+    else None. Counted after the stream, never during it."""
+    if not _TOK:
+        try:
+            import tokenizers
+            _TOK.append(tokenizers.Tokenizer.from_file(
+                os.path.join(P.weights_dir(), "qwen38-27b-mlx-4bit", "tokenizer.json")))
+        except Exception:  # noqa: BLE001 -- optional
+            _TOK.append(None)
+    if _TOK[0] is None or not text:
+        return None
+    return len(_TOK[0].encode(text, add_special_tokens=False).ids)
 
 
 def summarize(raw):
@@ -133,8 +158,13 @@ def summarize(raw):
     r.update(ttft_s=round(t_first, 4), t_last_s=round(t_last, 4), decode_s=round(t_last - t_first, 4))
     span = t_last - t_first
     if n and span > 0:
-        r["decode_tps"] = round((n - 1) / span, 3)
-        r["decode_tps_stop_adj"] = round((n - 2) / span, 3) if raw["finish"] == "stop" else r["decode_tps"]
+        r["decode_tps_raw"] = round((n - 1) / span, 3)
+        k = first_chunk_tokens(raw.get("first_text", ""))
+        r["first_chunk_tokens"] = k
+        # tokens generated after t_first = n - k (k = 1 when a server sends one token per chunk)
+        r["decode_tps"] = round((n - (k or 1)) / span, 3)
+        r["decode_tps_stop_adj"] = (round((n - (k or 1) - 1) / span, 3) if raw["finish"] == "stop"
+                                    else r["decode_tps"])
         r["tokens_per_chunk"] = round(n / len(ch), 3)
     if len(ch) > 1 and span > 0:
         r["decode_tps_chunks"] = round((len(ch) - 1) / span, 3)

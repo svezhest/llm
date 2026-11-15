@@ -6,8 +6,11 @@
   -> the plan through bench_decode.py (HTTP systems) or the CLI tool (llama-bench,
   perplexity) -> stop -> session.json (+ logs/, probe.json) -> release the lease.
 
-  python3 scripts/perf/bench27/session.py --system ours-dflash --plan headline \\
+  src/worker/.venv/bin/python scripts/perf/bench27/session.py --system ours-dflash --plan headline \\
       --out $PERF_OUT/bench27 [--code DIR] [--lease NAME] [--env K=V ...] [--set K=V ...]
+
+Run it with the worker venv's python (stdlib otherwise): its `tokenizers` counts the tokens of
+each stream's first chunk (bench_decode.decode_tps); under a plain python3 that count is 1.
 
 Systems (`--list`): ours-plain / ours-dflash (worker + gateway of --code, the 4-bit),
 ours-oq4e-plain / -dflash, mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
@@ -119,7 +122,9 @@ def llama(ctx, quant, spec=None):
     argv = ["llama-server", "-m", gguf, "-ngl", "99", "-fa", "on", "-c", str(c), "--jinja", "-np", "1",
             "--host", "127.0.0.1", "--port", str(ctx["port"]), "--cache-ram", str(ctx["set"].get("cache_ram", 0))]
     if spec:
-        argv += ["--spec-type", f"draft-{spec}", "-md", os.path.join(g, GGUF[spec])]
+        argv += ["--spec-type", f"draft-{spec}"]
+        if ctx["set"].get("md", "1") != "0":   # md=0: the target's own nextn (MTP) layer, no draft file
+            argv += ["-md", os.path.join(g, GGUF[spec])]
         if "n_max" in ctx["set"]:
             argv += ["--spec-draft-n-max", str(ctx["set"]["n_max"])]
     argv += ctx["set"].get("args", "").split()
@@ -234,10 +239,12 @@ class MemSampler(threading.Thread):
     def __init__(self, pid, every=5.0):
         super().__init__(daemon=True)
         self.pid, self.every, self.series, self.stop_ev = pid, every, [], threading.Event()
+        self.sys = []
         self.t0 = time.time()
 
     def run(self):
         while not self.stop_ev.is_set():
+            self.sys.append((round(time.time() - self.t0, 1), sys_used_gib()))
             o = sh(["footprint", "-p", str(self.pid), "--noCategories", "-f", "bytes"], timeout=20)
             for line in o.splitlines():
                 if "Footprint:" in line:
@@ -251,7 +258,65 @@ class MemSampler(threading.Thread):
 
     def result(self):
         return {"peak_gib": max((g for _, g in self.series), default=None), "samples": len(self.series),
-                "series": self.series[::max(1, len(self.series) // 400)]}
+                "series": self.series[::max(1, len(self.series) // 400)],
+                "sys_used_peak_gib": max((g for _, g in self.sys), default=None),
+                "sys_series": self.sys[::max(1, len(self.sys) // 400)]}
+
+
+def sys_used_gib():
+    """wired + active + compressor pages (vm_stat): the system's used memory. llama.cpp's
+    weights are an mmap'd GGUF wrapped as Metal buffers, which a process footprint does not
+    count; this does (with everything else running, so read it as a delta to the baseline)."""
+    o = sh(["vm_stat"])
+    page = 16384
+    vals = {}
+    for line in o.splitlines():
+        if "page size of" in line:
+            page = int(line.split("page size of")[1].split()[0])
+        k, _, v = line.partition(":")
+        try:
+            vals[k.strip()] = int(v.strip().rstrip("."))
+        except ValueError:
+            pass
+    used = sum(vals.get(k, 0) for k in ("Pages wired down", "Pages active", "Pages occupied by compressor"))
+    return round(used * page / 2**30, 3)
+
+
+def parse_logs(logdir):
+    """Per-request stats the servers log: our worker's request line (+ its DFlash acceptance),
+    llama-server's draft acceptance and buffer sizes."""
+    import re
+    out = {}
+    p = os.path.join(logdir, "worker.log")
+    if os.path.exists(p):
+        reqs, acc = [], None
+        for line in open(p, errors="replace"):
+            m = re.search(r"dflash: (\d+) tokens, accept rate (\d+)% \((\d+)/(\d+) drafts\)", line)
+            if m:
+                acc = {"dflash_tokens": int(m[1]), "accepted": int(m[3]), "drafted": int(m[4])}
+            m = re.search(r"id=(\S+) finish=(\S+) gen_tokens=(\d+) ttft_ms=(\d+) tps=([\d.]+) cached=(\d+) "
+                          r"peak=([\d.]+)GB", line)
+            if m:
+                reqs.append(dict(id=m[1], finish=m[2], gen_tokens=int(m[3]), ttft_ms=int(m[4]), tps=float(m[5]),
+                                 cached=int(m[6]), peak_gb=float(m[7]), **(acc or {})))
+                acc = None
+            if "dflash drafter loaded" in line or "DFlash through" in line:
+                out.setdefault("worker_dflash_setup", []).append(line.strip()[:300])
+        out["worker_requests"] = reqs
+    p = os.path.join(logdir, "llama-server.log")
+    if os.path.exists(p):
+        acc, bufs = [], []
+        for line in open(p, errors="replace"):
+            m = re.search(r"draft acceptance = ([\d.]+) \(\s*(\d+) accepted /\s*(\d+) generated\), mean len =\s*([\d.]+)",
+                          line)
+            if m:
+                acc.append({"rate": float(m[1]), "accepted": int(m[2]), "drafted": int(m[3]),
+                            "mean_len": float(m[4])})
+            if "buffer size" in line:
+                bufs.append(line.strip()[-160:])
+        out["llama_draft"] = acc
+        out["llama_buffers"] = bufs
+    return out
 
 
 def wait_ready(url, procs, timeout):
@@ -318,17 +383,20 @@ def lease(cmd, name):
 # --------------------------------------------------------------------------- session
 def run_session(system, plan, out_root, code=CODE_DEFAULT, env=None, sets=None, port=8095, cooldown=60,
                 probe_s=30, lease_name="", force=False, ready_timeout=1500, tag="", log=print):
+    if system not in SYSTEMS:
+        raise SystemExit(f"unknown system {system!r}; systems: {', '.join(SYSTEMS)}")
+    B.load_plan(plan)
     sid = time.strftime("%Y%m%d-%H%M%S") + f"-{system}-{plan}" + (f"-{tag}" if tag else "")
     d = os.path.join(out_root, sid)
     os.makedirs(os.path.join(d, "logs"), exist_ok=True)
     ctx = {"code": os.path.abspath(code), "weights": P.weights_dir(), "env": env or {}, "set": sets or {},
            "port": port, "plan": plan, "dir": d}
-    spec = SYSTEMS[system](ctx)
     meta = {"session": sid, "system": system, "plan": plan, "tag": tag, "set": ctx["set"], "env_overrides": ctx["env"],
             "code": ctx["code"], "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "status": "started"}
-    procs = spec.get("procs", [])
-    held = False
+    procs, held = [], False
     try:
+        spec = SYSTEMS[system](ctx)          # missing files / binaries raise here, recorded below
+        procs = spec.get("procs", [])
         if lease_name:
             lease("acquire", lease_name)
             held = True
@@ -369,6 +437,7 @@ def run_session(system, plan, out_root, code=CODE_DEFAULT, env=None, sets=None, 
                 meta["ppl"] = json.load(open(os.path.join(d, "ppl.json")))
             meta["status"] = "ok" if all(c["returncode"] == 0 for c in meta["cli"]) else "failed"
         else:
+            meta["sys_used_before_gib"] = sys_used_gib()
             start(procs, os.path.join(d, "logs"))
             meta["procs"] = [{"name": p["name"], "argv": p["argv"], "env": p.get("env"), "pid": p["pid"]}
                              for p in procs]
@@ -401,6 +470,10 @@ def run_session(system, plan, out_root, code=CODE_DEFAULT, env=None, sets=None, 
     finally:
         stop(procs)
         meta["proc_exit"] = {p["name"]: p.get("returncode") for p in procs}
+        try:
+            meta["server_stats"] = parse_logs(os.path.join(d, "logs"))
+        except Exception as e:  # noqa: BLE001
+            meta["server_stats"] = {"error": str(e)}
         meta["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         with open(os.path.join(d, "session.json"), "w") as f:
             json.dump(meta, f, ensure_ascii=False, indent=1)
