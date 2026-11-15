@@ -116,7 +116,7 @@ Second slot (08:34–08:46, bwprobe 336–341 GB/s), modes normal / stage altern
 
 | verify part (2K) | ms | source |
 |---|---:|---|
-| linears, 8 rows mrqmm 4-bit (64 layers + lm_head) | ~76 | [Ms] plan (kern5_bench, ×1.64 of a solo row) |
+| linears, 8 rows mrqmm 4-bit (64 layers + lm_head) | 78.1 | [M] §5 step 3 (kern5_bench on the real 4-bit weights, ×1.65 of a solo row; the plan said ~76) |
 | GDN with-states, T = 8, 48 layers | 5.5 | [M] `microbench_gdn --calls 48` (plain kernel at T=8: 3.6; T=1: 2.1) |
 | block attention, 16 layers × `vec` 5+3 queries | ~6 | [M/D] `verify_att_bench` (8K: 1.20 ms/layer; 2K less) |
 | everything else (norms, conv, gates, splits, KV append) × 8 rows | ~10 | [D] remainder of the first run's 97.4 ms |
@@ -205,6 +205,24 @@ batched-decode numerics class). Whether they are near-ties, and the teacher-forc
 of the kernel against stock qmm at B = 3/8/16, are below.
 
 <!-- K1STEP5 -->
+
+## Open issues
+
+- **The verify graph build, 4.6–6.7 ms of Python per round on an idle GPU** (§2). cProfile of
+  the build in normal rounds (`spec_prof --cprofile`, 2K, 196 verify calls; `raw/g0_spec_prof_cprofile.txt`)
+  [M]: 6.7 ms per build under the profiler, no single hot spot — 353 `mrqmm` calls per round
+  (1.1 ms own time), mlx-vlm's `speculative_verifier._gated_delta` (3.0 ms cumulative, of which
+  the with-states kernel wrapper 0.5 and the qk normalization 0.2), `_verify_linears` /
+  `_mr_rows` dispatch (1.7 ms cumulative), `nn.Module.__getattr__` (0.4 ms, 1400 calls). Trimming
+  the Python (cached kernel handles, fewer attribute lookups) would recover ≤ ~2 ms of the
+  134 ms round (≤ 1.5 %) — below the 3 % bar, not done. Hiding it needs MLX to encode further
+  ahead (§3: no env setting does) or a verify graph that does not depend on the previous
+  walk (it does: the block's first token is the walk's bonus token).
+- **4-bit DFlash ≠ plain greedy** on 4 of 16 tasks (§5 step 5); the exact verify path (e0/8)
+  is identical but slower than plain. At 32K the DFlash output also differs from plain
+  (§2, same numerics class).
+- `step_prof.py` does not configure INFO logging: load-log lines (e.g. the mrqmm self-test)
+  are not in its output.
 
 ## 6. Commands
 
