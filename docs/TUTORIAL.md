@@ -267,11 +267,19 @@ as on a text-only checkpoint.
 `qwen3_5_moe` checkpoint should load, including mixed-precision ones (per-module bits in
 `config.json`). The custom decode kernel (`mrqmm`, multi-row matmul for batched decode and
 DFlash verify blocks) covers 8-bit modules by default and 5-bit / 4-bit modules behind
-`QWEN_MRQMM5` / `QWEN_MRQMM4`; modules at any other width (3, 6 bits) fall back to MLX's
-`quantized_matmul`, which makes a DFlash verify block several times slower on them. The fused
-decode in-projection of a Gated DeltaNet layer (`QWEN_GDN_FUSE`) needs its four projections at
-the same bit width; mixed layers keep four separate matmuls. The prefill kernel (`pfqmm`) is
-self-tested per (bits, group) and covers 3, 4, 5, 6 and 8 bits.
+`QWEN_MRQMM5` / `QWEN_MRQMM4` / `QWEN_MRQMM6`; modules at any other width (2, 3 bits) fall back
+to MLX's `quantized_matmul`, which makes a DFlash verify block several times slower on them.
+6 bits matter for mixed-precision builds: Jundot's oQ4e of the 27B keeps its lm_head (and the
+last layer's k / v) at 6 bits, and without `QWEN_MRQMM6=1` a DFlash verify block reads that
+1 GiB head once per block token (mlx-vlm's exact verify kernels take only 4, 5 and 8 bits). Each
+width's kernel is self-tested on the GPU at load (4 and 6 bits) and its knob stays off until a
+GPU gate passes (`scripts/perf/dflash2/gate_mrqmm4.sh`, `gate_oq4e.sh`). The fused decode
+in-projection of a Gated DeltaNet layer (`QWEN_GDN_FUSE`) concatenates the projections that
+share a bit width: one matmul for a uniform layer, one per width group in a mixed layer (oQ4e:
+`[qkv+z 4-bit, b+a 5-bit]` in most layers, `[z+b+a 5-bit, qkv alone]` in the first ones; the load
+log lists them). The prefill kernel (`pfqmm`) is self-tested per (bits, group) and covers 3, 4,
+5, 6 and 8 bits. Why oQ4e decodes slower than the uniform 4-bit and what the GPU gate checks:
+`docs/perf/2026-11-15/design/oq4e_speed.md`.
 
 Only the checkpoints above were measured. Other architectures are not supported. At best the worker runs
 them without batching: it logs `… is not a qwen3_5 / qwen3_5_moe model: no batching` and
@@ -1265,7 +1273,8 @@ All of these are on by default. Each was measured on M1 Max.
 | `QWEN_PFQMM` | prefill quantized matmul with 64-row tiles (`pfqmm.py`, MLX's own kernel code from the installed wheel) | ×1.10–1.14 per 8-bit matmul; 9B full prefill ×1.20–1.27 together with the fixed slab (2026-10-12) | **bit-identical**, self-tested per (bits, group) at load |
 | `QWEN_MRQMM` | multi-row 8-bit matmul for decode at 3–16 rows (`mrqmm.py`, simdgroup MMA) | 9B decode step at 8 rows 86 → 34 ms (2026-10-12) | batched-decode class (top-1 ≥ 99.7 %) |
 | `QWEN_MRQMM5` (default **0**) | the same kernel for 5-bit modules (27B) | DFlash2 on the 27B depends on it | batched decode at B ≥ 3 not yet validated, hence off |
-| `QWEN_GDN_FUSE` | one matmul for the four GDN decode in-projections | −2 % decode step | bit-identical at B ≤ 2 |
+| `QWEN_MRQMM4` / `QWEN_MRQMM6` (default **0**) | the same kernel for 4-bit / 6-bit modules (27B 4-bit; oQ4e's 6-bit lm_head) | DFlash on those builds depends on them | GPU gates pending (`gate_mrqmm4.sh`, `gate_oq4e.sh`) |
+| `QWEN_GDN_FUSE` | one matmul for the GDN decode in-projections (per bit-width group in a mixed layer) | −2 % decode step | bit-identical at B ≤ 2 |
 | `QWEN_SDPA_FUSED` / `_MIN_KV` | fused attention for long fp16 prefill slabs | 64K prefill −3…5 %, −1.3 GB peak | KL 7e-6 |
 | `QWEN_SAMPLER_TOPK_FAST` (default **0**) | top-k sampling over the k survivors | −7 % step with top_k at B=16 | same distribution, different random stream per seed |
 | `QWEN_GDN_FAST` (default **0**) | MLX's fused gated-delta prefill | ×1.02 per slab | rejected: KL 0.013 on 8K real tokens |
@@ -1854,7 +1863,7 @@ unless noted.
 | var | default |
 |---|---|
 | `QWEN_PFQMM` / `QWEN_MRQMM` / `QWEN_GDN_FUSE` | `1` / `1` / `1` (`0` turns each off) |
-| `QWEN_MRQMM5` | `0` |
+| `QWEN_MRQMM5` / `QWEN_MRQMM4` / `QWEN_MRQMM6` | `0` / `0` / `0` |
 | `QWEN_GDN_FAST` | `0` |
 | `QWEN_BATCH_INVARIANT` | `0` |
 | `QWEN_DEBUG_NO_SYNC` | `0` |

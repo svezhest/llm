@@ -3,6 +3,7 @@
 in-projection, batch-invariant checks."""
 
 import sys
+from typing import NamedTuple
 
 import mlx.core as mx
 
@@ -74,13 +75,19 @@ def _fast_gdn_kernel(q, k, v, g, beta, state, mask=None):
     return _GDN_KERNEL(q, k, v, g, beta, state, mask)
 
 
-def _verify_mr(linear, x):
-    """A verify / drafter-head call that takes mrqmm: (1, T, K) fp16 with
-    MIN_ROWS..MAX_ROWS tokens on a module mrqmm.install covered."""
+def _verify_rows(x):
+    """A verify block mrqmm takes as decode rows: (1, T, K) fp16 with
+    MIN_ROWS..MAX_ROWS tokens (mrqmm loaded)."""
     mr = sys.modules.get("mrqmm")
-    return (mr is not None and type(linear) is mr.MRQuantizedLinear and x.ndim == 3
-            and x.shape[0] == 1 and mr.MIN_ROWS <= x.shape[1] <= mr.MAX_ROWS
-            and x.dtype == mx.float16)
+    return (mr is not None and x.ndim == 3 and x.shape[0] == 1
+            and mr.MIN_ROWS <= x.shape[1] <= mr.MAX_ROWS and x.dtype == mx.float16)
+
+
+def _verify_mr(linear, x):
+    """A verify / drafter-head call that takes mrqmm: _verify_rows on a module
+    mrqmm.install covered."""
+    mr = sys.modules.get("mrqmm")
+    return mr is not None and type(linear) is mr.MRQuantizedLinear and _verify_rows(x)
 
 
 def _mr_rows(linear, x):
@@ -185,13 +192,21 @@ def _verify_attention(self, attention, x, mask, cache, position_ids, position_em
 def _verify_linears(self, linears, x):
     if VERIFY_MR:
         f = linears[0].__dict__.get("_verify_fused") if linears else None
-        if f is not None and tuple(map(id, linears)) == f[0] and _verify_mr(linears[0], x):
-            # the GDN in-projections (qkv, z, b, a): one mrqmm over their
-            # concatenation (_install_verify_mrqmm), as _gdn_call in decode
-            _, w, sc, b, split, mr = f
+        if f is not None and tuple(map(id, linears)) == f[0] and _verify_rows(x):
+            # the GDN in-projections (qkv, z, b, a): one mrqmm per width group
+            # on the kernel (_install_verify_mrqmm; a uniform-width layer: one
+            # over all four), as _gdn_call in decode; the others below
             _, T, K = x.shape
-            y = mr.mrqmm(x.reshape(T, 1, K), w, sc, b).reshape(1, T, -1)
-            return tuple(mx.split(y, split, axis=-1))
+            out = [None] * len(linears)
+            for idx, w, sc, b, split, mr in f[1]:
+                y = mr.mrqmm(x.reshape(T, 1, K), w, sc, b).reshape(1, T, -1)
+                for i, o in zip(idx, mx.split(y, split, axis=-1)):
+                    out[i] = o
+            rest = [linear for linear, o in zip(linears, out) if o is None]
+            if not rest:
+                return tuple(out)
+            rest = iter(_verify_linears(self, rest, x))
+            return tuple(next(rest) if o is None else o for o in out)
         on = [_verify_mr(linear, x) for linear in linears]
         if any(on):
             rest = [linear for linear, m in zip(linears, on) if not m]
@@ -204,18 +219,21 @@ def _verify_linears(self, linears, x):
 
 def _install_verify_mrqmm(lm):
     """QWEN_VERIFY_MRQMM=1: point each GDN layer's in_proj_qkv at the fused
-    in-projection _install_gdn_fuse built for mrqmm (no copy), for
-    _verify_linears. After _install_gdn_fuse. -> number of layers."""
+    in-projection groups _install_gdn_fuse built for mrqmm (no copy), for
+    _verify_linears. After _install_gdn_fuse. -> number of layers with one."""
     if not VERIFY_MR:
         return 0
     n = 0
     for _, m in lm.named_modules():
-        f = m.__dict__.get("_fused_in")
-        if f is None or f[7] is None:
+        gs = m.__dict__.get("_fused_in")
+        on = [g for g in gs or () if g.mr is not None]
+        if not on:
             continue
         ls = [m[a] for a in _GDN_IN]
-        # ids of the four modules (no reference back to them: no cycle)
-        ls[0].__dict__["_verify_fused"] = (tuple(map(id, ls)), f[0], f[1], f[2], f[3], f[7])
+        # ids of the four modules (no reference back to them: no cycle); per
+        # group on the kernel: its members' positions in _GDN_IN + its weights
+        ls[0].__dict__["_verify_fused"] = (tuple(map(id, ls)), tuple(
+            (tuple(_GDN_IN.index(a) for a in g.names), g.w, g.s, g.b, g.split, g.mr) for g in on))
         n += 1
     return n
 
@@ -405,6 +423,20 @@ _GDN_IN = ("in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a")
 _GDN_CALL = None                      # the library's Qwen3_5GatedDeltaNet.__call__
 
 
+class _InGroup(NamedTuple):
+    """In-projections of one GDN layer quantized alike, run as one matmul
+    over their concatenated weights (_install_gdn_fuse)."""
+    names: tuple                      # members, in _GDN_IN order
+    w: mx.array                       # concatenated packed weights / scales / biases
+    s: mx.array
+    b: mx.array
+    split: list                       # mx.split indices of the output (ends but the last)
+    gs: int
+    bits: int
+    mode: str
+    mr: object                        # the mrqmm module for 3..16 rows, or None
+
+
 class _Given:
     """Stands in for an in-projection during one fused decode call: returns
     its precomputed output."""
@@ -418,68 +450,105 @@ class _Given:
 
 
 def _gdn_call(self, inputs, mask=None, cache=None):
-    """Qwen3_5GatedDeltaNet.__call__ with the fused decode in-projection: the
-    four outputs are computed in one matmul and handed to the library call in
-    place of the modules (restored right after; the scheduler thread is the
-    only caller of the model)."""
-    f = self.__dict__.get("_fused_in")
-    if f is None or not GDN_FUSE or inputs.ndim != 3 or inputs.shape[1] != 1 or inputs.dtype != f[2].dtype:
+    """Qwen3_5GatedDeltaNet.__call__ with the fused decode in-projection: each
+    width group's outputs are computed in one matmul and handed to the library
+    call in place of the modules (restored right after; the scheduler thread
+    is the only caller of the model). A projection in no group (its width
+    shared with no other) is the library's own call."""
+    gs = self.__dict__.get("_fused_in")
+    if gs is None or not GDN_FUSE or inputs.ndim != 3 or inputs.shape[1] != 1 or inputs.dtype != gs[0].s.dtype:
         return _GDN_CALL(self, inputs, mask=mask, cache=cache)
-    w, s, b, split, gs, bits, mode, mr = f
-    if mr is not None and mr._use(inputs):
-        y = mr.mrqmm(inputs, w, s, b)
-    else:
-        y = mx.quantized_matmul(inputs, w, scales=s, biases=b, transpose=True,
-                                group_size=gs, bits=bits, mode=mode)
-    mods = [self[n] for n in _GDN_IN]
-    for n, o in zip(_GDN_IN, mx.split(y, split, axis=-1)):
+    given = {}
+    for g in gs:
+        if g.mr is not None and g.mr._use(inputs):
+            y = g.mr.mrqmm(inputs, g.w, g.s, g.b)
+        else:
+            y = mx.quantized_matmul(inputs, g.w, scales=g.s, biases=g.b, transpose=True,
+                                    group_size=g.gs, bits=g.bits, mode=g.mode)
+        given.update(zip(g.names, mx.split(y, g.split, axis=-1)))
+    mods = {n: self[n] for n in given}
+    for n, o in given.items():
         dict.__setitem__(self, n, _Given(o))
     try:
         return _GDN_CALL(self, inputs, mask=mask, cache=cache)
     finally:
-        for n, m in zip(_GDN_IN, mods):
+        for n, m in mods.items():
             dict.__setitem__(self, n, m)
 
 
+def _gdn_groups(ls):
+    """Indices (into _GDN_IN) of the in-projections that can share a matmul:
+    quantized, no bias, fp16 scales and biases, grouped by (bits, group size,
+    mode); groups of >= 2 only, in order of their first member. A uniform-
+    width layer: one group [0, 1, 2, 3]."""
+    import mlx.nn as nn
+    by = {}
+    for i, l in enumerate(ls):
+        if (isinstance(l, nn.QuantizedLinear) and "bias" not in l and l.get("biases") is not None
+                and l.scales.dtype == mx.float16 and l.biases.dtype == mx.float16):
+            by.setdefault((l.bits, l.group_size, getattr(l, "mode", "affine")), []).append(i)
+    return [ix for ix in by.values() if len(ix) >= 2]
+
+
+def _group_label(gs):
+    """'qkv+z 4-bit, b+a 5-bit' (+ ', a alone')."""
+    short = lambda n: n[len("in_proj_"):]  # noqa: E731
+    seen = {n for g in gs for n in g.names}
+    parts = [f"{'+'.join(map(short, g.names))} {g.bits}-bit" for g in gs]
+    parts += [f"{short(n)} alone" for n in _GDN_IN if n not in seen]
+    return ", ".join(parts)
+
+
 def _install_gdn_fuse(lm):
-    """QWEN_GDN_FUSE: concatenate the in-projections of every GDN layer whose
-    four are quantized alike (fp16 scales/biases, no bias), point the modules
-    at row views of it, route the class __call__. After the fp16 cast and
-    mrqmm.install. -> number of layers fused."""
+    """QWEN_GDN_FUSE: per GDN layer, concatenate the in-projections quantized
+    alike (_gdn_groups: by bits / group size / mode; fp16 scales/biases, no
+    bias) into one weight per group, point the modules at row views of it,
+    route the class __call__. A uniform-width layer is one group of all four
+    (the fusion as it always was); a mixed-width one (oQ4e: qkv+z 4-bit, b+a
+    5-bit) fuses each width group, a projection alone at its width keeps its
+    own weights. A group takes mrqmm for 3..16 rows where mrqmm.supported
+    takes its width and N >= mrqmm.MIN_N (any N in batch-invariant mode), as
+    mrqmm.install's rule for a module. After the fp16 cast and mrqmm.install.
+    -> number of layers with a group."""
     global _GDN_CALL
     if not GDN_FUSE:
         return 0
-    import mlx.nn as nn
     from mlx_vlm.models.qwen3_5 import language as q35
     mr = sys.modules.get("mrqmm")
-    n, warm = 0, {}
+    n, warm, kinds = 0, {}, {}
     for _, m in lm.named_modules():
         if not isinstance(m, q35.Qwen3_5GatedDeltaNet) or "_fused_in" in m.__dict__:
             continue
         ls = [m[a] for a in _GDN_IN]
-        f = ls[0]
-        if not all(isinstance(l, nn.QuantizedLinear) and "bias" not in l and l.get("biases") is not None
-                   and l.bits == f.bits and l.group_size == f.group_size
-                   and getattr(l, "mode", "affine") == getattr(f, "mode", "affine")
-                   and l.scales.dtype == mx.float16 and l.biases.dtype == mx.float16 for l in ls):
+        groups = []
+        for ix in _gdn_groups(ls):
+            gl = [ls[i] for i in ix]
+            f = gl[0]
+            w, s, b = (mx.concatenate([l[k] for l in gl], axis=0) for k in ("weight", "scales", "biases"))
+            mx.eval(w, s, b)
+            offs, o = [], 0
+            for l in gl:
+                offs.append((o, o + l.weight.shape[0]))
+                o += l.weight.shape[0]
+            for l, (lo, hi) in zip(gl, offs):     # row views: the old buffers are freed
+                l.weight, l.scales, l.biases = w[lo:hi], s[lo:hi], b[lo:hi]
+                mx.eval(l.weight, l.scales, l.biases)
+            mode = getattr(f, "mode", "affine")
+            # the kernel's bit widths: 8, 5 / 4 / 6 with QWEN_MRQMM5 / 4 / 6 = 1
+            # once self-tested (mr.supported); narrow groups (b+a, N = 96 on the
+            # 27B) stay on quantized_matmul as narrow modules do
+            use_mr = (mr is not None and mr.enabled() and f.group_size == mr.GROUP
+                      and (mr.INVARIANT or w.shape[0] >= mr.MIN_N)
+                      and mr.supported(w, s, b, f.bits, f.group_size, mode))
+            groups.append(_InGroup(tuple(_GDN_IN[i] for i in ix), w, s, b, [hi for _, hi in offs[:-1]],
+                                   f.group_size, f.bits, mode, mr if use_mr else None))
+            if use_mr:
+                warm.setdefault(w.shape, (w, s, b))
+        if not groups:
             continue
-        w, s, b = (mx.concatenate([l[k] for l in ls], axis=0) for k in ("weight", "scales", "biases"))
-        mx.eval(w, s, b)
-        offs, o = [], 0
-        for l in ls:
-            offs.append((o, o + l.weight.shape[0]))
-            o += l.weight.shape[0]
-        for l, (lo, hi) in zip(ls, offs):     # row views: the old buffers are freed
-            l.weight, l.scales, l.biases = w[lo:hi], s[lo:hi], b[lo:hi]
-            mx.eval(l.weight, l.scales, l.biases)
-        # the kernel's bit widths: 8, 5 with QWEN_MRQMM5=1, 4 with QWEN_MRQMM4=1
-        # once self-tested (mr.supported)
-        use_mr = (mr is not None and mr.enabled() and f.group_size == mr.GROUP
-                  and mr.supported(w, s, b, f.bits, f.group_size, getattr(f, "mode", "affine")))
-        m.__dict__["_fused_in"] = (w, s, b, [hi for _, hi in offs[:-1]], f.group_size, f.bits,
-                                   getattr(f, "mode", "affine"), mr if use_mr else None)
-        if use_mr:
-            warm.setdefault(w.shape, (w, s, b))
+        m.__dict__["_fused_in"] = tuple(groups)
+        k = _group_label(groups)
+        kinds[k] = kinds.get(k, 0) + 1
         n += 1
     # the concatenated shapes (9B K=4096, 35B K=2048 -> N=12352) are new to
     # mrqmm: compile their 3..8 / 9..16-row kernels now, not in the first
@@ -491,23 +560,24 @@ def _install_gdn_fuse(lm):
         _GDN_CALL, q35.Qwen3_5GatedDeltaNet.__call__ = q35.Qwen3_5GatedDeltaNet.__call__, _gdn_call
     if n:
         mx.clear_cache()
+    if any(not k.startswith("qkv+z+b+a ") for k in kinds):     # mixed widths: say how
+        log.info("GDN in-projections fused by width: %s",
+                 "; ".join(f"{v} x [{k}]" for k, v in sorted(kinds.items(), key=lambda kv: -kv[1])))
     return n
 
 
 def _invariant_uncovered(lm):
     """mrqmm.uncovered for the language model, the fused GDN in-projections
-    counted as their one call: on mrqmm (covered: the four modules are never
-    called alone), or on quantized_matmul (one entry per layer)."""
+    counted as their group's one call: on mrqmm (covered: the members are
+    never called alone), or on quantized_matmul (one entry per group)."""
     import mrqmm
     skip, out = set(), {}
     for _, m in lm.named_modules():
-        f = m.__dict__.get("_fused_in")
-        if f is None:
-            continue
-        skip.update(id(m[n]) for n in _GDN_IN)
-        if f[7] is None:
-            k = "fused GDN in-projection on quantized_matmul"
-            out[k] = out.get(k, 0) + 1
+        for g in m.__dict__.get("_fused_in") or ():
+            skip.update(id(m[n]) for n in g.names)
+            if g.mr is None:
+                k = "fused GDN in-projection on quantized_matmul"
+                out[k] = out.get(k, 0) + 1
     for k, v in mrqmm.uncovered(lm, skip).items():
         out[k] = out.get(k, 0) + v
     return out

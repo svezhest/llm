@@ -77,6 +77,14 @@ def qlinear(K, N, bits, dtype=mx.float16):
     return lin
 
 
+def fused_mr(layer):
+    """The kernel module (or None) of each fused GDN in-projection group of a
+    layer (a uniform-width layer: one group of all four)."""
+    gs = layer.linear_attn.__dict__["_fused_in"]
+    assert all(g.names == worker._GDN_IN for g in gs)
+    return [g.mr for g in gs]
+
+
 class Holder(nn.Module):
     def __init__(self, **mods):
         super().__init__()
@@ -94,7 +102,7 @@ def test_8bit_source_is_pinned(raw, monkeypatch):
     raw._get_kernel(128, 64, 1, 2, 2)
     raw._get_kernel(128, 64, 2, 4, 4, 8)
     raw._get_kernel(128, 64, 1, 2, 2, 5)
-    assert all("@" not in raw._src(b) for b in raw.KERNEL_BITS) and len({raw._src(b) for b in raw.KERNEL_BITS}) == 3
+    assert all("@" not in raw._src(b) for b in raw.KERNEL_BITS) and len({raw._src(b) for b in raw.KERNEL_BITS}) == 4
     consts = "using T = half;\n    constexpr int K = 128, N = 64, MB = {}, NA = {}, KS = {};\n"
     assert [k["name"] for k in made] == ["mrqmm8_g64_k128_n64_mb1_a2_s2", "mrqmm8_g64_k128_n64_mb2_a4_s4",
                                          "mrqmm5_g64_k128_n64_mb1_a2_s2"]
@@ -151,7 +159,7 @@ def test_supported_by_bits(raw, monkeypatch):
         return raw.supported(m.weight, m.scales, m.biases, m.bits, m.group_size)
     assert raw._bits_of(256, 64) == 8 and raw._bits_of(256, 40) == 5
     assert raw._bits_of(256, 32) == 4 and raw._bits_of(5120, 800) == 5 and raw._bits_of(5120, 1280) == 8
-    assert raw._bits_of(256, 48) is None and raw._bits_of(256, 24) is None          # 6-bit, 3-bit
+    assert raw._bits_of(256, 48) == 6 and raw._bits_of(256, 24) is None             # 6-bit, 3-bit
     assert ok(a8) and not ok(a5) and not ok(a4)                 # default: 8-bit only
     assert not raw.bits5()
     monkeypatch.setenv("QWEN_MRQMM5", "1")
@@ -201,11 +209,11 @@ def test_call_finds_the_bit_width(raw, monkeypatch):
         return (lambda inputs, **kw: [mx.zeros(kw["output_shapes"][0], mx.float16)]), {}
     monkeypatch.setattr(raw, "_call", call)
     x = mx.zeros((4, 1, 256), mx.float16)
-    for bits in (8, 5, 4):                 # 4: callable (the bench), never dispatched
+    for bits in (8, 5, 4, 6):              # callable whatever the knobs (the dispatch's)
         lin = qlinear(256, 64, bits)
         assert raw.mrqmm(x, lin.weight, lin.scales, lin.biases).shape == (4, 1, 64)
-    assert seen == [(256, 64, 4, 8), (256, 64, 4, 5), (256, 64, 4, 4)]
-    for bits in (6, 3):
+    assert seen == [(256, 64, 4, 8), (256, 64, 4, 5), (256, 64, 4, 4), (256, 64, 4, 6)]
+    for bits in (3, 2):
         lin = qlinear(256, 64, bits)
         with pytest.raises(ValueError):
             raw.mrqmm(x, lin.weight, lin.scales, lin.biases)
@@ -213,7 +221,7 @@ def test_call_finds_the_bit_width(raw, monkeypatch):
     lin = qlinear(320, 64, 8)
     with pytest.raises(ValueError):
         raw.mrqmm(mx.zeros((4, 1, 512), mx.float16), lin.weight, lin.scales, lin.biases)
-    assert len(seen) == 3
+    assert len(seen) == 4
 
 
 def test_config_default_bits(raw):
@@ -240,8 +248,7 @@ def test_worker_knob_off_leaves_5bit_alone(mr):
     import types
     lm, n, fused = model5(mr)
     assert n == 0 and fused == sum(1 for x in lm.model.layers if x.is_linear)
-    assert all(m.__dict__["_fused_in"][7] is None for x in lm.model.layers if x.is_linear
-               for m in [x.linear_attn])
+    assert all(fused_mr(x) == [None] for x in lm.model.layers if x.is_linear)
     for B in (1, 2, 5, 16):
         decode(lm, B)
     assert mr.calls == []
@@ -249,7 +256,7 @@ def test_worker_knob_off_leaves_5bit_alone(mr):
     assert worker._setup_verify_mrqmm(lm, draft) == "off: nothing covered"
 
 
-@pytest.mark.parametrize("bits", [5, 4])
+@pytest.mark.parametrize("bits", [5, 4, 6])
 @pytest.mark.parametrize("B", [1, 2, 3, 8, 16])
 def test_worker_decode_on_5bit(mr, monkeypatch, B, bits):
     """QWEN_MRQMM5=1 (QWEN_MRQMM4=1): a 3..16-row decode step of a 5-bit
@@ -263,7 +270,7 @@ def test_worker_decode_on_5bit(mr, monkeypatch, B, bits):
     lm, n, fused = model5(mr, bits)
     gdn = sum(1 for x in lm.model.layers if x.is_linear)
     assert n > 0 and fused == gdn
-    assert all(x.linear_attn.__dict__["_fused_in"][7] is mr for x in lm.model.layers if x.is_linear)
+    assert all(fused_mr(x) == [mr] for x in lm.model.layers if x.is_linear)
     got = decode(lm, B)
     if B <= 2:
         assert mr.calls == [] and mx.array_equal(got, want).item()
@@ -277,7 +284,7 @@ def test_worker_decode_on_5bit(mr, monkeypatch, B, bits):
     assert mx.allclose(got, want, atol=2e-2, rtol=1e-2).item()
 
 
-@pytest.mark.parametrize("bits", [5, 4])
+@pytest.mark.parametrize("bits", [5, 4, 6])
 @pytest.mark.parametrize("T", [2, 8, 16])
 def test_worker_verify_block_on_5bit(mr, monkeypatch, T, bits):
     """QWEN_MRQMM5=1 + QWEN_VERIFY_MRQMM=1: a DFlash verify block of a 5-bit
@@ -326,7 +333,7 @@ def test_batch_invariant_ignores_the_knob(mr, monkeypatch):
     try:
         lm, n, fused = model5(mr)
         assert n == 0 and fused > 0
-        assert all(x.linear_attn.__dict__["_fused_in"][7] is None for x in lm.model.layers if x.is_linear)
+        assert all(fused_mr(x) == [None] for x in lm.model.layers if x.is_linear)
         assert worker._invariant_check(lm, 16) == 2
         decode(lm, 2), decode(lm, 1)
         assert mr.calls == []
@@ -425,10 +432,14 @@ def test_selftest_passes_on_the_stand_in(mr, monkeypatch):
     assert rows == [3, 8, 9, 16] and len(mr.calls) == 8 + 4 + 4
 
 
-def _broken(mr, monkeypatch, fn):
+def _broken(mr, monkeypatch, fn, bits=4):
     monkeypatch.setattr(mr, "_selftest", mr.real_selftest)
     monkeypatch.setattr(mr, "mrqmm", fn)
-    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    monkeypatch.setenv(mr.KNOBS[bits], "1")
+
+
+def _wbits(x, w):
+    return w.shape[1] * 32 // x.shape[-1]
 
 
 def _swap_k(x, w, s, b, cfg=None):
@@ -436,34 +447,35 @@ def _swap_k(x, w, s, b, cfg=None):
     K = x.shape[-1]
     i = mx.arange(K)
     j = mx.where(i % 64 == 8, i + 1, mx.where(i % 64 == 9, i - 1, i))
-    return mx.quantized_matmul(x[..., j], w, s, b, transpose=True, group_size=64, bits=4)
+    return mx.quantized_matmul(x[..., j], w, s, b, transpose=True, group_size=64, bits=_wbits(x, w))
 
 
 def _no_bias(x, w, s, b, cfg=None):
     """A dequant bug: biases ignored (invisible to the unpack check: zero there)."""
-    return mx.quantized_matmul(x, w, s, mx.zeros_like(b), transpose=True, group_size=64, bits=4)
+    return mx.quantized_matmul(x, w, s, mx.zeros_like(b), transpose=True, group_size=64, bits=_wbits(x, w))
 
 
 def _raises(x, w, s, b, cfg=None):
     raise RuntimeError("Unable to build metal library")
 
 
+@pytest.mark.parametrize("bits", [4, 6])
 @pytest.mark.parametrize("fn,why", [(_swap_k, "unpack: 8 rows, one-hot k="), (_no_bias, "3 rows, outputs"),
                                     (_raises, "RuntimeError: Unable to build")])
-def test_selftest_failure_leaves_4bit_off(mr, monkeypatch, fn, why):
-    """A broken kernel fails the self-test: no 4-bit module swapped, the fused
-    GDN in-projection on quantized_matmul, `supported` False from then on
-    (logged once); 8-bit modules unaffected."""
-    _broken(mr, monkeypatch, fn)
-    m = Holder(a=qlinear(256, 512, 8), c=qlinear(256, 512, 4))
+def test_selftest_failure_leaves_4bit_off(mr, monkeypatch, fn, why, bits):
+    """A broken kernel fails the self-test: no 4-bit (6-bit) module swapped,
+    the fused GDN in-projection on quantized_matmul, `supported` False from
+    then on (logged once); 8-bit modules unaffected."""
+    _broken(mr, monkeypatch, fn, bits)
+    m = Holder(a=qlinear(256, 512, 8), c=qlinear(256, 512, bits))
     monkeypatch.setattr(mr, "MIN_N", 512)
     assert mr.install(m, warmup=False) == 1 and type(m.c) is nn.QuantizedLinear
-    ok, detail = mr._TESTED[4]
+    ok, detail = mr._TESTED[bits]
     assert not ok and detail.startswith("c K=256 N=512: " + why), detail
-    assert not mr.supported(m.c.weight, m.c.scales, m.c.biases, 4, 64)
-    lm, n, fused = model5(mr, 4)
+    assert not mr.supported(m.c.weight, m.c.scales, m.c.biases, bits, 64)
+    lm, n, fused = model5(mr, bits)
     assert n == 0 and fused > 0
-    assert all(x.linear_attn.__dict__["_fused_in"][7] is None for x in lm.model.layers if x.is_linear)
+    assert all(fused_mr(x) == [None] for x in lm.model.layers if x.is_linear)
 
 
 def test_gdn_fuse_alone_runs_the_selftest(mr, monkeypatch):
@@ -474,5 +486,117 @@ def test_gdn_fuse_alone_runs_the_selftest(mr, monkeypatch):
     lm = build_lm("dense", 4, mx.float16)
     assert worker._install_gdn_fuse(lm) > 0 and mr._TESTED[4][0]
     a = lm.model.layers[0].linear_attn
-    assert a.__dict__["_fused_in"][7] is mr
-    assert mr._TESTED[4][1] == f"K=128 N={a.__dict__['_fused_in'][0].shape[0]}"
+    assert [g.mr for g in a.__dict__["_fused_in"]] == [mr]
+    assert mr._TESTED[4][1] == f"K=128 N={a.__dict__['_fused_in'][0].w.shape[0]}"
+
+
+# --- 6 bits (QWEN_MRQMM6) ---------------------------------------------------------
+
+def test_6bit_unpack_scheme():
+    """The integer path of _WSIDE[6] in numpy: the two lanes of `q` at every
+    row, 64-group, thread (fn) and MMA step are the weights at k = 8fn + st
+    and 8fn + 8 + st of MLX's 6-bit packing (3 aligned words per thread,
+    regrouped into 4 words of two 16-bit lanes, lane bits 12..15 unmasked)."""
+    N, K = 16, 256
+    mx.random.seed(2)
+    w, s, b = mx.quantize(mx.random.normal((N, K)), group_size=64, bits=6)
+    want = np.array(mx.dequantize(w, mx.ones_like(s), mx.zeros_like(b), group_size=64, bits=6))
+    want = want.round().astype(np.int64)
+    assert want.min() == 0 and want.max() == 63
+    wn = np.array(w).astype(np.uint32).astype(np.int64)
+    assert wn.shape == (N, K * 6 // 32)
+    m32 = 0xffffffff
+
+    def insert_bits(base, ins, off, bits):
+        mask = ((1 << bits) - 1) << off
+        return (base & ~mask & m32) | ((ins << off) & mask)
+
+    got = np.full_like(want, -1)
+    for r in range(N):
+        for g in range(K // 64):
+            for fn in (0, 2, 4, 6):
+                p = 12 * g + 3 * (fn // 2)
+                a0, a1, a2 = (int(wn[r, p + i]) for i in range(3))
+                h0, h1 = ((a1 >> 16) | (a2 << 16)) & m32, a2 >> 16
+                wq = [insert_bits(a0, h0, 16, 16),
+                      insert_bits(a0 >> 12, h0 >> 12, 16, 16),
+                      insert_bits(((a0 >> 24) | (a1 << 8)) & m32, ((h0 >> 24) | (h1 << 8)) & m32, 16, 16),
+                      insert_bits(a1 >> 4, h1 >> 4, 16, 16)]
+                for st in range(8):
+                    q = (wq[st // 2] >> (6 * (st % 2))) & 0x003f003f
+                    got[r, 64 * g + 8 * fn + st] = q & 0xffff
+                    got[r, 64 * g + 8 * fn + 8 + st] = q >> 16
+    assert np.array_equal(got, want)
+
+
+def test_6bit_source_matches_the_scheme(raw):
+    """The rendered 6-bit kernel holds the weight side the numpy mirror above
+    checks (load offsets, regrouping, step), and only the weight side differs
+    from the 5-bit kernel's."""
+    src = raw._src(6)
+    for frag in ("(K / 64 * 12) + 3 * (fn / 2)", "wp[i] + 12 * g", "uint4 wq[NA]",
+                 "insert_bits(a0, h0, 16u, 16u)", "insert_bits(a1 >> 4, h1 >> 4, 16u, 16u)",
+                 "(wq[i][st / 2] >> uint(6 * (st % 2))) & 0x003f003fu"):
+        assert frag in src, frag
+
+
+def test_supported_6bit_knob(raw, monkeypatch):
+    """QWEN_MRQMM6 is its own knob: the 4- / 5-bit ones do not pull 6-bit in,
+    a self-test runs once before the first 6-bit dispatch, never in
+    batch-invariant mode."""
+    a8, a4, a6 = qlinear(256, 64, 8), qlinear(256, 64, 4), qlinear(256, 64, 6)
+
+    def ok(m):
+        return raw.supported(m.weight, m.scales, m.biases, m.bits, m.group_size)
+    assert not raw.bits6() and not ok(a6) and raw._TESTED == {}
+    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    monkeypatch.setenv("QWEN_MRQMM5", "1")
+    assert ok(a4) and not ok(a6) and 6 not in raw._TESTED
+    monkeypatch.setenv("QWEN_MRQMM6", "1")
+    assert ok(a8) and ok(a6) and raw._TESTED[6][0]
+    assert not ok(qlinear(256, 64, 6, mx.bfloat16)) and not ok(qlinear(256, 60, 6))
+    raw.set_invariant(True)
+    try:
+        assert ok(a8) and not ok(a6)
+    finally:
+        raw.set_invariant(False)
+
+
+def test_install_6bit(raw, monkeypatch):
+    """QWEN_MRQMM6=1: 6-bit modules of N >= MIN_N swapped (the narrow one not:
+    oQ4e's 6-bit in_proj_a, N = 48), one self-test on a covered-size one."""
+    tested = []
+    monkeypatch.setattr(raw, "_selftest", lambda w, s, b, bits: tested.append((w.shape, bits)))
+
+    def holder():
+        return Holder(a=qlinear(256, 512, 4), b=qlinear(256, 48, 6), c=qlinear(256, 1024, 6),
+                      d=qlinear(256, 512, 5))
+    monkeypatch.setenv("QWEN_MRQMM4", "1")
+    m = holder()
+    assert raw.install(m, warmup=False) == 1 and [t[1] for t in tested] == [4]
+    monkeypatch.setenv("QWEN_MRQMM6", "1")
+    m = holder()
+    assert raw.install(m, warmup=False) == 2
+    assert [k for k in "abcd" if type(getattr(m, k)) is raw.MRQuantizedLinear] == ["a", "c"]
+    assert tested == [((512, 32), 4), ((1024, 48), 6)] and raw._TESTED[6] == (True, "c K=256 N=1024")
+
+
+def test_selftest_passes_on_the_stand_in_6bit(mr, monkeypatch):
+    """The self-test harness at 6 bits (12 words per group) against a correct
+    stand-in: passes; the same harness fails a stand-in that drops the
+    biases. The stand-in is an fp32 dequantized matmul rounded to fp16 (the
+    kernel's numerics): the CPU's own 6-bit quantized_matmul is ~1e-2 off an
+    fp32 reference at |y| ~ 2, outside the tolerance meant for the GPU."""
+    monkeypatch.setattr(mr, "_selftest", mr.real_selftest)
+
+    def exact(x, w, s, b, cfg=None):
+        bits = mr._bits_of(x.shape[-1], w.shape[1])
+        mr.calls.append((tuple(x.shape), w.shape[0], bits))
+        deq = mx.dequantize(w, s.astype(mx.float32), b.astype(mx.float32), group_size=64, bits=bits)
+        return (x.astype(mx.float32) @ deq.T).astype(mx.float16)
+    monkeypatch.setattr(mr, "mrqmm", exact)
+    w, s, b = (qlinear(320, 200, 6)[k] for k in ("weight", "scales", "biases"))
+    assert mr._selftest(w, s, b, 6) is None
+    assert {c[2] for c in mr.calls} == {6}
+    monkeypatch.setattr(mr, "mrqmm", lambda x, w, s, b, cfg=None: exact(x, w, s, mx.zeros_like(b)))
+    assert mr._selftest(w, s, b, 6).startswith("3 rows, outputs")

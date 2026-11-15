@@ -393,6 +393,14 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # an fp32 reference); a failure leaves every 4-bit call on quantized_matmul
 # (load log "self-test FAILED"). Ignored with QWEN_BATCH_INVARIANT=1. Gate:
 # scripts/perf/dflash2/gate_mrqmm4.sh.
+#
+# QWEN_MRQMM6 (default 0, read by mrqmm at load): the same for 6-bit affine g64
+# modules (the mixed-precision oQ4e 27B, weights/qwen38-27b-mlx-oq4e: its
+# lm_head and the last layer's k / v). Above all the DFlash verify block's head
+# and the drafter's head: mlx-vlm's exact verify kernels take only 4 / 5 / 8
+# bits, so without it a 6-bit head is read once per block token. Self-tested
+# like 4 bits. Ignored with QWEN_BATCH_INVARIANT=1. Gate:
+# scripts/perf/dflash2/gate_oq4e.sh (docs/perf/2026-11-15/design/oq4e_speed.md).
 
 # Prefill matmul (QWEN_PFQMM, default 1, read by pfqmm.install at load; 0 =
 # always quantized_matmul): on M1/M2 MLX's qmm_t uses 32x32 output tiles and
@@ -700,5 +708,8 @@ VERIFY_MR_BLOCK = 8
 #   weights, +1.2 GB on the 9B); 0.7 runs four launches per GDN layer.
 #   Per output row the same kernel and K order: bit-identical to the unfused
 #   calls on qmv; with mrqmm the narrow b/a projections (N=32, else on qmv)
-#   ride along in the multi-row kernel, as on the old stack.
+#   ride along in the multi-row kernel, as on the old stack. A mixed-width
+#   layer (oQ4e) is fused per (bits, group) group of >= 2 projections, each
+#   group its own concatenation and matmul (mrqmm only with N >= MIN_N); a
+#   projection alone at its width keeps its own call (kernels._gdn_groups).
 GDN_FUSE = os.environ.get("QWEN_GDN_FUSE", "1") != "0"

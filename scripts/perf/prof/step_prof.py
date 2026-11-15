@@ -30,7 +30,9 @@ PROF_RATTN=chunk:ns); a "/s" suffix runs that variant with a sync after every st
 time), e.g. --ab base,nosdpa,noattn,base/s,nosdpa/s,noattn/s. nomr: the step with
 mrqmm off (every linear and the fused GDN in-projection on quantized_matmul, as
 QWEN_MRQMM=0 / QWEN_MRQMM5=0 / QWEN_MRQMM4=0 would run it), e.g. --ab base,nomr
---ab-steps 32 for the kernel's A/B in one process.
+--ab-steps 32 for the kernel's A/B in one process. nofuse: the step with the
+fused GDN in-projection off (QWEN_GDN_FUSE=0 at run time; e.g. --B 1 --ab
+base,nofuse for the width-group fusion of a mixed-precision model, 2026-11-15).
 """
 import argparse, collections, json, os, statistics, sys, threading, time
 sys.path.insert(0, os.getcwd())
@@ -288,6 +290,21 @@ def _nomr(self):
 
 
 IMPL["nomr"] = _nomr
+
+
+def _nofuse(self):
+    """the step with the fused GDN in-projection off (as QWEN_GDN_FUSE=0: the
+    library's four in-projection calls on the modules, which keep their row
+    views of the concatenation); everything else as base"""
+    keep = W.GDN_FUSE
+    W.GDN_FUSE = False
+    try:
+        return _iter(self)
+    finally:
+        W.GDN_FUSE = keep
+
+
+IMPL["nofuse"] = _nofuse
 MODE = {"attn": "base", "sync": False}
 RATTN_CFG = tuple(int(x) for x in os.environ.get("PROF_RATTN", "512:4").split(":"))     # attention variant + per-step sync of the current variant
 for _v in ("base", "nosdpa", "noattn", "rattn"):
