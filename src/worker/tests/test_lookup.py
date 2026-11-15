@@ -327,3 +327,19 @@ def test_gate():
     g = worker._Gate(0, 15, 3, 8, False)         # fixed K, no backoff
     g.after(0, 15)
     assert (g.k, g.need) == (15, 3)
+
+
+def test_lookup_draft_mode(dense, look, caplog):
+    """QWEN_LOOKUP=draft: lookup rounds for the drafter's rows only; without a
+    drafter the plain loop (no index, not _spec)."""
+    caplog.set_level(logging.INFO)
+    look.setattr(worker, "LOOKUP", "draft")
+    p = prompts([25], 39)[0]
+    plain = answer_of(dense, p, 30)
+    FakeLookup.made = None
+    assert run(scheduler(dense, max_batch=1), [request(p, 30, "a")])["a"] == plain
+    assert FakeLookup.made is None
+    sched = scheduler(dense, max_batch=1)
+    sched.eng.draft = CtxDraft(plain[0], len(p))
+    assert run(sched, [request(p, 30, "a")])["a"] == plain
+    assert FakeLookup.made is not None and lstats(caplog)[0] >= 1

@@ -354,6 +354,7 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # leaves >= 2 drafts (a verify block of >= 3 rows), at most QWEN_LOOKUP_K
 # drafts (<= 15: mrqmm's 16 rows).
 #   "0" (default) off.
+#   "draft": rows the drafter takes only (below); plain rows stay the plain loop.
 #   "1": with a drafter (QWEN_DRAFT), a lookup round when a match exists, else
 #        the drafter's block (its context = every position since its last
 #        block); without a drafter (or for rows no drafter takes), lookup
@@ -364,18 +365,19 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 #        token, the (longer) continuation instead (a host read of the drafts).
 LOOKUP = os.environ.get("QWEN_LOOKUP", "0") or "0"
 LOOKUP_N = int(os.environ.get("QWEN_LOOKUP_N", "3"))
-LOOKUP_NMAX = int(os.environ.get("QWEN_LOOKUP_NMAX", "8"))
-LOOKUP_MIN = int(os.environ.get("QWEN_LOOKUP_MIN", "3"))
+LOOKUP_NMAX = int(os.environ.get("QWEN_LOOKUP_NMAX", "32"))
+LOOKUP_MIN = int(os.environ.get("QWEN_LOOKUP_MIN", "4"))
 LOOKUP_K = min(15, int(os.environ.get("QWEN_LOOKUP_K", "15")))
 # QWEN_LOOKUP_K0: adaptive drafts per lookup round: start at K0, 2k+1 after a
 # round whose drafts were all accepted (up to QWEN_LOOKUP_K), back to K0 after
 # one that was not (a match into text that does not copy costs a short block).
-# 0 = always QWEN_LOOKUP_K.
-LOOKUP_K0 = int(os.environ.get("QWEN_LOOKUP_K0", "0"))
+# 0 = always QWEN_LOOKUP_K. 27B 4-bit verify (mrqmm buckets): 4 rows 99 ms,
+# 8 rows 106, 12 rows 155, 16 rows 159 (a plain step 55): so 7, then 15.
+LOOKUP_K0 = int(os.environ.get("QWEN_LOOKUP_K0", "7"))
 # QWEN_LOOKUP_BACKOFF: a lookup round that kept fewer than half its drafts
 # doubles the match length the next one needs (up to QWEN_LOOKUP_NMAX), a fully
 # accepted one resets it to QWEN_LOOKUP_MIN (_Gate). 0 = off.
-LOOKUP_BACKOFF = os.environ.get("QWEN_LOOKUP_BACKOFF", "0") == "1"
+LOOKUP_BACKOFF = os.environ.get("QWEN_LOOKUP_BACKOFF", "1") == "1"
 LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by

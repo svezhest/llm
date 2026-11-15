@@ -193,8 +193,8 @@ class _SpecMixin:
             first = one(out.logits[:, -1, :])
         mx.eval(first, hidden)
         first = first.item()
-        lk = (_Lookup(req.ids, LOOKUP_N, LOOKUP_NMAX)
-              if LOOKUP in ("1", "splice") and max_tokens > 1 else None)
+        on = LOOKUP in ("1", "splice") or (LOOKUP == "draft" and draft is not None)
+        lk = _Lookup(req.ids, LOOKUP_N, LOOKUP_NMAX) if on and max_tokens > 1 else None
         req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
         # Reply KV (QWEN_PROMPT_CACHE_REPLY): row.fed takes every generated
         # token in order (as _iterate: the stop token too), `recent` the
