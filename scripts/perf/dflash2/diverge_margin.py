@@ -24,7 +24,7 @@ res = json.load(open(sys.argv[1]))
 thinking = bool(res.get("thinking"))
 bad = [(o["task"], o["variant"], o["diverge"]) for o in res["ident"] if not o["same"]]
 prompts = {o["task"]: o["prompt"] for o in res["speed"] if "prompt" in o}
-model, proc = load(os.path.join(ROOT, "weights/qwen38-27b-mlx-5bit"))
+model, proc = load(os.environ.get("MODEL", os.path.join(ROOT, "weights/qwen38-27b-mlx-5bit")))
 lm = model.language_model
 lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
 mx.eval(lm.parameters())

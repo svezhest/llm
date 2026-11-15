@@ -1,0 +1,13 @@
+loaded; max_batch 16 sync=False consumer=handler
+B=3 all rows decoding after 11.5s; lengths [511, 507, 502]; KV per step 0.05 GB = 0.1 ms at 400 GB/s
+round 0 B= 3 base: period median 80.24 ms (q1 79.2 q3 83.7, n=92) fwd_cpu 4.23 async_eval 75.83 enc 0.00 wait 0.01 sample 0.00 iterate 80.26
+round 0 B= 3 nomr: period median 120.19 ms (q1 116.2 q3 122.0, n=87) fwd_cpu 3.45 async_eval 116.42 enc 0.00 wait 0.01 sample 0.00 iterate 120.00
+B=4 all rows decoding after 15.3s; lengths [511, 508, 507, 504]; KV per step 0.07 GB = 0.2 ms at 400 GB/s
+round 0 B= 4 base: period median 82.86 ms (q1 82.2 q3 83.9, n=90) fwd_cpu 4.30 async_eval 78.32 enc 0.00 wait 0.01 sample 0.00 iterate 82.85
+round 0 B= 4 nomr: period median 155.44 ms (q1 150.0 q3 161.2, n=87) fwd_cpu 3.54 async_eval 151.41 enc 0.00 wait 0.01 sample 0.00 iterate 155.13
+B=8 all rows decoding after 34.0s; lengths [519, 512, 512, 510, 509, 506, 503, 502]; KV per step 0.13 GB = 0.3 ms at 400 GB/s
+round 0 B= 8 base: period median 103.20 ms (q1 100.7 q3 104.7, n=87) fwd_cpu 4.91 async_eval 97.01 enc 0.00 wait 0.01 sample 0.00 iterate 103.25
+round 0 B= 8 nomr: period median 304.53 ms (q1 298.3 q3 319.2, n=84) fwd_cpu 4.01 async_eval 300.67 enc 0.00 wait 0.01 sample 0.00 iterate 304.85
+B=16 all rows decoding after 69.9s; lengths [534, 529, 528, 525, 523, 521, 520, 517, 515, 514, 514, 509, 509, 509, 509, 508]; KV per step 0.27 GB = 0.7 ms at 400 GB/s
+round 0 B=16 base: period median 166.80 ms (q1 163.4 q3 170.7, n=80) fwd_cpu 11.55 async_eval 153.47 enc 0.00 wait 0.03 sample 0.00 iterate 166.76
+round 0 B=16 nomr: period median 331.00 ms (q1 327.4 q3 335.4, n=82) fwd_cpu 12.21 async_eval 318.58 enc 0.00 wait 0.03 sample 0.00 iterate 330.97

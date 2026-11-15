@@ -151,6 +151,61 @@ roof (one-pass L1 is the other agent's lever).
 
 
 
+## 5. K1: mrqmm 4-bit, config sweep and gate steps 3–5 (`scripts/perf/dflash2/gate_mrqmm4.sh`)
+
+**Step 3** (kern5_bench on the real 4-bit weights, no model; `raw/k1_kern4_bench_real.json`) [M]:
+linears of one 27B forward (64 layers + lm_head):
+
+| rows | qmv per row (1 row) | MLX `quantized_matmul` | mrqmm (`_config`) | 2x8 | 4x8 | 4x4 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 3 | 47.6 | 93.9 (×1.97) | 71.1 (×1.49) | | | |
+| 4 | 47.1 | 121.3 (×2.58) | 71.7 (×1.52) | | | |
+| 6 | 47.1 | 240.8 (×5.11) | 74.1 (×1.57) | | | |
+| **8** | 47.2 | 243.7 (×5.16) | **78.1 (×1.65)** | 78.0 | 78.1 | 80.0 |
+| 12 | 47.7 | 249.2 (×5.22) | 115.5 (×2.42) | | | |
+| 16 | 47.1 | 246.7 (×5.24) | 116.1 (×2.47) | 115.9 | 116.6 | 115.5 |
+
+`mrqmm._config`'s 4-bit choice (4x8 at ≤ 8 rows, 2x8 above) is within 0.1 % of the best
+config at 8 rows (4x4 is 2.6 % slower) and within 0.5 % at 16: **no config change**. The
+8-row verify block's linears cost ×1.65 a solo row's — the plan's [Ms] number, now on the
+real weights.
+
+**Step 4** (step_prof `--ab base,nomr --ab-steps 32`, one process, the model without the
+drafter, ~600-token prompts; `raw/k1_step_ab_4bit.{json,log}`) [M]: decode step period, mrqmm vs
+`quantized_matmul` for the same rows:
+
+| B | mrqmm (base) | `quantized_matmul` (nomr) | |
+|---:|---:|---:|---:|
+| 3 | 80.2 ms | 120.2 ms | ×1.50 |
+| 4 | 82.9 | 155.4 | ×1.88 |
+| 8 | 103.2 | 304.5 | ×2.95 |
+| 16 | 166.8 | 331.0 | ×1.98 |
+
+Pass (base beats nomr at every B). step_prof does not configure INFO logging, so the load
+log's self-test line is not in this file; the kernel was evidently taken (the A/B differs
+×1.5–3); step 5's log shows it.
+
+**Step 5** (`scripts/perf/dflash2/ab27.py`, plain / `m8/8` = DFlash block 8 with the verify through
+mrqmm (`QWEN_VERIFY_MRQMM=1`, the default) / `e0/8` = block 8 through mlx-vlm's exact verify kernels,
+5 tasks × 3 rounds interleaved, 256 tokens, greedy, thinking off, then a 16-task identity pass;
+`raw/k1_ab27_4bit.{json,log}`) [M]. The load log has `mrqmm 4-bit g64 self-test passed`.
+
+| variant | tok/s (median of tasks) | per task | accepted / round | round | identical to plain |
+|---|---:|---|---:|---:|---:|
+| plain | 18.44 | 18.2–18.6 | — | — | — |
+| **m8/8** | **32.27 (×1.75)** | 22.6–37.9 | 3.40 | 136.7 ms | 12/15 (speed tasks), **12/16** (identity pass) |
+| e0/8 | 13.22 (×0.72) | 9.3–15.7 | 3.40 | 331.0 ms | 15/15 |
+
+Speed passes the gate's ×1.6 bar; without the kernel DFlash on the 4-bit model is slower than
+plain (the exact verify kernels cost 2.4× a mrqmm round). Peak 17.97 GB, active 16.52 GB.
+Identity: 12/16 with divergences at tokens 151, 56, 33, 202 — below the night rules' ≥ 15/16
+(the 5-bit kernel had 15/16 without thinking on the same tasks). The e0/8 column shows the
+drafter path itself is exact, so the four divergences come from the mrqmm verify rows (the
+batched-decode numerics class). Whether they are near-ties, and the teacher-forced agreement
+of the kernel against stock qmm at B = 3/8/16, are below.
+
+<!-- K1STEP5 -->
+
 ## 6. Commands
 
 From `src/worker`, `ENV27="QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1

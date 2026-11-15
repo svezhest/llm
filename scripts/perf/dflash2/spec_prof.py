@@ -73,6 +73,9 @@ ap.add_argument("--max-tokens", type=int, default=512)
 ap.add_argument("--task", type=int, default=0)
 ap.add_argument("--modes", default="normal,stage,normal,deep")
 ap.add_argument("--skip", type=int, default=4, help="rounds of each request not counted (warm-up)")
+ap.add_argument("--cprofile", action="store_true",
+                help="cProfile the verify forward's graph build in normal rounds (where the "
+                     "GPU idles: section 2 of docs/perf/2026-11-16/profile_27b.md)")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
 assert os.environ.get("QWEN_PROMPT_CACHE") == "1", "QWEN_PROMPT_CACHE=1 (requests after the first read it)"
@@ -180,6 +183,10 @@ def async_eval(*arrs):
 
 
 _lm_call = LM.__call__
+PROF = None
+if a.cprofile:
+    import cProfile
+    PROF = cProfile.Profile()
 
 
 def lm_call(self, *args, **kw):
@@ -193,9 +200,14 @@ def lm_call(self, *args, **kw):
         r["pre_sync"] = r.get("pre_sync", 0.0) + (now() - t) * 1e3
         t = now()
     S["mark"], S["deep"], S["in_verify"] = t, mode == "deep", True
+    prof = PROF if (PROF is not None and mode == "normal" and not S.get("skip_prof")) else None
     try:
+        if prof is not None:
+            prof.enable()
         out = _lm_call(self, *args, **kw)
     finally:
+        if prof is not None:
+            prof.disable()
         S["in_verify"] = False
     t1 = now()
     r["verify_build"] = (t1 - t) * 1e3
@@ -402,6 +414,13 @@ spec = [o for o in reqs if o["kind"] == "spec"]
 out["spec_tps"] = statistics.median(o["tps"] for o in spec)
 out["rounds_raw"] = [{k: v for k, v in r.items() if not k.endswith(("_t0", "_t1")) and k not in ("start", "next_start")}
                      for r in ROUNDS]
+if PROF is not None:
+    import io
+    import pstats
+    for key in ("tottime", "cumulative"):
+        buf = io.StringIO()
+        pstats.Stats(PROF, stream=buf).sort_stats(key).print_stats(35)
+        print(buf.getvalue()[:9000], flush=True)
 if a.json:
     json.dump(out, open(a.json, "w"), indent=1)
 os._exit(0)
