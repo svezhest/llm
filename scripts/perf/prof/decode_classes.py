@@ -48,8 +48,13 @@ ap.add_argument("--pipe", type=int, default=0,
                 help="also N steps of the worker's step-ahead loop (build step k+1, async_eval, then "
                      "step k's .item()) per round: its period vs eval/K = what pipelining loses")
 ap.add_argument("--only-pipe", action="store_true", help="skip the removal variants")
+ap.add_argument("--setenv", default="", help="K=V[,K=V]: set after mlx/worker are imported, before the "
+                "first MLX op (does MLX read it lazily, e.g. MLX_MAX_MB_PER_BUFFER?)")
 ap.add_argument("--json")
 a = ap.parse_args()
+for kv in filter(None, a.setenv.split(",")):
+    k, _, v = kv.partition("=")
+    os.environ[k] = v
 
 from mlx_vlm.models.cache import make_prompt_cache, KVCache, ArraysCache  # noqa: E402
 from mlx_vlm.models.qwen3_5 import gated_delta as gd, language as q35  # noqa: E402
@@ -122,8 +127,12 @@ ctxs = sorted(int(x) for x in a.ctx.split(","))
 ids_all = filler(ctxs[-1])
 
 
+PEAK = {}
+
+
 def prefill_to(n):
     global pos
+    mx.reset_peak_memory()
     t = time.time()
     while pos < n:
         m = min(2048, n - pos)
@@ -131,7 +140,9 @@ def prefill_to(n):
         mx.eval([c.state for c in cache])
         pos += m
         mx.clear_cache()
-    print(f"prefilled to {n} in {time.time() - t:.1f}s", flush=True)
+    PEAK[n] = mx.get_peak_memory() / 2**30
+    print(f"prefilled to {n} in {time.time() - t:.1f}s; prefill peak {PEAK[n]:.2f} GiB "
+          f"(active {mx.get_active_memory() / 2**30:.2f})", flush=True)
 
 
 def snapshot():
@@ -262,7 +273,7 @@ for n in ctxs:
               f"{os.environ.get('MLX_MAX_MB_PER_BUFFER', '')}", flush=True)
     res[str(n)] = dict(raw=t, build=b, median=med, build_median=bmed, deltas=d, nodes=nodes, top_ops=top,
                        pipe=pp, env={k: v for k, v in os.environ.items() if k.startswith("MLX_")},
-                       peak_gib=mx.get_peak_memory() / 2**30)
+                       prefill_peak_gib=PEAK.get(n))
 if a.json:
     json.dump(res, open(a.json, "w"), indent=1)
 os._exit(0)
