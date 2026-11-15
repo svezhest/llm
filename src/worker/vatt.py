@@ -61,6 +61,7 @@ TARGET_TG = int(os.environ.get("VATT_TARGET_TG") or "256")   # pass-1 threadgrou
 # (BQ, BK, WM, WN) override for the microbench: "BQxBK" (WM = BQ / 8, WN = 2), "BQxBKw1" (WN = 1:
 # a simdgroup's 8 rows over the whole head_dim, no score exchange)
 TILE = os.environ.get("VATT_TILE", "")
+SPLIT = os.environ.get("VATT_SPLIT", "0") == "1"   # K / V / exchange in separate smem regions
 BK_MUL = int(os.environ.get("VATT_BK_MUL") or "1")           # > 1: BK = BK_MUL * BQ
 
 _IMPL = r"""
@@ -69,7 +70,7 @@ _IMPL = r"""
 // strided buffers (head stride, token stride), a causal tail per query row
 // (row r < M0 sees keys < N - TQN + 1 + r % TQN), keys [start, start + kL)
 // of one chunk; writes the chunk's normalized o (fp32) + m and l.
-template <typename T, int BQ, int BK, int BD, int WM, int WN>
+template <typename T, int BQ, int BK, int BD, int WM, int WN, bool SPLIT>
 METAL_FUNC void vatt_p1(
     const device T* Q, const device T* K, const device T* V,
     device float* po, device float* pml,
@@ -103,8 +104,12 @@ METAL_FUNC void vatt_p1(
   constexpr short tgp_mem_1 = BK * (BV + padV);
   constexpr short tgp_mem_s = tgp_mem_0 > tgp_mem_1 ? tgp_mem_0 : tgp_mem_1;
 
+  // SPLIT: K, V and the score exchange in their own regions (K and V of a
+  // block loaded together: 3 barriers a block instead of 6)
   threadgroup T* Ks = KV_smem;
-  threadgroup T* Vs = KV_smem;
+  threadgroup T* Vs = SPLIT ? KV_smem + tgp_mem_0 : KV_smem;
+  threadgroup float* Xs = SPLIT ? reinterpret_cast<threadgroup float*>(KV_smem + tgp_mem_0 + tgp_mem_1)
+                                : reinterpret_cast<threadgroup float*>(KV_smem);
 
   using KBlockLoader = BlockLoaderT<T, BK, BD, 1, LDK_tgp, 0, WM * WN * 32>;   // K transposed
   using VBlockLoader = BlockLoaderT<T, BK, BV, LDV_tgp, 1, 0, WM * WN * 32>;
@@ -165,8 +170,10 @@ METAL_FUNC void vatt_p1(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (kb == NK_aligned) {
       loader_k.load_safe(short2(BD, kL_rem));
+      if constexpr (SPLIT) loader_v.load_safe(short2(BV, kL_rem));
     } else {
       loader_k.load_unsafe();
+      if constexpr (SPLIT) loader_v.load_unsafe();
     }
     Stile.clear();
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -180,10 +187,10 @@ METAL_FUNC void vatt_p1(
     if constexpr (WN == 2) {   // each simdgroup summed half of D; exchange the partial scores
       constexpr int s_xchg_stride = decltype(Stile)::kElemsPerTile * 32;
       constexpr int s_xchg_size = WM * WN * s_xchg_stride;
-      static_assert(s_xchg_size * sizeof(AccumType) <= tgp_mem_s * sizeof(T),
+      static_assert(SPLIT || s_xchg_size * sizeof(AccumType) <= tgp_mem_s * sizeof(T),
                     "The score exchange must fit in KV_smem");
-      threadgroup_barrier(mem_flags::mem_threadgroup);
-      threadgroup AccumType* s_xchg = reinterpret_cast<threadgroup AccumType*>(KV_smem);
+      if constexpr (!SPLIT) threadgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup AccumType* s_xchg = Xs;
       threadgroup AccumType* slot = s_xchg + (row_group * WN + d_half) * s_xchg_stride;
       const short base = short(simd_lane_id) * decltype(Stile)::kElemsPerTile;
       STEEL_PRAGMA_UNROLL
@@ -213,11 +220,13 @@ METAL_FUNC void vatt_p1(
         }
       }
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (kb == NK_aligned) {
-      loader_v.load_safe(short2(BV, kL_rem));   // zeros past the chunk: 0 * NaN never happens
-    } else {
-      loader_v.load_unsafe();
+    if constexpr (!SPLIT) {
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (kb == NK_aligned) {
+        loader_v.load_safe(short2(BV, kL_rem));   // zeros past the chunk: 0 * NaN never happens
+      } else {
+        loader_v.load_unsafe();
+      }
     }
     AccumType new_max[kRowsPT];
     AccumType factor[kRowsPT];
@@ -234,7 +243,7 @@ METAL_FUNC void vatt_p1(
     STEEL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) sum_score[i] = sum_score[i] * factor[i] + sum_score_tmp[i];
     Otile.template row_bin_op<MulOp>(factor);
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if constexpr (!SPLIT) threadgroup_barrier(mem_flags::mem_threadgroup);
     STEEL_PRAGMA_UNROLL
     for (short id = 0; id < TVh; id++) {
       STEEL_PRAGMA_UNROLL
@@ -278,9 +287,10 @@ METAL_FUNC void vatt_p1(
 # constants prepended (_consts): D, HKV, BQ, BK, WM, WN, SCALE2 (scale * log2 e)
 # meta (int32): M0 (= G * T query rows per kv head), N (keys), T, chunk, items, blocks
 _P1 = r"""
-    constexpr int KVS = (BK + 8) * D > BK * (D + 8) ? (BK + 8) * D : BK * (D + 8);
+    constexpr int KVS = SPLIT ? (BK + 8) * D + BK * (D + 8) + 2 * WM * WN * (BQ / (8 * WM)) * BK * 8
+                              : ((BK + 8) * D > BK * (D + 8) ? (BK + 8) * D : BK * (D + 8));
     threadgroup half KV_smem[KVS];
-    vatt_p1<half, BQ, BK, D, WM, WN>(q, k, v, po, pml, meta[0], meta[1], meta[2], meta[3], meta[5], HKV,
+    vatt_p1<half, BQ, BK, D, WM, WN, SPLIT>(q, k, v, po, pml, meta[0], meta[1], meta[2], meta[3], meta[5], HKV,
         size_t(k_strides[1]), int(k_strides[2]), size_t(v_strides[1]), int(v_strides[2]),
         SCALE2, KV_smem, thread_index_in_simdgroup, simdgroup_index_in_threadgroup,
         threadgroup_position_in_grid);
@@ -346,6 +356,7 @@ def _loader_ok(bk, D, tgp):
 
 def _consts(D, hkv, scale, bq, bk, wm, wn):
     return (f"constexpr int D = {D}, HKV = {hkv}, BQ = {bq}, BK = {bk}, WM = {wm}, WN = {wn};\n"
+            f"    constexpr bool SPLIT = {'true' if SPLIT else 'false'};\n"
             f"    constexpr float SCALE2 = {scale * math.log2(math.e)!r}f;\n")
 
 
@@ -359,7 +370,7 @@ def _kernels(D, hkv, scale, bq, bk, wm, wn):
                 if not _loader_ok(bk, D, 32 * wm * wn):
                     raise ValueError(f"vatt: tile {bq}x{bk} does not fit the loaders")
                 c = _consts(D, hkv, scale, bq, bk, wm, wn)
-                tag = (f"q{bq}k{bk}w{wm}x{wn}_d{D}_h{hkv}_s"
+                tag = (f"q{bq}k{bk}w{wm}x{wn}{'s' if SPLIT else ''}_d{D}_h{hkv}_s"
                        + float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p'))
                 p1 = mx.fast.metal_kernel(
                     name=f"vatt_p1_{tag}", input_names=["q", "k", "v", "meta"],
