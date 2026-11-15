@@ -11,7 +11,7 @@
 | P2 `MLX_MAX_OPS_PER_BUFFER` / `_MB_PER_BUFFER`, `MLX_METAL_FAST_SYNCH` | ≥ 3 % | plain period 51.5 → 50.3–51.6 ms, DFlash round 126.7 → 128.2 ms; MB=1000: prefill peak **+6.6 GiB, 8K prefill Metal OOM** | **rejected** |
 | L1 one-pass verify attention (other agent) | go if ≥ 25 % of the round at ≥ 32K | verify attention **~5 % at 2K, ~36 % at 32K** (70 of 194 ms), 132 ms per round at 60K | **GO** (report only) |
 | D1 drafter on mrqmm (other agent) | go if drafter ≥ 18 % of the round | drafter **23 % at 2K** (29.7 of 128 ms), 17 % at 32K | **GO** at short context (report only) |
-| K1 mrqmm 4-bit sweep + gate steps 4–5 | — | see §5 | <!-- K1V --> |
+| K1 mrqmm 4-bit sweep + gate steps 3–5 | config within 0.1 %; numerics in class; DFlash ×1.6; identity ≥ 15/16 | `_config` best at 8 rows (78.1 ms vs 78.0); batched step ×1.5–2.95 vs qmm; DFlash **×1.75** (32.3 vs 18.4 tok/s); teacher-forced top-1 100 / 100 / 99.80 % at B = 3/8/16, KL ≤ 1e-5 (stock qmm: 100 / 99.90 / 99.85 %); identity **12/16**, all 4 at near-ties (gap 0–0.031) | **no config change; QWEN_MRQMM4 stays default off** (identity count below 15/16, the 35B's 4-bit shared expert ungated) — use `QWEN_MRQMM4=1` for the 4-bit 27B |
 
 What is left on the table besides L1 / D1: the DFlash round exposes **8–9 ms of host time
 (4–7 %)**, mostly the verify graph build (4.6–6.4 ms of Python) on an idle GPU — MLX's
@@ -202,9 +202,42 @@ Identity: 12/16 with divergences at tokens 151, 56, 33, 202 — below the night 
 (the 5-bit kernel had 15/16 without thinking on the same tasks). The e0/8 column shows the
 drafter path itself is exact, so the four divergences come from the mrqmm verify rows (the
 batched-decode numerics class). Whether they are near-ties, and the teacher-forced agreement
-of the kernel against stock qmm at B = 3/8/16, are below.
+of the kernel against stock qmm at B = 3/8/16, follow.
 
-<!-- K1STEP5 -->
+**Near-ties** (`scripts/perf/dflash2/diverge_margin.py` with `MODEL=…-4bit`: plain greedy through
+the library, single-row qmv, top-1 − top-2 logit gap at the diverging token; `raw/k1_diverge_margin_4bit.txt`,
+`raw/k1_ab27_4bit_margins.json`) [M]:
+
+| task | diverges at | gap there | median gap before | earlier steps with a smaller gap |
+|---:|---:|---:|---:|---:|
+| 3 | 151 | 0.0156 | 7.91 | 0 |
+| 10 | 56 | 0.0312 | 8.23 | 0 |
+| 11 | 33 | 0.0 | 2.30 | 0 |
+| 15 | 202 | 0.0156 | 2.43 | 5 |
+
+All 442 earlier steps: gap p1 0.016, p5 0.172, p50 4.09. Every divergence is at an fp16
+tie or one ulp from it (fp16 logit spacing at these magnitudes is 0.0156).
+
+**Teacher-forced agreement** (`scripts/perf/prof/agree.py`, `AG_BATCHES=3,8,16 AG_STEPS=128`, batched
+vs solo decode of the same rows, the solo greedy stream fed to both; `raw/k1_agree_mrqmm4_{1,0}.txt`) [M]:
+
+| B | `QWEN_MRQMM4=1` top-1 / KL mean / KL max | `QWEN_MRQMM4=0` (stock qmm) |
+|---:|---|---|
+| 3 | 100.00 % / 9.5e-6 / 4.4e-4 | 100.00 % / 0 / 0 (per-row qmv: bit-exact) |
+| 8 | 100.00 % / 7.1e-6 / 4.4e-4 | 99.90 % / 6.8e-6 / 5.5e-4 |
+| 16 | 99.80 % / 7.6e-6 / 1.0e-3 | 99.85 % / 7.4e-6 / 5.5e-4 |
+
+Peak 19.1 / 22.2 GB at B = 8 / 16 (two copies of every row). The kernel is in the batched-decode
+numerics class (KL ≤ 1e-4, top-1 ≥ 99.7 %) and no worse than stock qmm, whose 8–16 rows are
+not bit-exact either; at B = 3 stock is per-row qmv (exact), the kernel is not.
+
+**K1 verdict**: speed (×1.75 DFlash, ×1.5–2.95 batched step) and numerics (KL ≤ 1e-5,
+top-1 ≥ 99.80 %) pass; DFlash identity is 12/16 — every divergence at a near-tie, but the
+count is below the night rules' 15/16 (the 5-bit kernel is 15/16 without thinking and stays
+default off at 12/16 with thinking). A default flip would also put the 35B's 4-bit shared
+expert on the kernel, which no gate has measured. **`QWEN_MRQMM4` stays default off**; it
+belongs in the 4-bit 27B recipe (without it DFlash on that model is ×0.72 of plain).
+Lease hold for this section: 12:02–12:13.
 
 ## Open issues
 

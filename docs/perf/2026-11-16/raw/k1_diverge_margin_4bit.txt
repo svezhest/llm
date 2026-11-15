@@ -1,0 +1,5 @@
+{'task': 3, 'variant': 'm8/8', 'diverge': 151, 'prompt_tokens': 39, 'prompt_matches_worker': True, 'gap_at_diverge': 0.0156, 'median_gap_before': 7.906, 'steps_with_smaller_gap': 0, 'steps': 151, 'token': '\n'}
+{'task': 10, 'variant': 'm8/8', 'diverge': 56, 'prompt_tokens': 34, 'prompt_matches_worker': None, 'gap_at_diverge': 0.0312, 'median_gap_before': 8.227, 'steps_with_smaller_gap': 0, 'steps': 56, 'token': ' Edge'}
+{'task': 11, 'variant': 'm8/8', 'diverge': 33, 'prompt_tokens': 35, 'prompt_matches_worker': None, 'gap_at_diverge': 0.0, 'median_gap_before': 2.297, 'steps_with_smaller_gap': 0, 'steps': 33, 'token': ','}
+{'task': 15, 'variant': 'm8/8', 'diverge': 202, 'prompt_tokens': 37, 'prompt_matches_worker': None, 'gap_at_diverge': 0.0156, 'median_gap_before': 2.43, 'steps_with_smaller_gap': 5, 'steps': 202, 'token': ' disk'}
+all 442 earlier steps: gap p1 0.016 p5 0.172 p50 4.086
