@@ -8,9 +8,10 @@ from typing import NamedTuple
 import mlx.core as mx
 
 from . import config as cfg
-from .config import (DRAFT_FP32, GDN_FAST, GDN_FAST_MIN_T, GDN_FUSE, GIB, log, PREFILL_BUDGET,
+from .config import (DECODE_ATT_MIN_KV, DRAFT_FP32, GDN_FAST, GDN_FAST_MIN_T, GDN_FUSE, GIB, log, PREFILL_BUDGET,
                      PROMPT_CACHE, PROMPT_CACHE_REPLY, SDPA_FUSED_MIN_KV, SDPA_FUSED_MIN_Q,
-                     VERIFY_ATT, VERIFY_EXACT_MAX_T, VERIFY_MR, VERIFY_MR_BLOCK, VERIFY_MR_HEAD)
+                     VERIFY_ATT, VERIFY_ATT2, VERIFY_EXACT_MAX_T, VERIFY_MR, VERIFY_MR_BLOCK,
+                     VERIFY_MR_HEAD)
 from .sizing import _act_dtype
 
 
@@ -19,6 +20,8 @@ _GDN_KERNEL = None                    # the library's gated_delta_kernel
 _VERIFY_LINEAR = _VERIFY_LINEARS = None   # Qwen3_5BatchInvariantForward._linear / _linears
 _VERIFY_ATTENTION = None                  # ... ._attention
 _VERIFY_ATT_Q = 0                         # queries per call; 0 = off (set at load)
+_VATT = False                             # QWEN_VERIFY_ATT=2: one-pass kernel (vatt.py), set at load
+_VATT_DEC = False                         # QWEN_DECODE_ATT: decode steps through it, set at load
 
 
 def _fused_sdpa(queries, keys, values, cache, scale, mask, sinks=None):
@@ -32,6 +35,18 @@ def _fused_sdpa(queries, keys, values, cache, scale, mask, sinks=None):
     QuantizedKVCache take the fused kernel over the layer's keys / values
     dequantized to fp16 (_dequantized_kv); the cache keeps its packed arrays.
     Off: the library's quantized SDPA, as before."""
+    global _VATT_DEC
+    if (_VATT_DEC and queries.shape[2] == 1 and queries.shape[0] == 1 and mask is None
+            and sinks is None and type(cache).__name__ == "KVCache" and isinstance(keys, mx.array)
+            and keys.shape[2] >= DECODE_ATT_MIN_KV and queries.dtype == mx.float16):
+        # QWEN_DECODE_ATT: a decode step's query (a lone row's or one row of
+        # a batch: _rows_attention calls this per row) over a long fp16 KV
+        # through the one-pass kernel, on the cache's own buffers
+        try:
+            return sys.modules["vatt"].attention(queries, cache.keys, cache.values, keys.shape[2], scale)
+        except (ValueError, RuntimeError, TypeError) as e:
+            _VATT_DEC = False
+            log.warning("QWEN_DECODE_ATT off: %s", e)
     # cache type first: a quantized cache hands over (packed, scales, biases)
     # tuples as keys/values
     plain = type(cache).__name__ == "KVCache" and isinstance(keys, mx.array)
@@ -164,9 +179,11 @@ def _block_attention(queries, keys, values, scale, step):
 def _probe_verify_attention(lm):
     """At load with a drafter: -> queries per vector-kernel call (0 = off:
     QWEN_VERIFY_ATT=0, no kernel, or its output is not bit-equal to the
-    one-query calls' on a random block of this model's heads)."""
+    one-query calls' on a random block of this model's heads). With
+    QWEN_VERIFY_ATT=2 also the one-pass kernel's self-test (_probe_vatt)."""
     global _VERIFY_ATT_Q
     _VERIFY_ATT_Q = 0
+    _probe_vatt(lm)
     a = lm.args
     H, HK, D = a.num_attention_heads, a.num_key_value_heads, a.head_dim
     T = min(32 // max(1, H // HK), 16)
@@ -190,20 +207,114 @@ def _probe_verify_attention(lm):
     return _VERIFY_ATT_Q
 
 
+def _rel_rms(a, ref):
+    d = a.astype(mx.float32) - ref
+    return (mx.sqrt(mx.mean(d * d)) / mx.sqrt(mx.mean(ref * ref))).item()
+
+
+def _vatt_selftest(lm, Ts):
+    """The one-pass kernel (vatt.py) on random blocks of this model's heads,
+    every block size in Ts (each compiles its tile's pipelines now, not on the
+    scheduler's first round), over a buffer with garbage past its keys and
+    several chunks: -> (why it is unusable or "", the worst rms relative error).
+    Usable only if every output is finite and within max(1.05 x the per-query
+    calls' error, 4e-4) of an fp32 reference."""
+    import vatt
+    a = lm.args
+    H, HK, D = a.num_attention_heads, a.num_key_value_heads, a.head_dim
+    if D not in vatt.D_OK or H % HK:
+        return f"head_dim {D}, {H} / {HK} heads", 0.0
+    if (_act_dtype(lm) or mx.float16) != mx.float16:
+        return f"activations {_act_dtype(lm)}", 0.0
+    worst = 0.0
+    try:
+        ks = mx.random.split(mx.random.key(1), 3)
+        qkeys = mx.random.split(ks[0], vatt.MAX_T + 1)
+        n, cap = 600, 700
+        k = mx.random.normal((1, HK, cap, D), key=ks[1]).astype(mx.float16)
+        v = mx.random.normal((1, HK, cap, D), key=ks[2]).astype(mx.float16)
+        k[..., n:, :] = 1000.0
+        v[..., n:, :] = float("nan")
+        for T in Ts:
+            q = (mx.random.normal((1, H, T, D), key=qkeys[T]) * 2).astype(mx.float16)
+            out = vatt.attention(q, k, v, n, D ** -0.5)
+            ref = vatt.reference(q, k, v, n, D ** -0.5)
+            rows = mx.concatenate(_rows_sdpa(q, k[:, :, :n], v[:, :, :n], D ** -0.5, 0, T), axis=2)
+            e, e_rows = _rel_rms(out, ref), _rel_rms(rows, ref)
+            worst = max(worst, e)
+            if mx.any(mx.isnan(out)).item() or not e <= max(1.05 * e_rows, 4e-4):
+                return f"T={T}: rms rel error {e:.2e} vs the per-query calls' {e_rows:.2e}", worst
+    except (ValueError, RuntimeError, TypeError) as e:
+        return f"{type(e).__name__}: {e}", worst
+    return "", worst
+
+
+def _probe_vatt(lm):
+    """QWEN_VERIFY_ATT=2: on (-> _VATT) only where _vatt_selftest passes for
+    every block size 2..vatt.MAX_T, else off (the vector kernel's path, logged)."""
+    global _VATT
+    _VATT = False
+    if not VERIFY_ATT2:
+        return False
+    import vatt
+    why, worst = _vatt_selftest(lm, range(2, vatt.MAX_T + 1))
+    if why:
+        log.warning("QWEN_VERIFY_ATT=2 off (one-pass kernel self-test failed: %s); the vector kernel's path",
+                    why)
+        return False
+    _VATT = True
+    log.info("DFlash verify attention: one-pass kernel (QWEN_VERIFY_ATT=2, vatt), blocks of 2..%d, "
+             "self-test rms rel error <= %.2e", vatt.MAX_T, worst)
+    return True
+
+
+def _probe_decode_att(lm):
+    """QWEN_DECODE_ATT: on (-> _VATT_DEC) only where _vatt_selftest passes for
+    one query, else off (MLX's decode SDPA, logged)."""
+    global _VATT_DEC
+    _VATT_DEC = False
+    if not DECODE_ATT_MIN_KV:
+        return False
+    why, worst = _vatt_selftest(lm, (1,))
+    if why:
+        log.warning("QWEN_DECODE_ATT off (one-pass kernel self-test failed: %s)", why)
+        return False
+    if _SDPA is None:
+        log.warning("QWEN_DECODE_ATT off: the SDPA override is not installed")
+        return False
+    _VATT_DEC = True
+    log.info("decode attention from %d keys: one-pass kernel (QWEN_DECODE_ATT, vatt), self-test rms rel "
+             "error %.2e", DECODE_ATT_MIN_KV, worst)
+    return True
+
+
 def _verify_attention(self, attention, x, mask, cache, position_ids, position_embeddings):
     """Qwen3_5BatchInvariantForward._attention; a verify block (1, T >= 2, K)
-    of a lone row over a plain fp16 KVCache attends _VERIFY_ATT_Q queries per
-    call (QWEN_VERIFY_ATT) instead of one. Decided before the cache is
-    touched; anything else is the library's call."""
+    of a lone row over a plain fp16 KVCache attends through the one-pass
+    kernel (QWEN_VERIFY_ATT=2: vatt over the cache's own buffers) or
+    _VERIFY_ATT_Q queries per call (QWEN_VERIFY_ATT) instead of one. Decided
+    before the cache is touched; anything else is the library's call. A
+    one-pass call that raises turns it off (the vector kernel's path from then on)."""
+    global _VATT
     T = x.shape[1]
-    if not (_VERIFY_ATT_Q and x.shape[0] == 1 and T >= 2
+    if not ((_VERIFY_ATT_Q or _VATT) and x.shape[0] == 1 and T >= 2
             and (mask is None or (isinstance(mask, str) and mask == "causal"))
             and type(cache).__name__ == "KVCache" and not hasattr(cache, "bits")):
         return _VERIFY_ATTENTION(self, attention, x, mask, cache, position_ids, position_embeddings)
     q, k, v = self._linears((attention.q_proj, attention.k_proj, attention.v_proj), x)
     queries, keys, values, gate, _ = attention._prepare_projected_qkv(
         q, k, v, cache, position_ids, position_embeddings, mask)
-    out = _block_attention(queries, keys, values, attention.scale, _VERIFY_ATT_Q)
+    out = None
+    if _VATT and T <= sys.modules["vatt"].MAX_T:
+        try:
+            # the cache's own buffers (keys / values are their [..., :n, :] views)
+            out = sys.modules["vatt"].attention(queries, cache.keys, cache.values, keys.shape[2],
+                                                attention.scale)
+        except (ValueError, RuntimeError, TypeError) as e:
+            _VATT = False
+            log.warning("QWEN_VERIFY_ATT=2 off: %s", e)
+    if out is None:
+        out = _block_attention(queries, keys, values, attention.scale, _VERIFY_ATT_Q or T)
     out = out.transpose(0, 2, 1, 3).reshape(1, T, -1)
     return self._linear(attention.o_proj, out * mx.sigmoid(gate))
 
@@ -655,7 +766,9 @@ def _install_fast_paths():
     from mlx_vlm.models.qwen3_5 import gated_delta, language as q35, speculative_verifier
     if cfg.SDPA_FUSED and _SDPA is None:
         _probe_fused_sdpa()
-    if cfg.SDPA_FUSED and _SDPA is None:
+    if (cfg.SDPA_FUSED or DECODE_ATT_MIN_KV) and _SDPA is None:
+        # QWEN_DECODE_ATT rides on the same override (its prefill branches
+        # need cfg.SDPA_FUSED; without it _step never sized a slab for them)
         _SDPA, q35.scaled_dot_product_attention = q35.scaled_dot_product_attention, _fused_sdpa
     if GDN_FAST and _GDN_KERNEL is None and hasattr(mx.fast, "gated_delta_update"):
         _GDN_KERNEL, gated_delta.gated_delta_kernel = gated_delta.gated_delta_kernel, _fast_gdn_kernel

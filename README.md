@@ -591,6 +591,12 @@ resting row: the verify block's per-token recurrent states (block 8). Above the 
 limit MLX does not fail at once, it crawls (the same run at `_CKPTS=8` and before the two
 fixes of §8: 0.6 tok/s, then Metal's out-of-memory) — keep the peak under it.
 
+Add `QWEN_VERIFY_ATT=2 QWEN_DECODE_ATT=8192` to the recipe (2026-11-16,
+`docs/perf/2026-11-16/verify_att2.md`). They send the verify block's attention, and the
+attention of plain decode steps over ≥ 8K keys, through a one-pass kernel. On the 4-bit 27B at 60K
+(measured): DFlash goes from 18.0 to 26.5 tok/s, plain decode from 10.6 to 14.4 tok/s, and the tokens are the same. The
+numbers above were measured before the kernel.
+
 ### Cascade attention (`QWEN_CASCADE`, default on with fp16 KV)
 
 Rows that share a long prompt prefix (one system prompt, the prompt cache on) can
@@ -806,7 +812,8 @@ batch steps: every request gets an error, then the process exits with 70);
 | `QWEN_MRQMM5` | worker | `0` — the multi-row matmul kernel for 5-bit modules (the 27B), 3..16 rows; needed for DFlash2 on the 27B (×1.77 code / ×1.41 thinking vs ×0.8–1.1 without); off by default: the 27B's batched decode through it is not gated |
 | `QWEN_MRQMM4` | worker | `0` — the same kernel for 4-bit modules (`weights/qwen38-27b-mlx-4bit`), self-tested on the GPU at load (a failure leaves 4-bit on `quantized_matmul`); for DFlash2 on the 4-bit 27B; off until its gate (`scripts/perf/dflash2/gate_mrqmm4.sh`) |
 | `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | worker | `128` / `2048` — with the prompt cache, every state a DFlash row stores keeps the drafter's context there: the target's hidden states of the last N positions (27B: 51 KiB each); a DFlash row resuming from it starts its drafter with them instead of only the tokens the hit left to prefill. `TAIL`: checkpoints; `TAIL_END`: the entry's end (prompt end, reply end; capped at the drafter's window, ≤ 105 MB per entry on the 27B) — a turn that re-emits the previous answer's code needs the whole source in the drafter's sight. `0` = off |
-| `QWEN_VERIFY_ATT` | worker | `1` — a DFlash verify block's attention through MLX's vector attention kernel, several queries per call (queries × GQA factor ≤ 32: 5 on the 27B, 8 on the 9B; longer blocks in chunks) instead of mlx-vlm's one query per call, which reads the row's whole KV once per block token. Bit-equal to the one-query calls (checked on random data at load, else off). 27B, block 8: round 570 → 296 ms at 60K keys (×1.9), 210 → 202 ms at 24K; `0` = the library's calls |
+| `QWEN_VERIFY_ATT` | worker | `1` — a DFlash verify block's attention through MLX's vector attention kernel, several queries per call (queries × GQA factor ≤ 32: 5 on the 27B, 8 on the 9B; longer blocks in chunks) instead of mlx-vlm's one query per call, which reads the row's whole KV once per block token. Bit-equal to the one-query calls (checked on random data at load, else off). 27B, block 8: round 570 → 296 ms at 60K keys (×1.9), 210 → 202 ms at 24K; `0` = the library's calls; `2` = one pass for the whole block (`vatt.py`): the KV read once whatever the block size, not the one-query calls' bits (teacher-forced KL 1.3e-5, top-1 100 %); 27B 4-bit at 60K: round 284 → 192 ms, DFlash 18.0 → 26.5 tok/s (docs/perf/2026-11-16/verify_att2.md) |
+| `QWEN_DECODE_ATT` | worker | `0` — `N`: a decode step's attention over ≥ N fp16 keys through the same one-pass kernel instead of MLX's decode SDPA (27B: 2.8 → 0.9 ms a layer at 60K keys; plain decode 10.6 → 14.4 tok/s at 60K); `8192` for long contexts |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `QWEN_MAX_BATCH` | worker | `16` — requests decoded together (continuous batching); `1` = one at a time, as before. Reported to the gateway (Health) as its in-flight limit |

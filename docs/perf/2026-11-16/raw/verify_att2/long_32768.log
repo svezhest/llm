@@ -1,0 +1,138 @@
+2026-11-15 11:04:29,444 INFO qwen.worker loading model: weights/qwen38-27b-mlx-4bit
+2026-11-15 11:04:33,316 INFO qwen.worker QWEN_TEXT_ONLY=1: vision tower not loaded (333 tensors, 0.86 GiB of checkpoint weights never read); image requests will be refused
+2026-11-15 11:04:33,506 INFO qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-11-15 11:04:33,508 INFO mlx_vlm.speculative.drafters Auto-detected --draft-kind='dflash' for drafter 'weights/qwen38-27b-dflash2' (model_type='qwen3').
+2026-11-15 11:04:35,423 INFO qwen.worker dflash drafter loaded: weights/qwen38-27b-dflash2 (DFlash2DraftModel 4-bit, fp32 activations (QWEN_DRAFT_FP32), block adaptive, target layers [5, 19, 33, 47, 61])
+2026-11-15 11:04:35,423 INFO qwen.worker eos token ids: [248044, 248046]
+2026-11-15 11:04:38,140 INFO qwen.worker wired limit set to 27.0 GB
+2026-11-15 11:04:40,365 INFO qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-11-15 11:04:40,383 INFO qwen.worker decode attention from 8192 keys: one-pass kernel (QWEN_DECODE_ATT, vatt), self-test rms rel error 2.08e-04
+2026-11-15 11:04:40,383 INFO qwen.worker prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-11-15 11:04:41,142 INFO worker.pfqmm pfqmm 4-bit g64: tested, 401 modules on (lm_head K=5120 N=248320 M=256/264/288/296)
+2026-11-15 11:04:41,142 INFO worker.pfqmm pfqmm: 401 modules on the 64-row prefill qmm, >= 64 rows (4-bit g64 tested)
+2026-11-15 11:04:41,614 INFO worker.mrqmm mrqmm 4-bit g64 self-test passed (lm_head K=5120 N=248320): QWEN_MRQMM4 on the kernel
+2026-11-15 11:04:41,618 INFO worker.mrqmm mrqmm: 401 modules on the multi-row kernel (4-bit, QWEN_MRQMM4) for 3..16 decode rows (linear_attn.in_proj_qkv x48, linear_attn.in_proj_z x48, linear_attn.out_proj x48, lm_head x1, mlp.down_proj x64, mlp.gate_proj x64, mlp.up_proj x64, self_attn.k_proj x16, self_attn.o_proj x16, self_attn.q_proj x16, self_attn.v_proj x16); left on quantized_matmul: 4-bit g64 N < 512 x96
+2026-11-15 11:04:41,764 INFO qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 48 layers
+2026-11-15 11:04:41,767 INFO qwen.worker DFlash through mrqmm (QWEN_VERIFY_MRQMM=1): verify blocks of 3..16 tokens + drafter lm_head (48 GDN layers fused), block 8
+2026-11-15 11:04:41,797 INFO qwen.worker DFlash verify attention: one-pass kernel (QWEN_VERIFY_ATT=2, vatt), blocks of 2..16, self-test rms rel error <= 2.10e-04
+2026-11-15 11:04:41,798 INFO qwen.worker DFlash verify attention (QWEN_VERIFY_ATT): 5 queries per call (vector kernel, bit-equal to the one-query calls)
+2026-11-15 11:04:41,800 INFO qwen.worker cascade attention (QWEN_CASCADE): off (max_batch < 3)
+2026-11-15 11:04:41,801 INFO qwen.worker model loaded in 7466 ms
+loaded; drafter on, move: on (a hit moves the entry's KV into the row; a row's buffers become its entry); active 15.38 GiB
+2026-11-15 11:04:54,554 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=12.6 reserved=2.42/9.48GiB pcache=0.00GiB active=15.85GiB groups=0 grouped=0
+2026-11-15 11:05:07,349 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=12.8 reserved=2.42/9.48GiB pcache=0.00GiB active=16.75GiB groups=0 grouped=0
+2026-11-15 11:05:20,244 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=12.9 reserved=2.42/9.48GiB pcache=0.00GiB active=16.63GiB groups=0 grouped=0
+2026-11-15 11:05:36,219 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=16.0 reserved=2.42/9.48GiB pcache=0.00GiB active=16.70GiB groups=0 grouped=0
+2026-11-15 11:05:49,580 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=13.4 reserved=2.42/9.48GiB pcache=0.00GiB active=16.82GiB groups=0 grouped=0
+2026-11-15 11:06:03,290 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=13.7 reserved=2.42/9.48GiB pcache=0.00GiB active=16.95GiB groups=0 grouped=0
+2026-11-15 11:06:17,365 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=14.1 reserved=2.42/9.48GiB pcache=0.00GiB active=17.07GiB groups=0 grouped=0
+2026-11-15 11:06:31,800 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=14.4 reserved=2.42/9.48GiB pcache=0.00GiB active=17.20GiB groups=0 grouped=0
+2026-11-15 11:06:46,627 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=14.8 reserved=2.42/9.48GiB pcache=0.00GiB active=17.32GiB groups=0 grouped=0
+2026-11-15 11:07:01,873 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=15.2 reserved=2.42/9.48GiB pcache=0.00GiB active=17.45GiB groups=0 grouped=0
+2026-11-15 11:07:17,600 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=15.7 reserved=2.42/9.48GiB pcache=0.00GiB active=17.57GiB groups=0 grouped=0
+2026-11-15 11:07:33,735 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=16.1 reserved=2.42/9.48GiB pcache=0.00GiB active=17.70GiB groups=0 grouped=0
+2026-11-15 11:07:50,311 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=16.6 reserved=2.42/9.48GiB pcache=0.00GiB active=17.82GiB groups=0 grouped=0
+2026-11-15 11:08:07,217 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=16.9 reserved=2.42/9.48GiB pcache=0.00GiB active=20.14GiB groups=0 grouped=0
+2026-11-15 11:08:17,659 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.4 reserved=2.42/9.48GiB pcache=0.00GiB active=18.07GiB groups=0 grouped=0
+2026-11-15 11:08:34,278 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=16.6 reserved=2.42/9.48GiB pcache=0.00GiB active=18.15GiB groups=0 grouped=0
+2026-11-15 11:08:44,363 INFO qwen.worker batch: rows=0 waiting=0 prefilling=turn1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=2.42/9.48GiB pcache=0.00GiB active=19.23GiB groups=0 grouped=0
+turn1   prompt  32834 reused      0 ttft  236.35s tps 29.24 n  256 rounds  56 accepted/round 3.55 round 155.7 ms peak 20.71 GiB (prefill 20.71, decode 19.86, active at the first token 18.60) active 18.25 GiB cache 2.86 GiB entries [33089] end ['done', 'length']
+       id=turn1 prompt cache MISS (common prefix 0, 0 entries)
+       dflash: 256 tokens, accept rate 51% (199/392 drafts)
+       id=turn1 prompt cache store: 32833 tokens, 4 checkpoints, 3052.5 MB (1 entries, 3052.5 MB total) reused=0 gap=0 absorbed=0 pieces=1 states=900.7 MB (moved: the row's own buffers)
+       id=turn1 prompt cache reply kept: 33089 tokens (+255 generated), 4 checkpoints, 3069.3 MB (1 entries, 3069.3 MB total) absorbed=1 pieces=2
+2026-11-15 11:08:54,425 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=9.9 mean_rows=1.00 step_ms=64.5 gbps=262 decode_s=6.5 prefill_s=3.4 reserved=2.42/9.48GiB pcache=0.00GiB active=18.56GiB groups=0 grouped=0
+2026-11-15 11:09:04,493 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.9 mean_rows=1.00 step_ms=67.1 gbps=252 decode_s=10.1 prefill_s=0.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.57GiB groups=0 grouped=0
+plain1  prompt  32834 reused  32788 ttft    0.82s tps 15.11 n  256 rounds   0 accepted/round None round None ms peak 18.69 GiB (prefill 18.62, decode 18.69, active at the first token 18.54) active 18.16 GiB cache 2.76 GiB entries [33090] end ['done', 'length'] same=True
+       id=plain1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       id=plain1 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)
+       id=plain1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:09:14,535 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.9 mean_rows=1.00 step_ms=60.3 gbps=280 decode_s=9.0 prefill_s=0.7 reserved=2.42/9.48GiB pcache=0.00GiB active=18.45GiB groups=0 grouped=0
+plain+d1 prompt  32834 reused  32788 ttft    0.84s tps 16.63 n  256 rounds   0 accepted/round None round None ms peak 18.59 GiB (prefill 18.52, decode 18.59, active at the first token 18.44) active 18.16 GiB cache 2.76 GiB entries [33090] end ['done', 'length'] same=True
+       id=plain+d1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       id=plain+d1 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)
+       id=plain+d1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:09:24,573 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vector1 steps/s=11.4 mean_rows=1.00 step_ms=60.2 gbps=281 decode_s=6.9 prefill_s=2.9 reserved=2.42/9.48GiB pcache=0.00GiB active=19.11GiB groups=0 grouped=0
+vector1 prompt  32834 reused  32788 ttft    0.82s tps 22.52 n  256 rounds  56 accepted/round 3.57 round 202.2 ms peak 19.88 GiB (prefill 18.53, decode 19.88, active at the first token 18.46) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vector1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vector1 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vector1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:09:34,846 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vatt1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.48GiB groups=0 grouped=0
+vatt1   prompt  32834 reused  32788 ttft    0.76s tps 30.92 n  256 rounds  56 accepted/round 3.57 round 147.3 ms peak 19.79 GiB (prefill 18.55, decode 19.79, active at the first token 18.48) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vatt1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vatt1 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vatt1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:09:44,978 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vatt+d1 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=9.9 reserved=2.42/9.48GiB pcache=0.00GiB active=19.49GiB groups=0 grouped=0
+vatt+d1 prompt  32834 reused  32788 ttft    0.75s tps 30.44 n  256 rounds  56 accepted/round 3.57 round 149.6 ms peak 19.79 GiB (prefill 18.55, decode 19.79, active at the first token 18.48) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vatt+d1 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vatt+d1 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vatt+d1 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:09:54,990 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=2.7 mean_rows=1.00 step_ms=58.1 gbps=291 decode_s=1.6 prefill_s=8.2 reserved=2.42/9.48GiB pcache=0.00GiB active=18.47GiB groups=0 grouped=0
+2026-11-15 11:10:05,004 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=16.5 mean_rows=1.00 step_ms=60.7 gbps=278 decode_s=10.0 prefill_s=0.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.47GiB groups=0 grouped=0
+plain+d2 prompt  32834 reused  32788 ttft    0.81s tps 16.53 n  256 rounds   0 accepted/round None round None ms peak 18.61 GiB (prefill 18.54, decode 18.61, active at the first token 18.46) active 18.16 GiB cache 2.76 GiB entries [33090] end ['done', 'length'] same=True
+       id=plain+d2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       id=plain+d2 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)
+       id=plain+d2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:10:15,106 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vector2 steps/s=6.4 mean_rows=1.00 step_ms=60.7 gbps=278 decode_s=3.9 prefill_s=5.9 reserved=2.42/9.48GiB pcache=0.00GiB active=19.48GiB groups=0 grouped=0
+vector2 prompt  32834 reused  32788 ttft    0.85s tps 22.31 n  256 rounds  56 accepted/round 3.57 round 204.1 ms peak 19.88 GiB (prefill 18.53, decode 19.88, active at the first token 18.46) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vector2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vector2 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vector2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:10:25,136 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vatt2 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=9.8 reserved=2.42/9.48GiB pcache=0.00GiB active=19.49GiB groups=0 grouped=0
+vatt2   prompt  32834 reused  32788 ttft    0.76s tps 30.13 n  256 rounds  56 accepted/round 3.57 round 151.1 ms peak 19.92 GiB (prefill 18.55, decode 19.92, active at the first token 18.48) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vatt2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vatt2 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vatt2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:10:35,190 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vatt+d2 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=9.8 reserved=2.42/9.48GiB pcache=0.00GiB active=19.49GiB groups=0 grouped=0
+vatt+d2 prompt  32834 reused  32788 ttft    0.75s tps 30.06 n  256 rounds  56 accepted/round 3.57 round 151.5 ms peak 19.79 GiB (prefill 18.55, decode 19.79, active at the first token 18.48) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vatt+d2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vatt+d2 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vatt+d2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:10:45,201 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=5.9 mean_rows=1.00 step_ms=63.9 gbps=264 decode_s=3.8 prefill_s=6.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.48GiB groups=0 grouped=0
+2026-11-15 11:10:55,241 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.7 mean_rows=1.00 step_ms=67.8 gbps=249 decode_s=10.0 prefill_s=0.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.48GiB groups=0 grouped=0
+plain2  prompt  32834 reused  32788 ttft    0.82s tps 14.87 n  256 rounds   0 accepted/round None round None ms peak 18.73 GiB (prefill 18.54, decode 18.73, active at the first token 18.47) active 18.16 GiB cache 2.76 GiB entries [33090] end ['done', 'length'] same=True
+       id=plain2 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       id=plain2 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)
+       id=plain2 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:11:05,309 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vector3 steps/s=5.0 mean_rows=1.00 step_ms=69.0 gbps=245 decode_s=3.4 prefill_s=6.3 reserved=2.42/9.48GiB pcache=0.00GiB active=19.46GiB groups=0 grouped=0
+vector3 prompt  32834 reused  32788 ttft    0.81s tps 22.06 n  256 rounds  56 accepted/round 3.57 round 206.5 ms peak 19.88 GiB (prefill 18.53, decode 19.88, active at the first token 18.46) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vector3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vector3 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vector3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:11:15,390 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vatt3 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=9.8 reserved=2.42/9.48GiB pcache=0.00GiB active=19.50GiB groups=0 grouped=0
+vatt3   prompt  32834 reused  32788 ttft    0.75s tps 29.70 n  256 rounds  56 accepted/round 3.57 round 153.3 ms peak 19.86 GiB (prefill 18.55, decode 19.86, active at the first token 18.48) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vatt3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vatt3 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vatt3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:11:25,452 INFO qwen.worker batch: rows=0 waiting=0 prefilling=vatt+d3 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=9.8 reserved=2.42/9.48GiB pcache=0.00GiB active=19.49GiB groups=0 grouped=0
+vatt+d3 prompt  32834 reused  32788 ttft    0.75s tps 29.55 n  256 rounds  56 accepted/round 3.57 round 154.1 ms peak 19.92 GiB (prefill 18.55, decode 19.92, active at the first token 18.48) active 18.18 GiB cache 2.78 GiB entries [33090] end ['done', 'length'] same=True
+       id=vatt+d3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       dflash: 256 tokens, accept rate 51% (200/389 drafts)
+       id=vatt+d3 prompt cache store: 32833 tokens, 4 checkpoints, 2956.5 MB (1 entries, 2956.5 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=804.8 MB (moved: the row's own buffers)
+       id=vatt+d3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2986.5 MB (1 entries, 2986.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:11:35,507 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=6.2 mean_rows=1.00 step_ms=64.1 gbps=263 decode_s=4.0 prefill_s=5.8 reserved=2.42/9.48GiB pcache=0.00GiB active=18.48GiB groups=0 grouped=0
+2026-11-15 11:11:45,525 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.6 mean_rows=1.00 step_ms=68.6 gbps=246 decode_s=10.0 prefill_s=0.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.48GiB groups=0 grouped=0
+plain3  prompt  32834 reused  32788 ttft    0.82s tps 14.76 n  256 rounds   0 accepted/round None round None ms peak 18.67 GiB (prefill 18.54, decode 18.67, active at the first token 18.47) active 18.16 GiB cache 2.76 GiB entries [33090] end ['done', 'length'] same=True
+       id=plain3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       id=plain3 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)
+       id=plain3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2
+2026-11-15 11:11:55,547 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.0 mean_rows=1.00 step_ms=64.2 gbps=263 decode_s=9.0 prefill_s=0.8 reserved=2.42/9.48GiB pcache=0.00GiB active=18.45GiB groups=0 grouped=0
+2026-11-15 11:12:05,590 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=15.8 mean_rows=1.00 step_ms=63.2 gbps=267 decode_s=10.0 prefill_s=0.0 reserved=2.42/9.48GiB pcache=0.00GiB active=18.47GiB groups=0 grouped=0
+plain+d3 prompt  32834 reused  32788 ttft    0.89s tps 15.98 n  256 rounds   0 accepted/round None round None ms peak 18.71 GiB (prefill 18.52, decode 18.71, active at the first token 18.44) active 18.16 GiB cache 2.76 GiB entries [33090] end ['done', 'length'] same=True
+       id=plain+d3 prompt cache HIT: 32788/32834 tokens reused (common prefix 32833), prefilling 46 (moved: the entry's KV is the row's now)
+       id=plain+d3 prompt cache store: 32833 tokens, 4 checkpoints, 2947.7 MB (1 entries, 2947.7 MB total) reused=32788 gap=45 absorbed=0 pieces=1 states=795.9 MB (moved: the row's own buffers)
+       id=plain+d3 prompt cache reply kept: 33090 tokens (+256 generated), 4 checkpoints, 2964.5 MB (1 entries, 2964.5 MB total) absorbed=1 pieces=2
+ab plain   tps median  14.87 (all [15.11, 14.87, 14.76]) round_ms [None, None, None] same as the first plain 3/3
+ab plain+d tps median  16.53 (all [16.63, 16.53, 15.98]) round_ms [None, None, None] same as the first plain 3/3
+ab vector  tps median  22.31 (all [22.52, 22.31, 22.06]) round_ms [202.2, 204.1, 206.5] same as the first plain 3/3
+ab vatt    tps median  30.13 (all [30.92, 30.13, 29.7]) round_ms [147.3, 151.1, 153.3] same as the first plain 3/3
+ab vatt+d  tps median  30.06 (all [30.44, 30.06, 29.55]) round_ms [149.6, 151.5, 154.1] same as the first plain 3/3
+process peak 20.71 GiB
