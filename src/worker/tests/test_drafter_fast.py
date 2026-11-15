@@ -73,7 +73,7 @@ def test_install_and_routing(mr, monkeypatch):
     m = nn.Module()
     m.a = qlin(256, 64, 4)
     m.b = qlin(256, 128, 5, seed=1)
-    m.c = qlin(320, 64, 6, seed=2)              # no kernel for 6 bits
+    m.c = qlin(320, 64, 3, seed=2)              # no kernel for 3 bits (6 has one since oq4e-speed)
     m.d = nn.Linear(64, 64)                      # not quantized
     ref = {k: getattr(m, k) for k in "abc"}
     x8 = (mx.random.normal((1, 8, 256), key=mx.random.key(3)) * 40).astype(mx.float32)
