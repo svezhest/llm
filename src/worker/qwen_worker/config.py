@@ -688,7 +688,12 @@ VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
 #   numerics class: fp32 throughout, error vs an fp32 reference <= MLX's own
 #   kernel's); self-tested at load against an fp32 reference for every block
 #   size (_probe_verify_attention), else "1". docs/perf/2026-11-16/verify_att2.md
-_VERIFY_ATT_MODE = os.environ.get("QWEN_VERIFY_ATT", "1")
+#   Default "2" since 2026-11-16: DFlash x1.35 at 32K / x1.48 at 60K on the 27B,
+#   equal at short context, tokens == plain on every long run; on 16 short tasks
+#   12/16 == plain greedy, exactly as "1" on the 4-bit 27B (the mrqmm verify
+#   decides those near-ties, gaps <= 0.016, not the attention). "1" = the
+#   library's bits per query.
+_VERIFY_ATT_MODE = os.environ.get("QWEN_VERIFY_ATT", "2")
 VERIFY_ATT = _VERIFY_ATT_MODE in ("1", "2")
 VERIFY_ATT2 = _VERIFY_ATT_MODE == "2"
 # QWEN_DECODE_ATT (0 = off): a decode step's attention over >= this many fp16
