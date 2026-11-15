@@ -64,7 +64,7 @@ def _own_states(caches):
 
 def _with_tail(states, tail):
     """A recurrent state with the drafter's context at its position
-    (QWEN_DRAFT_TAIL / _END: `tail`, (1, n, layers x hidden), the target's hidden
+    (QWEN_DRAFT_TAIL / QWEN_DRAFT_TAIL_END: `tail`, (1, n, layers x hidden), the target's hidden
     states of the n positions before it) as one more item after the recurrent
     layers. It rides wherever the state goes (inherited, absorbed, thinned,
     counted in the entry's bytes, written to the disk tier); restore reads

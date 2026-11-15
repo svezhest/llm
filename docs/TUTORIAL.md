@@ -648,9 +648,10 @@ QWEN_MODEL=../../weights/ornith15-9b-mlx-8bit QWEN_KV_BITS=0 QWEN_PROMPT_CACHE=1
   uv run python worker.py
 ```
 
-DFlash only runs for greedy requests (temperature 0) **with no presence or frequency
-penalty**. The worker's default presence penalty is 1.5, so set `QWEN_PRESENCE_PENALTY=0`
-or send `"presence_penalty": 0` in each request.
+DFlash only runs for greedy requests (temperature 0) **with no presence, frequency or
+repetition penalty**. The worker's default presence penalty is 1.5, so with the defaults
+DFlash never runs: set `QWEN_PRESENCE_PENALTY=0` (as above) or send `"presence_penalty": 0`
+in each request. Every DFlash recipe below sets it.
 
 **27B, plain, 128K context:**
 
@@ -676,8 +677,10 @@ QWEN_MODEL=../../weights/qwen38-27b-mlx-5bit QWEN_KV_BITS=0 QWEN_MRQMM5=1 \
 
 What each setting does:
 
-- **The drafter needs fp16 KV.** Speculative decoding is ignored with quantized KV, so
-  `QWEN_KV_BITS=0`. That costs 64 KiB/token, so the context is capped at 64K.
+- **fp16 KV for speed.** Since 2026-11-15 DFlash also runs over quantized KV, but the
+  one-pass verify attention (`QWEN_VERIFY_ATT=2`, the default) and `QWEN_DECODE_ATT` are
+  fp16-only, and q8 DFlash speed is not gated yet. fp16 costs 64 KiB/token, so the context
+  is capped at 64K.
 - `QWEN_MRQMM5=1` enables the 5-bit multi-row kernel. Without it, DFlash2 gives ×0.8–1.1
   instead of ×1.4–1.8.
 - **One KV copy.** `QWEN_PROMPT_CACHE_MOVE=1` with `QWEN_MAX_BATCH=1` keeps one copy of the
@@ -687,11 +690,12 @@ What each setting does:
   2.8 GiB.
 - **Fewer resident states.** `QWEN_PROMPT_CACHE_CKPTS=4` bounds the recurrent-state
   checkpoints (147 MiB each), and `QWEN_CACHE_LIMIT_GB=1` bounds the buffer pool.
-- **Faster long-context attention.** Add `QWEN_VERIFY_ATT=2 QWEN_DECODE_ATT=8192`
-  (2026-11-16): a one-pass kernel for the verify block and for plain decode steps over
-  ≥ 8K keys. Measured on the 4-bit 27B at 60K: DFlash 18.0 → 26.5 tok/s, plain 10.6 →
-  14.4 tok/s, the same tokens. The attention shapes are those of the 5-bit model; the
-  5-bit end-to-end gain was not measured.
+- **Faster long-context attention.** Add `QWEN_DECODE_ATT=8192` (2026-11-16): plain decode
+  steps over ≥ 8K keys then use the one-pass kernel that verify blocks use by default
+  (`QWEN_VERIFY_ATT=2` since 2026-11-16). Measured on the 4-bit 27B at 60K: DFlash 18.0 →
+  26.5 tok/s (the verify kernel), plain 10.6 → 14.4 tok/s (`QWEN_DECODE_ATT`), the same
+  tokens. The attention shapes are those of the 5-bit model; the 5-bit end-to-end gain was
+  not measured, and the run below predates the kernel.
 
 Measured results for a 60.1K-token conversation:
 
@@ -1183,8 +1187,9 @@ weights do.
 
 Answers and hits are the same as with copies.
 
-Requirements: `QWEN_MAX_BATCH=1`, fp16 KV and no disk tier. Otherwise the feature is off,
-and the load log says why.
+Requirements: `QWEN_MAX_BATCH=1` and no disk tier. Otherwise the feature is off, and the
+load log says why. With quantized KV (since 2026-11-15) quantized entries move and the fp16
+part below `quantized_kv_start` (5000 tokens) is copied as without the mode.
 
 Costs:
 
@@ -1223,7 +1228,7 @@ less memory but is slower at 16 × 32K, so it is off.
 
 A small block-diffusion **drafter** proposes a block of tokens and the target model
 verifies them in one forward pass. The target checks every token, so the drafter's
-precision only moves speed (its weights are quantized to `QWEN_DRAFT_BITS` = 4 at load).
+precision only moves speed (its linears are quantized to `QWEN_DRAFT_BITS` = 4 bits at load).
 
 ```zsh
 QWEN_DRAFT=../../weights/qwen35-9b-dflash QWEN_KV_BITS=0 QWEN_PRESENCE_PENALTY=0 …
@@ -1231,16 +1236,21 @@ QWEN_DRAFT=../../weights/qwen35-9b-dflash QWEN_KV_BITS=0 QWEN_PRESENCE_PENALTY=0
 
 Conditions, all required:
 
-- fp16 KV;
-- the request is greedy (temperature 0) with no presence, frequency or repetition penalty;
+- the request is greedy (temperature 0) with no presence, frequency or repetition penalty.
+  **The worker's default `QWEN_PRESENCE_PENALTY` is 1.5**, so with the defaults DFlash never
+  runs: start the worker with `QWEN_PRESENCE_PENALTY=0` or send `"presence_penalty": 0`
+  (`QWEN_DRAFT_SAMPLING=1` lifts this condition, see below);
 - text-only;
+- not `QWEN_BATCH_INVARIANT=1` (the drafter is not loaded then);
 - no grammar, `bad_words`, `allowed_token_ids`, `min_tokens`, `stop_token_ids` or
   `ignore_eos`;
 - no logprobs;
 - **nothing else running or waiting.** With `QWEN_MAX_BATCH` > 1, a DFlash row is demoted to
   a normal batch row at a round boundary when another request arrives.
 
-A thinking budget is honoured inside the rounds.
+A thinking budget is honoured inside the rounds. fp16 KV is not required (since 2026-11-15
+DFlash runs over quantized KV, positions quantized where the plain loop quantizes them), but
+the fast verify attention below (`QWEN_VERIFY_ATT`) is fp16-only.
 
 Measured:
 
@@ -1254,24 +1264,38 @@ Measured:
 | knob | default | effect |
 |---|---|---|
 | `QWEN_DRAFT` | unset | drafter directory; enables DFlash |
-| `QWEN_DRAFT_BLOCK` | 0 | 0 = automatic: a fixed block of 8 with `QWEN_VERIFY_MRQMM=1`, else adaptive |
+| `QWEN_DRAFT_BITS` | 4 | the drafter's linears quantized to this many bits (affine g64) at load; `0` keeps them as loaded. Speed only: 9B drafter 4-bit ≈ 8-bit ≈ fp16 acceptance with a cheaper round; on the 27B 5 / 8 bits accept the same as 4 and cost more per block |
+| `QWEN_DRAFT_BLOCK` | 0 | tokens per verify round (the last accepted token + N − 1 drafts). `0` = automatic: a fixed 8 when `QWEN_VERIFY_MRQMM=1` and the multi-row kernel covers the target's linears (8-bit, or 5 / 4 / 6-bit with their `QWEN_MRQMM*` knob), else mlx-vlm's adaptive block (up to the drafter's trained size, shrinking on low acceptance); `N` = a fixed N |
 | `QWEN_VERIFY_MRQMM` | 1 | verify rows through the multi-row kernel (fast; output ≠ plain greedy bitwise, 15/16 identical on the test corpus); `head` = only the drafter's head (exact); `0` = old path |
 | `QWEN_VERIFY_EXACT_MAX_T` | 8 | on the exact path, blocks up to this size use bit-exact verify kernels |
-| `QWEN_VERIFY_ATT` | 1 | verify attention reads the KV once per block (27B at 60K keys: 570 → 296 ms per round); **`2`** = a one-pass kernel for the whole block (`vatt.py`): 27B 4-bit at 60K, round 284 → 192 ms, DFlash 18.0 → 26.5 tok/s |
+| `QWEN_VERIFY_ATT` | 2 | **`2`** (since 2026-11-16) = a one-pass kernel for the whole verify block (`vatt.py`): 27B 4-bit at 60K, round 284 → 192 ms, DFlash 18.0 → 26.5 tok/s; self-tested at load, else `1`. `1` = MLX's vector kernel, several queries per call, bit-equal to mlx-vlm's calls (27B at 60K keys: 570 → 296 ms per round); `0` = mlx-vlm's one query per call. fp16 KV only |
 | `QWEN_DECODE_ATT` | 0 | `N`: plain decode steps over ≥ N keys through the same kernel (27B 4-bit at 60K: 10.6 → 14.4 tok/s); `8192` in the long-context recipe |
 | `QWEN_DRAFT_FP32` | auto | drafter activations in fp32; auto-on for DFlash2, whose activations overflow fp16 |
 | `QWEN_DRAFT_MRQMM` | 1 | the fp32 drafter's linears through the multi-row kernel (rows prescaled by a power of two, fp32 output); 27B 4-bit drafter block 31 → 17 ms, DFlash ×1.12, the same drafts |
 | `QWEN_DRAFT_COMPILE` | 0 | compiled DFlash2 convolution (+0.3 %, below the 3 % bar) |
-| `QWEN_DRAFT_TAIL` / `_TAIL_END` | 128 / 2048 | the prompt cache stores the drafter's context with each state, so cache hits draft as well as cold runs |
+| `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | 128 / 2048 | the prompt cache stores the drafter's context with each state, so cache hits draft as well as cold runs |
 | `QWEN_DRAFT_SAMPLING` | 0 | speculative path for sampled requests too (exact; 9B ×0.8–1.2; 27B ×1.34–1.41 on 2K code / English / Russian prompts but ×0.70 on short Russian prose) |
 
-**Use it** for a single interactive user who wants fast greedy answers, especially code.
+**Prompt lookup** (`QWEN_LOOKUP`, default `0`, 2026-11-16) adds a draft source that needs no
+model: the continuation of the latest earlier occurrence of the last few tokens (prompt +
+output), verified exactly like a drafter's block. `draft` uses it on rows the drafter takes,
+whenever a match exists; `1` does that and also runs lookup rounds without a drafter, for a
+lone greedy fp16-KV row; `splice` is an experiment. Measured on the 27B 4-bit + DFlash2
+(greedy, in one process): rewriting a 2K-token file with one change ×2.4–2.8 over DFlash,
+re-emitting the previous answer's code ×1.55–1.67, ordinary prompts within ±5 %, answers
+identical to DFlash's (`docs/perf/2026-11-16/lookup_draft.md`). It stays off until measured
+on the 9B and at long context. Tuning: `QWEN_LOOKUP_N` / `_NMAX` / `_MIN` (n-gram, longest and
+shortest match), `_K` / `_K0` (max and first drafts per round), `_BACKOFF`, `_BURST` (see
+[§12](#12-env-knob-quick-reference)).
+
+**Use DFlash** for a single interactive user who wants fast greedy answers, especially code.
 **Skip it** for sampled generation, structured output, or a busy multi-user server: it only
 runs when the batch is empty.
 
 ### 7.8 Custom Metal kernels and other switches
 
-All of these are on by default. Each was measured on M1 Max.
+Most of these are on by default (the table marks the ones that are not). Each was measured
+on M1 Max.
 
 | knob | what | measured gain | exactness |
 |---|---|---|---|
@@ -1279,12 +1303,13 @@ All of these are on by default. Each was measured on M1 Max.
 | `QWEN_PFQMM` | prefill quantized matmul with 64-row tiles (`pfqmm.py`, MLX's own kernel code from the installed wheel) | ×1.10–1.14 per 8-bit matmul; 9B full prefill ×1.20–1.27 together with the fixed slab (2026-10-12) | **bit-identical**, self-tested per (bits, group) at load |
 | `QWEN_MRQMM` | multi-row 8-bit matmul for decode at 3–16 rows (`mrqmm.py`, simdgroup MMA) | 9B decode step at 8 rows 86 → 34 ms (2026-10-12) | batched-decode class (top-1 ≥ 99.7 %) |
 | `QWEN_MRQMM5` (default **0**) | the same kernel for 5-bit modules (27B) | DFlash2 on the 27B depends on it | batched decode at B ≥ 3 not yet validated, hence off |
-| `QWEN_MRQMM4` / `QWEN_MRQMM6` (default **0**) | the same kernel for 4-bit / 6-bit modules (27B 4-bit; oQ4e's 6-bit lm_head) | DFlash on those builds depends on them | GPU gates pending (`gate_mrqmm4.sh`, `gate_oq4e.sh`) |
+| `QWEN_MRQMM4` / `QWEN_MRQMM6` (default **0**) | the same kernel for 4-bit / 6-bit modules (27B 4-bit; oQ4e's 6-bit lm_head) | DFlash on those builds depends on them (27B 4-bit: DFlash ×1.75 with it, slower than plain without) | 4-bit gated 2026-11-15: KL ≤ 1e-5, but DFlash identity 12/16 at near-ties, so it stays off by default — set it for the 4-bit 27B; 6-bit: gate pending (`gate_oq4e.sh`) |
 | `QWEN_GDN_FUSE` | one matmul for the GDN decode in-projections (per bit-width group in a mixed layer) | −2 % decode step | bit-identical at B ≤ 2 |
 | `QWEN_SDPA_FUSED` / `_MIN_KV` | fused attention for long fp16 prefill slabs | 64K prefill −3…5 %, −1.3 GB peak | KL 7e-6 |
+| `QWEN_KVQ_PREFILL_FUSED` (default **0**) | long prefill slabs over quantized KV (`QWEN_KV_BITS` 4 / 8) attend the K / V dequantized to fp16 through the fused kernel, so the slab no longer shrinks with context | 27B q8: prefill attention per token as fp16's (was ×1.2 at 32K, ×1.5 at 80K) | KL vs fp16 KV 5.6e-5; off until the end-to-end gate |
 | `QWEN_SAMPLER_TOPK_FAST` (default **0**) | top-k sampling over the k survivors | −7 % step with top_k at B=16 | same distribution, different random stream per seed |
 | `QWEN_GDN_FAST` (default **0**) | MLX's fused gated-delta prefill | ×1.02 per slab | rejected: KL 0.013 on 8K real tokens |
-| `QWEN_VERIFY_ATT=2` / `QWEN_DECODE_ATT` (default `1` / **0**) | one-pass attention for a DFlash verify block / a decode step over a long fp16 KV (`vatt.py`, steel MMA loop over key chunks, the KV read once) | one layer at 60K keys: verify 8.1 → 2.4 ms, decode 2.8 → 0.9 ms; 27B at 60K: DFlash ×1.48, plain ×1.35 (2026-11-16) | fused-attention class: KL 1.3e-5, top-1 100 % (teacher-forced); self-tested at load |
+| `QWEN_VERIFY_ATT=2` / `QWEN_DECODE_ATT` (default `2` / **0**) | one-pass attention for a DFlash verify block / a decode step over a long fp16 KV (`vatt.py`, steel MMA loop over key chunks, the KV read once) | one layer at 60K keys: verify 8.1 → 2.4 ms, decode 2.8 → 0.9 ms; 27B at 60K: DFlash ×1.48, plain ×1.35 (2026-11-16) | fused-attention class: KL 1.3e-5, top-1 100 % (teacher-forced); self-tested at load |
 
 `pfqmm`, `mrqmm` and `QWEN_GDN_FUSE` need fp16 scales, so they turn themselves off with
 `QWEN_FP16=0`. Turn a kernel off (`=0`) only to bisect a problem or to compare.
@@ -1300,7 +1325,7 @@ documented and switchable:
 | cascade groups | ≥ 8 rows sharing a long prefix | `QWEN_CASCADE=0` (also off under the options above) |
 | hits through a stored reply | prompt cache on | `QWEN_PROMPT_CACHE_REPLY=0` |
 | DFlash verify through mrqmm | drafter loaded | `QWEN_VERIFY_MRQMM=head` (verify stays exact) |
-| one-pass attention (`vatt.py`) | `QWEN_VERIFY_ATT=2`: verify blocks; `QWEN_DECODE_ATT`: decode steps over long KV | `QWEN_VERIFY_ATT=1` (bit-equal to the library's verify calls), `QWEN_DECODE_ATT=0` |
+| one-pass attention (`vatt.py`) | `QWEN_VERIFY_ATT=2` (default): DFlash verify blocks; `QWEN_DECODE_ATT`: decode steps over long KV | `QWEN_VERIFY_ATT=1` (bit-equal to the library's verify calls), `QWEN_DECODE_ATT=0` |
 
 What stays exact regardless:
 
@@ -1488,8 +1513,9 @@ the queue is full, and flushed on SIGINT or SIGTERM.
 
 - Edit every absolute path: the binary, the `uv` location, `WorkingDirectory`, and the log
   files under `logs/`.
-- Add your worker env (`QWEN_MODEL`, `QWEN_KV_BITS`, …) to the worker plist's
-  `EnvironmentVariables`. As shipped, it sets none, so the worker loads the default 35B path.
+- Put your worker env in the worker plist's `EnvironmentVariables`. As shipped it sets
+  `QWEN_MODEL=../../weights/ornith15-9b-mlx-8bit` (relative to `WorkingDirectory`) and
+  `QWEN_KV_BITS=0`; without `QWEN_MODEL` the worker would load the default 35B path.
 - The wired-limit sysctl resets on reboot. A boot-time daemon or a manual step must re-apply
   it before a 27B or 35B worker starts.
 
@@ -1750,8 +1776,11 @@ This is expected with ≥ 3 rows, cascade groups or reply-KV hits. Use the setti
 **DFlash never kicks in.**
 Check, in order:
 
-- the worker log says `dflash drafter loaded` (it needs `QWEN_KV_BITS=0`);
-- the request is greedy with `presence_penalty` 0 (the env default is 1.5);
+- the worker log says `dflash drafter loaded` (not `QWEN_DRAFT ignored: …`, e.g. with
+  `QWEN_BATCH_INVARIANT=1`);
+- the request is greedy with `presence_penalty` 0: the env default is 1.5, so set
+  `QWEN_PRESENCE_PENALTY=0` or send it per request (`GATEWAY_OPENAI_DEFAULTS=1` makes the
+  default temperature 1, which also disables it);
 - the request has no grammar, logprobs or token options;
 - nothing else is running or waiting.
 
@@ -1785,7 +1814,7 @@ planned but not built.
 ## 12. Env-knob quick reference
 
 Defaults below are checked against the code: `qwen_worker/config.py`, `pcdisk.py`,
-`mrqmm.py`, `pfqmm.py`, `grammar.py`, `logprobs.py`, and the gateway's `main.rs`, `api.rs`
+`mrqmm.py`, `pfqmm.py`, `grammar.py`, `logprobs.py`, `lookup.py`, and the gateway's `main.rs`, `api.rs`
 and `request.rs`. The authoritative long table with all the caveats is in
 [`CLAUDE.md`, *Env knobs*](../CLAUDE.md#env-knobs). Switches are on only when set to `1`
 unless noted.
@@ -1812,11 +1841,14 @@ unless noted.
 | `QWEN_MODEL` | `weights/qwen36-35b-a3b-mlx-ud3` | or `--model` |
 | `QWEN_MAX_CONTEXT` | `131072` | prompt + generation |
 | `QWEN_KV_BITS` | `4` | `0` fp16 (9B), `8` (27B), `4` (35B) |
+| `QWEN_TEXT_ONLY` | `0` | `1`: load a VL checkpoint without its vision tower (images → 400) |
 | `QWEN_FP16` | `1` | cast bf16 → fp16 |
 | `QWEN_WIRED_LIMIT_GB` | `0` (off) | MLX wired limit, clamped to the sysctl cap |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | `1` / `3` | buffer pool |
 | `QWEN_PREFILL_STEP` / `_BUDGET` / `_MIN_STEP` | `2048` / `67108864` / `256` | prefill slabs |
 | `QWEN_SDPA_FUSED` / `_MIN_KV` | `1` / `32768` | fused attention for long fp16 slabs |
+| `QWEN_KVQ_PREFILL_FUSED` | `0` | `1`: the same for quantized KV, over K / V dequantized to fp16 (fixed slab) |
+| `QWEN_PREFILL_RESERVE_GB` | `0` (estimated) | memory kept for a prefill slab's activations |
 | `LOG_LEVEL` | `INFO` | or `--log-level` |
 
 **Worker: sampling defaults**
@@ -1859,13 +1891,16 @@ unless noted.
 | var | default |
 |---|---|
 | `QWEN_DRAFT` | unset |
-| `QWEN_DRAFT_BITS` / `QWEN_DRAFT_BLOCK` | `4` / `0` (automatic) |
+| `QWEN_DRAFT_BITS` / `QWEN_DRAFT_BLOCK` | `4` (`0` = weights as loaded) / `0` (automatic: 8 with the multi-row verify, else adaptive) |
 | `QWEN_DRAFT_FP32` | auto |
 | `QWEN_DRAFT_MRQMM` / `QWEN_DRAFT_COMPILE` | `1` / `0` |
 | `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | `128` / `2048` |
 | `QWEN_DRAFT_SAMPLING` | `0` |
-| `QWEN_VERIFY_MRQMM` / `QWEN_VERIFY_EXACT_MAX_T` / `QWEN_VERIFY_ATT` | `1` / `8` / `1` (`2` = one-pass kernel) |
-| `QWEN_DECODE_ATT` | `0` (min keys for the one-pass decode attention; `8192` for long contexts) |
+| `QWEN_VERIFY_MRQMM` / `QWEN_VERIFY_EXACT_MAX_T` | `1` (`head`, `0`) / `8` |
+| `QWEN_VERIFY_ATT` | `2` = one-pass kernel (`1` = MLX vector kernel, bit-equal to mlx-vlm; `0` = mlx-vlm's calls); fp16 KV only |
+| `QWEN_DECODE_ATT` | `0` (min keys for the one-pass decode attention; `8192` for long contexts, 27B) |
+| `QWEN_LOOKUP` | `0` (`draft`, `1`, `splice`: prompt lookup drafts) |
+| `QWEN_LOOKUP_N` / `_NMAX` / `_MIN` / `_K` / `_K0` / `_BACKOFF` / `_BURST` | `3` / `32` / `4` / `15` / `7` / `1` / `16` |
 
 **Worker: kernels, determinism, debugging**
 
