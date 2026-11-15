@@ -9,6 +9,7 @@ from .config import CLEAR_CACHE, DRAFT_TAIL, DRAFT_TAIL_END, log, PROMPT_CACHE_R
 from .pcache import _own_states, _resume_tail, _tail_copy
 from .sizing import _slab
 from .kernels import _verify_head
+from .mtp import Chooser
 
 
 def _budget_cut(think, new, stopping):
@@ -67,12 +68,19 @@ class _SpecMixin:
                                                 _speculative_walk)
         from mlx_vlm.speculative.dflash import _dflash_next_block_size
         req, lm, draft = row.req, self.lm, self.eng.draft
+        # the MTP head (mtp.py): alone (draft None) or beside DFlash (hybrid);
+        # the hidden-state stream below is then [DFlash's layers.., the final]
+        mt = getattr(self.eng, "mtp", None)
+        H = lm.args.hidden_size
         wide = getattr(self.eng, "draft_wide", False)    # QWEN_DRAFT_FP32
         row.spec = True                         # also after a demotion: never grouped
         input_ids, cache, pos, cuts, on_ckpt, on_prefilled = self._prompt_cache(row)
         row.cache = cache
-        layers = list(draft.config.target_layer_ids)
-        win = draft.config.sliding_window - 1
+        layers = list(draft.config.target_layer_ids) if draft is not None else []
+        win = draft.config.sliding_window - 1 if draft is not None else max(1, DRAFT_TAIL_END)
+        fin = mt is not None                    # return_hidden: the final hidden state too
+        width = (len(layers) + fin) * H
+        dfl = (lambda h: h[..., :len(layers) * H]) if fin else (lambda h: h)  # noqa: E731
         argmax = lambda logits: mx.argmax(logits, axis=-1)  # noqa: E731
         sampling, sampler, pen, max_tokens = req.sampling, row.sampler, row.pen, req.max_tokens
         dtype = input_ids.dtype
@@ -102,7 +110,15 @@ class _SpecMixin:
         # holds for the resume point (QWEN_DRAFT_TAIL), then every prefilled
         # position
         tail0 = _resume_tail(row.parent or (row.own.husk if row.own is not None else None), pos)
+        if tail0 is not None and tail0.shape[-1] != width:
+            tail0 = None                        # stored by another drafter setup
         hidden = [tail0] if tail0 is not None else []
+        if mt is not None:                      # the head's context: the tail, then the prompt
+            t0 = 0 if tail0 is None else tail0.shape[1]
+            mt.start(pos - t0)
+            if t0:
+                mt.push(tail0[..., -H:])
+                mt.emit_ids(req.ids[pos - t0 + 1:pos + 1])
 
         def tail(n=DRAFT_TAIL):
             """The drafter's context at the cache's end, for a state stored
@@ -124,8 +140,12 @@ class _SpecMixin:
                 n = _slab(pos, ctx.shape[1], cuts)
                 sink = []
                 intact = False                  # the forward moves every cache's offset
-                lm.model(ctx[:, :n], cache=cache, capture_layer_ids=layers, hidden_sink=sink)
-                h = mx.concatenate(sink, axis=-1)
+                last = lm.model(ctx[:, :n], cache=cache, capture_layer_ids=layers, hidden_sink=sink)
+                h = mx.concatenate(sink + [last] if fin else sink, axis=-1)
+                if mt is not None:
+                    mt.push(last)
+                    mt.emit_ids(req.ids[pos + 1:pos + n + 1])
+                    mt.flush()
                 hidden.append(h)
                 # drop the oldest chunk while the rest still covers the window
                 # (until 2026-11-11 this tested hidden[:-1], all but the NEWEST:
@@ -133,7 +153,7 @@ class _SpecMixin:
                 # short slab alone, e.g. slabs 2048 + 2048 + 40 -> 40 positions)
                 while sum(t.shape[1] for t in hidden[1:]) >= win:
                     hidden.pop(0)
-                mx.eval(h, [c.state for c in cache])
+                mx.eval(h, [c.state for c in cache], mt.state() if mt is not None else [])
                 pos += n
                 intact = True
                 if pos in cuts:
@@ -154,8 +174,10 @@ class _SpecMixin:
             return
         on_prefilled(cache, tail=tail_end())
         on_ckpt = on_prefilled = None           # nothing of the prefill outlives it here
-        out = lm(input_ids[:, -1:], cache=cache, capture_layer_ids=layers)
+        out = lm(input_ids[:, -1:], cache=cache, capture_layer_ids=layers, return_hidden=fin)
         hidden.append(mx.concatenate(out.hidden_states, axis=-1))
+        if mt is not None:
+            mt.push(out.hidden_states[-1])
         hidden = mx.concatenate(hidden, axis=1)[:, -win:]
         first = pick(out.logits[:, -1:, :], input_ids[0, -1:])
         mx.eval(first, hidden)
@@ -184,6 +206,8 @@ class _SpecMixin:
                 recent[:] = [_tail_copy(recent, keep)]
 
         def emit(tok):
+            if mt is not None:
+                mt.emit(tok)
             if gen is not None:
                 gen.append(tok)
             if self.eng.stopping(tok):
@@ -216,8 +240,11 @@ class _SpecMixin:
             ctx = []
             while f is not None and n < max_tokens:
                 if not cached:
-                    o = lm(mx.array([[last]], dtype=dtype), cache=cache, capture_layer_ids=layers)
+                    o = lm(mx.array([[last]], dtype=dtype), cache=cache, capture_layer_ids=layers,
+                           return_hidden=fin)
                     h = mx.concatenate(o.hidden_states, axis=-1)
+                    if mt is not None:
+                        mt.push(o.hidden_states[-1])
                     mx.eval(h, [c.state for c in cache])
                     ctx.append(h)
                     seen(h)
@@ -230,19 +257,26 @@ class _SpecMixin:
             return last, ctx, None
 
         finish, n, acc, drafted = "length", 0, 0, 0
+        pick_kind = None                        # hybrid: mtp.Chooser
         if max_tokens > 0 and not emit(first):
             finish = "stop"
         elif max_tokens > 0:
             n = 1
             # mlx-vlm 0.7.6 `_dflash_rounds`, with `pick` as the target sampler.
-            block_total = _dflash_block_total(draft, cfg.DRAFT_BLOCK or None)
-            draft_cache = draft.reset(self.model)
+            if draft is not None:
+                block_total = _dflash_block_total(draft, cfg.DRAFT_BLOCK or None)
+                draft_cache = draft.reset(self.model)
             if VERIFY_MR_HEAD and getattr(draft, "lm_head", None) is not None:
                 draft.lm_head = _verify_head(draft.lm_head)
             if wide and getattr(draft, "lm_head", None) is not None:
                 # the target's head (bound at reset) takes the target's dtype
                 draft.lm_head = (lambda x, head=draft.lm_head, hd=self._hidden_dtype():
                                  head(x.astype(hd)))
+            # QWEN_DRAFT_HYBRID: both drafters, one per round (mtp.Chooser);
+            # DFlash's context collects the positions of the MTP rounds
+            pick_kind = Chooser(("dflash", "mtp")) if draft is not None and mt is not None else None
+            force = cfg.DRAFT_HYBRID if cfg.DRAFT_HYBRID in ("dflash", "mtp") else None
+            kind, dpend = ("dflash" if mt is None else "mtp"), []
             b, why = first, None
             f = budget(first)
             if f is not None:                   # a budget the first token already passes
@@ -269,18 +303,32 @@ class _SpecMixin:
                     row.y, row.first, row.n = mx.array([b]), True, n
                     self._join(row)
                     return
-                bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
+                if pick_kind is not None:
+                    kind = pick_kind.pick(force)
+                if kind == "mtp":
+                    bs = min(max(1, cfg.MTP_K) + 1, max_tokens - n + 1)
+                else:
+                    bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
                 if bs <= 1:
                     break
-                drafts = draft.draft_block(b, hidden.astype(mx.float32) if wide else hidden,
-                                           draft_cache, bs, argmax, dtype)
+                if kind == "mtp":
+                    if draft is not None:       # DFlash's context: kept for its next round
+                        dpend = [mx.concatenate(dpend + [hidden], axis=1)[:, -win:]]
+                    drafts = mt.draft(bs - 1)
+                else:
+                    if dpend:
+                        hidden, dpend = mx.concatenate(dpend + [hidden], axis=1)[:, -win:], []
+                    dh = dfl(hidden)
+                    drafts = draft.draft_block(b, dh.astype(mx.float32) if wide else dh,
+                                               draft_cache, bs, argmax, dtype)
                 mx.async_eval(drafts)
                 fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
                 txn = None
                 try:
                     # the verify forward opens a cache transaction (out.gdn_states)
                     # that must be committed every round, or aborted
-                    out = lm(fed, cache=cache, capture_layer_ids=layers, speculative_verify=True)
+                    out = lm(fed, cache=cache, capture_layer_ids=layers, speculative_verify=True,
+                             return_hidden=fin)
                     txn = out.gdn_states
                     hidden = mx.concatenate(out.hidden_states, axis=-1)
                     targets = pick(out.logits, fed[0])
@@ -300,11 +348,18 @@ class _SpecMixin:
                 except BaseException:
                     abort_speculative_round(txn)
                     raise
-                _record_speculative_round(draft, hit, bs - 1)
+                if kind == "mtp":
+                    mt.record(hit, bs - 1)
+                else:
+                    _record_speculative_round(draft, hit, bs - 1)
+                if pick_kind is not None:
+                    pick_kind.done(hit)
                 acc, drafted = acc + hit, drafted + bs - 1
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
                 if accepted < bs - 1:           # the positions the commit kept
                     hidden = hidden[:, : accepted + 1, :]
+                if mt is not None:              # (a DFlash round's: no chained entries)
+                    mt.round_end(accepted, hidden[..., -H:])
                 seen(hidden)
                 stopped, f = False, None
                 for j, tok in enumerate(new):
@@ -331,8 +386,10 @@ class _SpecMixin:
                 if n % 256 < len(new) and CLEAR_CACHE:
                     mx.clear_cache()
         if max_tokens > 1:
-            log.info("dflash: %d tokens, accept rate %.0f%% (%d/%d drafts)",
-                     n, 100.0 * acc / max(1, drafted), acc, drafted)
+            log.info("%s: %d tokens, accept rate %.0f%% (%d/%d drafts)%s",
+                     "hybrid" if pick_kind is not None else ("mtp" if mt is not None else "dflash"),
+                     n, 100.0 * acc / max(1, drafted), acc, drafted,
+                     f"; {pick_kind.summary()}" if pick_kind is not None else "")
             if drafted >= 64 and not acc:
                 log.warning("dflash: none of %d drafts accepted: the drafter's output is "
                             "unusable (NaN from an fp16 overflow? try QWEN_DRAFT_FP32=1)", drafted)

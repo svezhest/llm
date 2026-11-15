@@ -346,6 +346,19 @@ DRAFT_TAIL_END = int(os.environ.get("QWEN_DRAFT_TAIL_END", "2048"))
 # plain decoding on low acceptance was tried and lost: a probe of 8 rounds
 # costs ~0.5 s, and the drafter restarts cold (~130 ms rounds, lower accept).
 DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
+# MTP drafting (qwen_worker/mtp.py): QWEN_DRAFT may also name the target's own
+# MTP head split into a drafter dir (scripts/perf/mtp/split_mtp.py; the kind is
+# detected from its config), and QWEN_DRAFT_MTP loads one beside a DFlash
+# QWEN_DRAFT. QWEN_MTP_K: drafts per MTP round (chained: k head steps + k
+# lm_heads, then a (k + 1)-token verify). QWEN_MTP_REFEED=1: every accepted
+# position's head entry is recomputed from the target's hidden state (default:
+# the chained steps' entries are kept, as mlx-vlm does). QWEN_DRAFT_HYBRID with
+# both drafters: "1" = per round the one with the larger expected tokens per
+# second (mtp.Chooser), "dflash" / "mtp" = always that one.
+DRAFT_MTP = os.environ.get("QWEN_DRAFT_MTP", "")
+MTP_K = int(os.environ.get("QWEN_MTP_K") or "3")
+MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
+DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs

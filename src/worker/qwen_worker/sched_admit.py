@@ -376,7 +376,8 @@ class _AdmitMixin:
     def _spec_ok(self, row):
         req = row.req
         greedy = req.sampling["temperature"] <= 0 and not row.pen.active
-        if (self.eng.draft is None or cfg.BATCH_INVARIANT or req.images
+        if ((self.eng.draft is None and getattr(self.eng, "mtp", None) is None)
+                or cfg.BATCH_INVARIANT or req.images
                 or req.golden is not None or not (greedy or DRAFT_SAMPLING)):
             return False
         if row.lpk is not None or _wants(req, "prompt_logprobs"):

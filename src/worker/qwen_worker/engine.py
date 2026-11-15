@@ -17,7 +17,8 @@ import worker_pb2 as pb
 
 from . import config as cfg
 from . import sizing
-from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, EVENT_POLL_S, FP16,
+from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, DRAFT_MTP,
+                     EVENT_POLL_S, FP16,
                      GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
                      PROMPT_CACHE_GB, PROMPT_CACHE_REPLY, RESERVE_TOKENS, SAMPLING_KWARGS,
@@ -31,6 +32,7 @@ from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks
 from .rows import _install_rows_attention
 from .kernels import (_draft_wide, _install_fast_paths, _install_gdn_fuse, _invariant_check,
                       _log_invariant, _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
+from .mtp import load_mtp, mtp_dir
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
 from .request import _Req
@@ -90,6 +92,7 @@ class Engine:
         self._pcache = _PrefixCache()
         self.draft = None
         self.draft_wide = False                 # QWEN_DRAFT_FP32: fp32 drafter activations
+        self.mtp = None                         # the MTP head drafter (QWEN_DRAFT / QWEN_DRAFT_MTP)
         self._span_tokens = None        # (header, think pre-opens, <|im_end|>): _assistant_spans
         self._tok_str = {}              # id -> tokenizer.decode([id]) (logprobs; vocab-bounded)
         self._plain = None              # _PlainContent (QWEN_SPLIT_SPECIAL_TOKENS)
@@ -131,6 +134,8 @@ class Engine:
             # quantized cache wrongly; the drafter is only worth it on the 9B,
             # which runs an fp16 cache anyway.
             log.warning("QWEN_DRAFT ignored: speculative decoding needs QWEN_KV_BITS=0")
+        elif DRAFT and mtp_dir(DRAFT):            # the target's own MTP head (mtp.py)
+            self.mtp = load_mtp(DRAFT, self.model.language_model, FP16)
         elif DRAFT:
             from mlx_vlm.speculative.drafters import load_drafter, validate_drafter_compatibility
             draft, kind = load_drafter(DRAFT)
@@ -159,6 +164,11 @@ class Engine:
             if wide and not DRAFT_BITS:
                 log.warning("QWEN_DRAFT_FP32 with QWEN_DRAFT_BITS=0: the drafter's weights stay "
                             "bf16 (slow on M1/M2: no native bf16)")
+        if DRAFT_MTP and self.draft is not None:  # beside DFlash: QWEN_DRAFT_HYBRID
+            self.mtp = load_mtp(DRAFT_MTP, self.model.language_model, FP16)
+        elif DRAFT_MTP:
+            log.warning("QWEN_DRAFT_MTP ignored: it goes beside a DFlash QWEN_DRAFT (an MTP head "
+                        "alone is QWEN_DRAFT itself)")
         _tok = getattr(self.processor, "tokenizer", self.processor)
         # mlx-vlm стопит только на верхнем eos_token_id; у qwen их два
         # (<|im_end|> и <|endoftext|>), стоп на всех — как в HF/vLLM
@@ -240,7 +250,8 @@ class Engine:
             self.max_batch = 1
         import pfqmm                       # after the fp16 cast (fp16 scales only); LM only
         pfqmm.install(lm)
-        if self.max_batch >= 3 or (self.draft is not None and VERIFY_MR_HEAD):
+        spec = self.draft is not None or self.mtp is not None
+        if self.max_batch >= 3 or (spec and VERIFY_MR_HEAD):
             # after the fp16 cast (the kernel takes fp16 scales only); the
             # language model only (never the vision tower or the drafter,
             # which shares lm_head and calls it with (1, T, K): mrqmm only
@@ -258,11 +269,11 @@ class Engine:
             self.max_batch = _invariant_check(lm, self.max_batch)
         if VERIFY_MRQMM not in ("0", "1", "head"):
             log.warning("QWEN_VERIFY_MRQMM=%r: not 0 / 1 / head, off", VERIFY_MRQMM)
-        if self.draft is not None and VERIFY_MR_HEAD:
+        if spec and VERIFY_MR_HEAD:
             # never with QWEN_BATCH_INVARIANT (it loads no drafter)
             how = _setup_verify_mrqmm(lm, self.draft)
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
-        if self.draft is not None:
+        if spec:
             nq = _probe_verify_attention(lm)
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",
                      f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)" if nq
