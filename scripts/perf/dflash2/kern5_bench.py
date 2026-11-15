@@ -24,9 +24,10 @@ k/v 32, o 16, lm_head 1); its ratio to the qmv1 step measured in the same
 rows block is the number to read (the GPU drifts between blocks).
 
 --random --bits B: random packed weights of the same shapes and counts at
-another bit width (4, 5 or 8; no 4-bit 27B exists on disk: the price of a
-4-bit build of the same model; --bits 5 --random checks that random weights
-time like the real ones).
+another bit width (4, 5 or 8: the price of a build of the same model at that
+width; --bits 5 --random checks that random weights time like the real ones).
+Real weights: --bits is the checkpoint's (config.json "quantization"; 4 for
+weights/qwen38-27b-mlx-4bit, QWEN_MRQMM4).
 
   cd src/worker && PYTHONPATH=. python ../../scripts/perf/dflash2/kern5_bench.py \\
       [--weights DIR] [--rounds 5] [--rows 2,3,4,6,8,12,16] [--sweep 2x8,4x4] [--exact] \\
@@ -57,15 +58,20 @@ ap.add_argument("--sweep-rows", default="8,16")
 ap.add_argument("--only", default="", help="shape names, comma separated")
 ap.add_argument("--k5-rows", default="3,4,6,8,12,16", help="rows the kernel is timed at (add 1,2 to look)")
 ap.add_argument("--exact", action="store_true")
-ap.add_argument("--bits", type=int, default=5)
+ap.add_argument("--bits", type=int, default=0, help="random weights' width (real: the checkpoint's)")
 ap.add_argument("--random", action="store_true", help="random weights of the 27B's shapes (needed for --bits != 5)")
 ap.add_argument("--mlx-t", action="store_true", help="also quantized_matmul on (1, rows, K): a verify block's shape")
 ap.add_argument("--out", default=os.path.join(os.environ.get("PERF_OUT", "/tmp/perf"), "kern5_bench.json"))
 a = ap.parse_args()
 mx.set_default_device(mx.gpu)
 
-BITS, GS = a.bits, 64
-assert BITS == 5 or a.random, "the 27B on disk is 5-bit: --bits needs --random"
+GS = 64
+if a.random:
+    BITS = a.bits or 5
+else:
+    _q = json.load(open(os.path.join(a.weights, "config.json")))["quantization"]
+    BITS = _q["bits"]
+    assert _q["group_size"] == GS and a.bits in (0, BITS), (_q, a.bits)
 L = "language_model.model.layers.%d."
 N_LAYERS = 64
 FA = [i for i in range(N_LAYERS) if i % 4 == 3]
