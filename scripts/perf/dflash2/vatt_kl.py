@@ -33,6 +33,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--tokens", type=int, default=32768, help="context before the first block")
 ap.add_argument("--blocks", type=int, default=64)
 ap.add_argument("--T", type=int, default=8)
+ap.add_argument("--decode", type=int, default=0,
+                help="then N decode steps (one real token each), MLX's decode SDPA vs vatt (QWEN_DECODE_ATT; "
+                     "the cache state restored between them)")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
 
@@ -52,12 +55,14 @@ for f in ["README.md", "CLAUDE.md", "BACKLOG.md"] + sorted(glob.glob(os.path.joi
     text += open(os.path.join(ROOT, f)).read() + "\n\n"
     if len(text) > 5 * (a.tokens + a.T * a.blocks + 64):
         break
-ids = tok.encode(text)[:a.tokens + a.T * a.blocks]
-assert len(ids) == a.tokens + a.T * a.blocks, len(ids)
+ids = tok.encode(text)[:a.tokens + a.T * a.blocks + a.decode]
+assert len(ids) == a.tokens + a.T * a.blocks + a.decode, len(ids)
 print(f"loaded; {len(ids)} tokens; vector kernel {NQ} queries per call", flush=True)
 
 cache = make_prompt_cache(lm)
 inp = mx.array([ids])
+lm._rope_deltas = mx.zeros((1, 1), dtype=mx.int32)   # text: mRoPE = the cache offset (as the worker sets it)
+lm._position_ids = None
 t0 = time.time()
 pos = 0
 while pos < a.tokens:
@@ -106,7 +111,48 @@ for b in range(a.blocks):
     if b % 16 == 15:
         print(f"  {b + 1} blocks, {time.time() - t0:.0f} s", flush=True)
 
-res = dict(tokens=a.tokens, blocks=a.blocks, T=a.T, model=os.environ["QWEN_MODEL"], pairs={})
+if a.decode:
+    from mlx_vlm.models.qwen3_5 import language as q35
+    assert W._SDPA is not None and q35.scaled_dot_product_attention is W._fused_sdpa
+    import vatt  # noqa: F401  (the hook reads sys.modules["vatt"])
+    MIN0 = W.DECODE_ATT_MIN_KV
+    W.DECODE_ATT_MIN_KV = 1
+    acc[("mlx", "dec")] = dict(kl=[], agree=0, n=0, dmax=0.0)
+    W._VATT, W._VERIFY_ATT_Q = False, NQ
+
+    def step(x, on):
+        W._VATT_DEC = on
+        snap = [(c.offset,) if type(c).__name__ == "KVCache" else (list(c.state),) for c in cache]
+        out = lm(x, cache=cache)
+        lp = out.logits[0, -1].astype(mx.float32)
+        lp = lp - mx.logsumexp(lp)
+        mx.eval(lp)
+        for c, sn in zip(cache, snap):
+            if type(c).__name__ == "KVCache":
+                c.offset = sn[0]
+            else:
+                c.state = sn[0]
+        return lp
+    for i in range(a.decode):
+        x = inp[:, pos:pos + 1]
+        if i % 2:
+            la = step(x, False)
+            lb = step(x, True)
+        else:
+            lb = step(x, True)
+            la = step(x, False)
+        s = acc[("mlx", "dec")]
+        s["kl"].append((mx.exp(la) * (la - lb)).sum().item())
+        s["agree"] += int(mx.argmax(la).item() == mx.argmax(lb).item())
+        s["n"] += 1
+        s["dmax"] = max(s["dmax"], mx.abs(la - lb).max().item())
+        W._VATT_DEC = False
+        lm(x, cache=cache)
+        mx.eval([c.state for c in cache])
+        pos += 1
+    W.DECODE_ATT_MIN_KV = MIN0
+
+res = dict(tokens=a.tokens, blocks=a.blocks, T=a.T, decode=a.decode, model=os.environ["QWEN_MODEL"], pairs={})
 for (x, y), s in acc.items():
     kl = sorted(s["kl"])
     n = len(kl)
@@ -119,6 +165,11 @@ for (x, y), s in acc.items():
 g = res["pairs"]["vec|vatt"]
 res["gate"] = g["kl_mean"] <= 1e-4 and g["top1"] >= 99.7
 print(f"gate (KL(vec||vatt) <= 1e-4, top-1 >= 99.7 %): {'PASS' if res['gate'] else 'FAIL'}", flush=True)
+if a.decode:
+    g = res["pairs"]["mlx|dec"]
+    res["gate_decode"] = g["kl_mean"] <= 1e-4 and g["top1"] >= 99.7
+    print(f"decode gate (KL(mlx||vatt) <= 1e-4, top-1 >= 99.7 %): {'PASS' if res['gate_decode'] else 'FAIL'}",
+          flush=True)
 if a.json:
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
     json.dump(res, open(a.json, "w"), indent=1)

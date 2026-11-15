@@ -50,7 +50,8 @@ ap.add_argument("--ab", type=int, default=0,
                      "attention / DFlash with the vector attention kernel (QWEN_VERIFY_ATT)")
 ap.add_argument("--ab-variants", default="plain,rows,vector",
                 help="--ab's variants, in rotation: plain / rows / vector (QWEN_VERIFY_ATT=1) / vatt (=2, "
-                     "needs the worker loaded with QWEN_VERIFY_ATT=2)")
+                     "needs the worker loaded with QWEN_VERIFY_ATT=2); a '+d' suffix: decode steps through "
+                     "vatt too (QWEN_DECODE_ATT, loaded with it), else MLX's decode SDPA")
 ap.add_argument("--ab-mode", default="read",
                 help="--ab's prompt_cache mode: read (a copy of the entry, nothing stored) or '' (the "
                      "default: with QWEN_PROMPT_CACHE_MOVE the entry moves into the row and comes back "
@@ -199,24 +200,27 @@ if a.cold_ref and res[-1]["end"][0] == "done":
     o["same"] = o["tokens"] == res[-1]["tokens"]
     res.append(o)
 if a.ab and res[-1]["end"][0] == "done":
-    nq, va0 = W._VERIFY_ATT_Q, W._VATT
+    nq, va0, vd0 = W._VERIFY_ATT_Q, W._VATT, W._VATT_DEC
     names = a.ab_variants.split(",")
     ref = None
     for k in range(a.ab):
         order = names[k % len(names):] + names[:k % len(names)]      # rotate: no variant always first
         for name in order:
-            eng.draft = None if name == "plain" else DRAFT
-            W._VERIFY_ATT_Q = nq if name in ("vector", "vatt") else 0
-            W._VATT = va0 and name == "vatt"
+            base, _, dec = name.partition("+")      # "+d": decode steps through vatt (QWEN_DECODE_ATT)
+            assert not dec or vd0, "'+d' needs QWEN_DECODE_ATT (self-test passed)"
+            eng.draft = None if base == "plain" else DRAFT
+            W._VERIFY_ATT_Q = nq if base in ("vector", "vatt") else 0
+            W._VATT = va0 and base == "vatt"
+            W._VATT_DEC = dec == "d"
             o = run(last, f"{name}{k + 1}", a.ab_mode)
             o["variant"], o["round"] = name, k
-            if name == "plain" and ref is None:
+            if base == "plain" and not dec and ref is None:
                 ref = o["tokens"]
             o["same"] = o["tokens"] == res[-1]["tokens"]
             o["same_as_plain"] = ref is not None and o["tokens"] == ref
             show(o, same=o["same"])
             res.append(o)
-    eng.draft, W._VERIFY_ATT_Q, W._VATT = DRAFT, nq, va0
+    eng.draft, W._VERIFY_ATT_Q, W._VATT, W._VATT_DEC = DRAFT, nq, va0, vd0
     import statistics
     for name in names:
         rows = [o for o in res if o.get("variant") == name]
