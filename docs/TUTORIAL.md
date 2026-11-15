@@ -1249,7 +1249,7 @@ Measured:
 | `QWEN_DRAFT_MRQMM` | 1 | the fp32 drafter's linears through the multi-row kernel (rows prescaled by a power of two, fp32 output); 27B 4-bit drafter block 31 → 17 ms, DFlash ×1.12, the same drafts |
 | `QWEN_DRAFT_COMPILE` | 0 | compiled DFlash2 convolution (+0.3 %, below the 3 % bar) |
 | `QWEN_DRAFT_TAIL` / `_TAIL_END` | 128 / 2048 | the prompt cache stores the drafter's context with each state, so cache hits draft as well as cold runs |
-| `QWEN_DRAFT_SAMPLING` | 0 | speculative path for sampled requests too (exact, but ×0.8–1.2) |
+| `QWEN_DRAFT_SAMPLING` | 0 | speculative path for sampled requests too (exact; 9B ×0.8–1.2; 27B ×1.34–1.41 on 2K code / English / Russian prompts but ×0.70 on short Russian prose) |
 
 **Use it** for a single interactive user who wants fast greedy answers, especially code.
 **Skip it** for sampled generation, structured output, or a busy multi-user server: it only

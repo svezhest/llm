@@ -20,6 +20,14 @@ SOURCES = (
 )
 
 
+SHORT = (
+    ("en_prose", "Write a short story (about 300 words) about a lighthouse keeper who finds a message in a "
+                 "bottle. Plain prose, no headings."),
+    ("ru_prose", "Напиши короткий рассказ (около 300 слов) о смотрителе маяка, который находит письмо в "
+                 "бутылке. Обычная проза, без заголовков."),
+)
+
+
 def _show(path):
     return subprocess.run(["git", "-C", ROOT, "show", f"{REV}:{path}"], check=True,
                           capture_output=True, text=True).stdout

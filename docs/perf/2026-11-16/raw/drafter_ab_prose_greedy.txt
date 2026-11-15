@@ -1,0 +1,45 @@
+loaded in 10 s; active 16.51 GB; max_batch 1; drafter DFlash2DraftModel block 8 runtime 5 window 2048 layers [5, 19, 33, 47, 61]; draft bits 4; verify exact max T 8; VERIFY_MR True
+drafter fast paths (engine's): conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules
+d8: conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 46 modules +2.40 GB
+warm plain: n=2 ok
+warm d4: n=2 ok
+warm d4+mr: n=2 ok
+warm d8+mr: n=2 ok
+r0 en_prose plain      n=256 tps= 18.70 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 en_prose d4         n=256 tps= 17.85 accept= 19.0% per_round=1.32 round_ms= 129.8 hist={0: 42, 1: 27, 2: 19, 3: 16, 4: 1, 5: 2, 6: 3}
+r0 en_prose d4+mr      n=256 tps= 20.28 accept= 19.0% per_round=1.32 round_ms= 114.3 hist={0: 42, 1: 27, 2: 19, 3: 16, 4: 1, 5: 2, 6: 3}
+r0 en_prose d8+mr      n=256 tps= 19.77 accept= 18.7% per_round=1.30 round_ms= 116.2 hist={0: 42, 1: 28, 2: 21, 3: 13, 4: 2, 5: 3, 6: 2}
+r0 ru_prose d8+mr      n=256 tps= 12.61 accept=  8.4% per_round=0.58 round_ms= 125.6 hist={0: 95, 1: 48, 2: 9, 3: 8, 4: 1}
+r0 ru_prose d4+mr      n=256 tps= 12.62 accept=  8.4% per_round=0.58 round_ms= 125.5 hist={0: 97, 1: 45, 2: 11, 3: 6, 4: 1, 5: 1}
+r0 ru_prose d4         n=256 tps= 11.10 accept=  8.4% per_round=0.58 round_ms= 142.7 hist={0: 97, 1: 45, 2: 11, 3: 6, 4: 1, 5: 1}
+r0 ru_prose plain      n=256 tps= 16.92 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 en_prose plain      n=256 tps= 16.74 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 en_prose d8+mr      n=256 tps= 16.96 accept= 18.7% per_round=1.30 round_ms= 135.5 hist={0: 42, 1: 28, 2: 21, 3: 13, 4: 2, 5: 3, 6: 2}
+r1 en_prose d4+mr      n=256 tps= 17.13 accept= 19.0% per_round=1.32 round_ms= 135.3 hist={0: 42, 1: 27, 2: 19, 3: 16, 4: 1, 5: 2, 6: 3}
+r1 en_prose d4         n=256 tps= 15.08 accept= 19.0% per_round=1.32 round_ms= 153.7 hist={0: 42, 1: 27, 2: 19, 3: 16, 4: 1, 5: 2, 6: 3}
+r1 ru_prose d4         n=256 tps=  9.95 accept=  8.4% per_round=0.58 round_ms= 159.2 hist={0: 97, 1: 45, 2: 11, 3: 6, 4: 1, 5: 1}
+r1 ru_prose d4+mr      n=256 tps= 11.07 accept=  8.4% per_round=0.58 round_ms= 143.1 hist={0: 97, 1: 45, 2: 11, 3: 6, 4: 1, 5: 1}
+r1 ru_prose d8+mr      n=256 tps= 10.81 accept=  8.4% per_round=0.58 round_ms= 146.5 hist={0: 95, 1: 48, 2: 9, 3: 8, 4: 1}
+r1 ru_prose plain      n=256 tps= 14.79 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en_prose d4+mr      n=256 tps= 16.05 accept= 19.0% per_round=1.32 round_ms= 144.5 hist={0: 42, 1: 27, 2: 19, 3: 16, 4: 1, 5: 2, 6: 3}
+r2 en_prose d8+mr      n=256 tps= 15.89 accept= 18.7% per_round=1.30 round_ms= 144.6 hist={0: 42, 1: 28, 2: 21, 3: 13, 4: 2, 5: 3, 6: 2}
+r2 en_prose plain      n=256 tps= 15.10 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en_prose d4         n=256 tps= 14.40 accept= 19.0% per_round=1.32 round_ms= 161.0 hist={0: 42, 1: 27, 2: 19, 3: 16, 4: 1, 5: 2, 6: 3}
+r2 ru_prose d4         n=256 tps=  9.94 accept=  8.4% per_round=0.58 round_ms= 159.3 hist={0: 97, 1: 45, 2: 11, 3: 6, 4: 1, 5: 1}
+r2 ru_prose plain      n=256 tps= 14.74 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 ru_prose d8+mr      n=256 tps= 10.71 accept=  8.4% per_round=0.58 round_ms= 147.8 hist={0: 95, 1: 48, 2: 9, 3: 8, 4: 1}
+r2 ru_prose d4+mr      n=256 tps= 10.82 accept=  8.4% per_round=0.58 round_ms= 146.3 hist={0: 97, 1: 45, 2: 11, 3: 6, 4: 1, 5: 1}
+
+== speed: median decode tok/s (median over tasks of per-task medians over rounds) ==
+plain      tps  15.77  per prompt  16.7  14.8  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 6/6
+d4         tps  12.51  per prompt  15.1   9.9  accept  13.7%  drafts/round 0.95  round  156.5 ms  == plain 6/6
+d4+mr      tps  14.10  per prompt  17.1  11.1  accept  13.7%  drafts/round 0.95  round  139.2 ms  == plain 6/6
+d8+mr      tps  13.89  per prompt  17.0  10.8  accept  13.6%  drafts/round 0.94  round  140.0 ms  == plain 6/6
+
+== paired ratio vs d4 (median over rounds x prompts; per prompt) ==
+plain      x1.297  per prompt x1.049 x1.487
+d4         x1.000  per prompt x1.000 x1.000
+d4+mr      x1.125  per prompt x1.136 x1.113
+d8+mr      x1.105  per prompt x1.107 x1.087
+peak 20.48 GB, active 19.02 GB
+wrote $PERF_OUT/drafter/ab_prose_greedy.json

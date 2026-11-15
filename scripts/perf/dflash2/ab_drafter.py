@@ -34,7 +34,7 @@ import worker_pb2 as pb  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "prof"))
 sys.path.insert(0, HERE)
-from prompts2k import prompts  # noqa: E402
+from prompts2k import SHORT, prompts  # noqa: E402
 from wtest import TASKS  # noqa: E402  (no MLX there: gRPC client module, TASKS only)
 
 ap = argparse.ArgumentParser()
@@ -43,6 +43,7 @@ ap.add_argument("--variants", default="plain,d4,d4+mr")
 ap.add_argument("--ident", default="d4,d4+mr", help="DFlash variants checked against plain on all 16 tasks")
 ap.add_argument("--tasks", type=int, default=0, help="speed phase: + the first N wtest TASKS")
 ap.add_argument("--no-2k", action="store_true")
+ap.add_argument("--short", action="store_true", help="+ two short prose prompts (en / ru, prompts2k.SHORT)")
 ap.add_argument("--sampling", default="", help="T,top_p,top_k (e.g. 0.6,0.95,20): sampled requests, "
                 "seeded per (round, prompt); DFlash variants with QWEN_DRAFT_SAMPLING=1. Variant flag "
                 "+tk = QWEN_SAMPLER_TOPK_FAST (also plain+tk)")
@@ -176,7 +177,8 @@ res = {"variants": a.variants, "rounds": a.rounds, "thinking": a.thinking, "max_
        "verify_mr": W.VERIFY_MR, "draft_block": cfg.DRAFT_BLOCK,
        "speed": [], "ident": []}
 VS = a.variants.split(",")
-PROMPTS = ([] if a.no_2k else prompts(tok)) + [(f"code{i}", t) for i, t in enumerate(TASKS[:a.tasks])]
+PROMPTS = (([] if a.no_2k else prompts(tok)) + (list(SHORT) if a.short else [])
+           + [(f"code{i}", t) for i, t in enumerate(TASKS[:a.tasks])])
 NT = len(PROMPTS)
 res["prompts"] = [n for n, _ in PROMPTS]
 if not a.skip_speed:

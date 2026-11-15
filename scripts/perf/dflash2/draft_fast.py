@@ -29,13 +29,14 @@ import worker_pb2 as pb  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "prof"))
 sys.path.insert(0, HERE)
-from prompts2k import prompts  # noqa: E402
+from prompts2k import SHORT, prompts  # noqa: E402
 from wtest import TASKS  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--variants", default="d4,d4+mr,d4+mr+cc")
 ap.add_argument("--tasks", type=int, default=5, help="short code TASKS (+ the three 2K prompts)")
 ap.add_argument("--no-2k", action="store_true")
+ap.add_argument("--short", action="store_true", help="+ two short prose prompts (en / ru)")
 ap.add_argument("--gen", type=int, default=96, help="greedy tokens per sequence (probed)")
 ap.add_argument("--stride", type=int, default=3, help="probe every N positions")
 ap.add_argument("--block", type=int, default=8)
@@ -96,6 +97,8 @@ layers = list(eng.draft.config.target_layer_ids)
 texts = [(f"code{i}", t) for i, t in enumerate(TASKS[:a.tasks])]
 if not a.no_2k:
     texts += prompts(tok)
+if a.short:
+    texts += list(SHORT)
 seqs = []
 for name, text in texts:
     s = tok.apply_chat_template([{"role": "user", "content": text}], tokenize=False,

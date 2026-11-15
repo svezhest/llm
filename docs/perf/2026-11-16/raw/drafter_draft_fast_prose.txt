@@ -1,0 +1,12 @@
+drafter fast paths (engine's): conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules
+d5: conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules 1.73 GB
+d8: conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 46 modules 2.40 GB
+sequences ready [('en_prose', 235), ('ru_prose', 244)]
+accept d4+mr        mean 1.008 of 7 (124 probes) en_prose=1.31 ru_prose=0.71
+accept d5+mr        mean 0.976 of 7 (124 probes) en_prose=1.24 ru_prose=0.71
+accept d8+mr        mean 0.944 of 7 (124 probes) en_prose=1.16 ru_prose=0.73
+block d4+mr        median  15.93 ms (min 15.75, 7 blocks)
+block d5+mr        median  16.95 ms (min 16.80, 7 blocks)
+block d8+mr        median  16.79 ms (min 16.66, 7 blocks)
+peak 22.47 GB
+wrote $PERF_OUT/drafter/draft_fast_prose.json
