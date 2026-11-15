@@ -357,9 +357,10 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 #   "draft": rows the drafter takes only (below); plain rows stay the plain loop.
 #   "1": with a drafter (QWEN_DRAFT), a lookup round when a match exists, else
 #        the drafter's block (its context = every position since its last
-#        block); without a drafter (or for rows no drafter takes), lookup
-#        rounds between plain steps (step-ahead bursts of <= QWEN_LOOKUP_BURST
-#        steps, the plain loop's sampler: bit-identical to it between rounds).
+#        block); without a drafter (a lone greedy row, fp16 KV, no thinking
+#        budget: _spec_ok), lookup rounds between plain steps (step-ahead bursts
+#        of <= QWEN_LOOKUP_BURST steps, the plain loop's sampler: bit-identical
+#        to it between rounds; the rounds' verify rows are not: DFlash's class).
 #   "splice": with a drafter, the drafter's block every round; where a match
 #        exists and its continuation agrees with the drafter on the first
 #        token, the (longer) continuation instead (a host read of the drafts).
