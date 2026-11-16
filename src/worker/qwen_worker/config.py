@@ -409,7 +409,7 @@ LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 # both drafters: "1" = per round the one with the larger expected tokens per
 # second (mtp.Chooser), "dflash" / "mtp" = always that one.
 DRAFT_MTP = os.environ.get("QWEN_DRAFT_MTP", "")
-MTP_K = int(os.environ.get("QWEN_MTP_K") or "3")
+MTP_K = int(os.environ.get("QWEN_MTP_K") or "0")
 # QWEN_MTP_K=0: adaptive (mtp.MTPDraft.next_k), QWEN_MTP_COST = one draft's cost
 # as a fraction of a round's verify
 MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
@@ -423,8 +423,8 @@ DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
 # (short Russian prose on the 27B: DFlash below plain) decodes mostly plain,
 # re-probing the drafters every mtp.Chooser.EXPLORE tokens.
 SPEC_PLAIN = os.environ.get("QWEN_SPEC_PLAIN", "0") == "1"
-# QWEN_VERIFY_QMV=N (2..8; 0 = off): verify blocks of 2..N tokens (MTP rounds:
-# QWEN_MTP_K + 1) on 4-bit g64 modules through mrqmv.py, a multi-row qmv whose
+# QWEN_VERIFY_QMV=N (2..3; 0 = off): verify blocks of 2..N tokens (MTP rounds:
+# QWEN_MTP_K + 1) on 4 / 5 / 6 / 8-bit g64 modules through mrqmv.py, a multi-row qmv whose
 # every row is MLX's solo qmv bit for bit (self-tested per shape at load):
 # the weights read once for the T rows, instead of mrqmm's MMA (rows padded
 # to 8, a flat ~x1.6 of a solo row) or mlx-vlm's exact kernels (T unpacks).
