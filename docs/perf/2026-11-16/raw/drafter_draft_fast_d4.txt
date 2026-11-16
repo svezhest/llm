@@ -1,0 +1,36 @@
+drafter fast paths (engine's): conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules
+sequences ready [('code0', 142), ('code1', 134), ('code2', 130), ('code3', 135), ('code4', 126), ('code2k', 2139), ('en2k', 2125), ('ru2k', 2135)]
+accept d4           mean 3.237 of 7 (240 probes) code0=3.87 code1=2.57 code2=3.07 code3=4.00 code4=4.30 code2k=3.37 en2k=2.77 ru2k=1.97
+accept d4+mr        mean 3.237 of 7 (240 probes) code0=3.87 code1=2.57 code2=3.07 code3=4.00 code4=4.30 code2k=3.37 en2k=2.77 ru2k=1.97
+accept d4+mr+cc     mean 3.237 of 7 (240 probes) code0=3.87 code1=2.57 code2=3.07 code3=4.00 code4=4.30 code2k=3.37 en2k=2.77 ru2k=1.97
+accept d4+cc        mean 3.237 of 7 (240 probes) code0=3.87 code1=2.57 code2=3.07 code3=4.00 code4=4.30 code2k=3.37 en2k=2.77 ru2k=1.97
+block d4           median  31.34 ms (min 30.52, 37 blocks)
+block d4+mr        median  17.44 ms (min 16.81, 37 blocks)
+block d4+mr+cc     median  16.79 ms (min 16.20, 37 blocks)
+block d4+cc        median  30.87 ms (min 30.15, 37 blocks)
+stages d4:
+  embed                                           0.27 ms (1 calls)
+  fc + hidden_norm (ctx rows)                     1.30 ms (1 calls)
+  layernorms                                      2.16 ms (10 calls)
+  conv.prepare (kernel_projection + conv)         4.22 ms (10 calls)
+  self_attn (q,k,v,o + ctx k,v + sdpa)            7.91 ms (5 calls)
+  conv.finish + residual                          3.46 ms (10 calls)
+  mlp (gate, up, down)                           17.11 ms (5 calls)
+  final norm                                      0.22 ms (1 calls)
+  lm_head (target, 7 rows)                        4.05 ms (1 calls)
+  selector                                        1.95 ms (1 calls)
+  TOTAL (staged, synced)                         44.04 ms (1 calls)
+stages d4+mr+cc:
+  embed                                           0.26 ms (1 calls)
+  fc + hidden_norm (ctx rows)                     0.72 ms (1 calls)
+  layernorms                                      2.16 ms (10 calls)
+  conv.prepare (kernel_projection + conv)         3.51 ms (10 calls)
+  self_attn (q,k,v,o + ctx k,v + sdpa)            6.42 ms (5 calls)
+  conv.finish + residual                          2.86 ms (10 calls)
+  mlp (gate, up, down)                            5.68 ms (5 calls)
+  final norm                                      0.22 ms (1 calls)
+  lm_head (target, 7 rows)                        4.00 ms (1 calls)
+  selector                                        2.01 ms (1 calls)
+  TOTAL (staged, synced)                         29.23 ms (1 calls)
+peak 20.99 GB
+wrote $PERF_OUT/drafter/draft_fast_d4.json

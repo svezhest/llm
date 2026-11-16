@@ -494,18 +494,18 @@ SNS = 4               # simdgroups per suffix piece
 _SMETA: dict = {}
 
 _HEADER = None
+_STEEL = None
 _KERNELS: dict = {}
 _META: dict = {}          # (M0, P, capP, chunk) -> int32 meta: one per group shape, all layers
 _LOCK = threading.Lock()
 
 
-def _header() -> str:
+def steel_headers() -> str:
     """The wheel's steel attention loader + MMA tile headers, includes
     inlined (the runtime Metal compiler has no include path; metal_kernel
-    prepends kernels/utils.h itself, so it is skipped), + the ops and
-    `cmma_p1`."""
-    global _HEADER
-    if _HEADER is None:
+    prepends kernels/utils.h itself, so it is skipped). Shared with vatt.py."""
+    global _STEEL
+    if _STEEL is None:
         root = os.path.join(os.path.dirname(mx.__file__), "include")
         seen = set()
 
@@ -525,8 +525,15 @@ def _header() -> str:
 
         k = "mlx/backend/metal/kernels/"
         inline(k + "utils.h")
-        _HEADER = ("\n".join(inline(k + f) for f in ("steel/attn/loader.h", "steel/attn/mma.h"))
-                   + _OPS + _IMPL)
+        _STEEL = "\n".join(inline(k + f) for f in ("steel/attn/loader.h", "steel/attn/mma.h"))
+    return _STEEL
+
+
+def _header() -> str:
+    """steel_headers() + the ops and `cmma_p1`."""
+    global _HEADER
+    if _HEADER is None:
+        _HEADER = steel_headers() + _OPS + _IMPL
     return _HEADER
 
 

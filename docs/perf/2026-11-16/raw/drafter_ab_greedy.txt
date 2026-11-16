@@ -1,0 +1,105 @@
+loaded in 12 s; active 16.51 GB; max_batch 1; drafter DFlash2DraftModel block 8 runtime 5 window 2048 layers [5, 19, 33, 47, 61]; draft bits 4; verify exact max T 8; VERIFY_MR True
+drafter fast paths (engine's): conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules
+d8: conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 46 modules +2.40 GB
+warm plain: n=2 ok
+warm d4: n=2 ok
+warm d4+mr: n=2 ok
+warm d4+mr+cc: n=2 ok
+warm d8+mr+cc: n=2 ok
+r0 code2k plain      n=256 tps= 18.26 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2k d4         n=256 tps= 25.32 accept= 39.5% per_round=2.71 round_ms= 145.9 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r0 code2k d4+mr      n=256 tps= 30.76 accept= 39.5% per_round=2.71 round_ms= 120.2 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r0 code2k d4+mr+cc   n=256 tps= 30.88 accept= 39.5% per_round=2.71 round_ms= 119.7 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r0 code2k d8+mr+cc   n=256 tps= 28.01 accept= 37.8% per_round=2.59 round_ms= 128.2 hist={0: 13, 1: 21, 2: 8, 3: 8, 4: 5, 5: 3, 6: 3, 7: 10}
+r0 en2k   d8+mr+cc   n=256 tps= 31.14 accept= 41.8% per_round=2.92 round_ms= 126.0 hist={0: 11, 1: 17, 2: 8, 3: 4, 4: 5, 5: 5, 6: 5, 7: 10}
+r0 en2k   d4+mr+cc   n=256 tps= 31.33 accept= 41.8% per_round=2.92 round_ms= 125.2 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r0 en2k   d4+mr      n=256 tps= 30.90 accept= 41.8% per_round=2.92 round_ms= 127.0 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r0 en2k   d4         n=256 tps= 27.52 accept= 41.8% per_round=2.92 round_ms= 142.6 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r0 en2k   plain      n=256 tps= 18.39 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru2k   plain      n=256 tps= 18.31 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru2k   d4         n=256 tps= 23.58 accept= 35.5% per_round=2.41 round_ms= 144.2 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r0 ru2k   d4+mr      n=256 tps= 26.33 accept= 35.5% per_round=2.41 round_ms= 129.1 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r0 ru2k   d4+mr+cc   n=256 tps= 26.38 accept= 35.5% per_round=2.41 round_ms= 128.9 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r0 ru2k   d8+mr+cc   n=256 tps= 26.04 accept= 35.5% per_round=2.41 round_ms= 130.5 hist={0: 17, 1: 15, 2: 13, 3: 9, 4: 8, 5: 4, 6: 2, 7: 7}
+r1 code2k plain      n=256 tps= 18.24 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code2k d8+mr+cc   n=256 tps= 27.44 accept= 37.8% per_round=2.59 round_ms= 130.9 hist={0: 13, 1: 21, 2: 8, 3: 8, 4: 5, 5: 3, 6: 3, 7: 10}
+r1 code2k d4+mr+cc   n=256 tps= 29.05 accept= 39.5% per_round=2.71 round_ms= 127.2 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r1 code2k d4+mr      n=256 tps= 29.06 accept= 39.5% per_round=2.71 round_ms= 127.2 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r1 code2k d4         n=256 tps= 25.75 accept= 39.5% per_round=2.71 round_ms= 143.5 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r1 en2k   d4         n=256 tps= 27.47 accept= 41.8% per_round=2.92 round_ms= 142.8 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r1 en2k   d4+mr      n=256 tps= 30.86 accept= 41.8% per_round=2.92 round_ms= 127.1 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r1 en2k   d4+mr+cc   n=256 tps= 31.10 accept= 41.8% per_round=2.92 round_ms= 126.2 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r1 en2k   d8+mr+cc   n=256 tps= 30.73 accept= 41.8% per_round=2.92 round_ms= 127.6 hist={0: 11, 1: 17, 2: 8, 3: 4, 4: 5, 5: 5, 6: 5, 7: 10}
+r1 en2k   plain      n=256 tps= 18.75 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 ru2k   plain      n=256 tps= 18.77 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 ru2k   d8+mr+cc   n=256 tps= 27.07 accept= 35.5% per_round=2.41 round_ms= 125.6 hist={0: 17, 1: 15, 2: 13, 3: 9, 4: 8, 5: 4, 6: 2, 7: 7}
+r1 ru2k   d4+mr+cc   n=256 tps= 27.43 accept= 35.5% per_round=2.41 round_ms= 124.0 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r1 ru2k   d4+mr      n=256 tps= 27.31 accept= 35.5% per_round=2.41 round_ms= 124.5 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r1 ru2k   d4         n=256 tps= 24.57 accept= 35.5% per_round=2.41 round_ms= 138.4 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r2 code2k d4+mr      n=256 tps= 29.55 accept= 39.5% per_round=2.71 round_ms= 125.1 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r2 code2k d4+mr+cc   n=256 tps= 29.53 accept= 39.5% per_round=2.71 round_ms= 125.1 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r2 code2k d8+mr+cc   n=256 tps= 28.26 accept= 37.8% per_round=2.59 round_ms= 127.1 hist={0: 13, 1: 21, 2: 8, 3: 8, 4: 5, 5: 3, 6: 3, 7: 10}
+r2 code2k plain      n=256 tps= 18.73 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code2k d4         n=256 tps= 26.51 accept= 39.5% per_round=2.71 round_ms= 139.4 hist={0: 13, 1: 18, 2: 7, 3: 8, 4: 7, 5: 3, 6: 3, 7: 10}
+r2 en2k   d4         n=256 tps= 28.00 accept= 41.8% per_round=2.92 round_ms= 140.1 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r2 en2k   plain      n=256 tps= 18.80 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en2k   d8+mr+cc   n=256 tps= 30.94 accept= 41.8% per_round=2.92 round_ms= 126.8 hist={0: 11, 1: 17, 2: 8, 3: 4, 4: 5, 5: 5, 6: 5, 7: 10}
+r2 en2k   d4+mr+cc   n=256 tps= 31.35 accept= 41.8% per_round=2.92 round_ms= 125.1 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r2 en2k   d4+mr      n=256 tps= 31.28 accept= 41.8% per_round=2.92 round_ms= 125.4 hist={0: 10, 1: 15, 2: 11, 3: 5, 4: 5, 5: 5, 6: 5, 7: 9}
+r2 ru2k   d4+mr      n=256 tps= 27.36 accept= 35.5% per_round=2.41 round_ms= 124.3 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r2 ru2k   d4+mr+cc   n=256 tps= 27.41 accept= 35.5% per_round=2.41 round_ms= 124.0 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+r2 ru2k   d8+mr+cc   n=256 tps= 26.98 accept= 35.5% per_round=2.41 round_ms= 126.0 hist={0: 17, 1: 15, 2: 13, 3: 9, 4: 8, 5: 4, 6: 2, 7: 7}
+r2 ru2k   plain      n=256 tps= 18.79 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 ru2k   d4         n=256 tps= 24.68 accept= 35.5% per_round=2.41 round_ms= 137.8 hist={0: 19, 1: 12, 2: 15, 3: 8, 4: 7, 5: 4, 6: 3, 7: 7}
+
+== speed: median decode tok/s (median over tasks of per-task medians over rounds) ==
+plain      tps  18.75  per prompt  18.3  18.8  18.8  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 9/9
+d4         tps  25.75  per prompt  25.7  27.5  24.6  accept  39.5%  drafts/round 2.71  round  142.6 ms  == plain 9/9
+d4+mr      tps  29.55  per prompt  29.5  30.9  27.3  accept  39.5%  drafts/round 2.71  round  125.4 ms  == plain 9/9
+d4+mr+cc   tps  29.53  per prompt  29.5  31.3  27.4  accept  39.5%  drafts/round 2.71  round  125.1 ms  == plain 9/9
+d8+mr+cc   tps  28.01  per prompt  28.0  30.9  27.0  accept  37.8%  drafts/round 2.59  round  127.1 ms  == plain 9/9
+
+== paired ratio vs d4 (median over rounds x prompts; per prompt) ==
+plain      x0.709  per prompt x0.709 x0.671 x0.764
+d4         x1.000  per prompt x1.000 x1.000 x1.000
+d4+mr      x1.117  per prompt x1.129 x1.123 x1.111
+d4+mr+cc   x1.120  per prompt x1.128 x1.132 x1.116
+d8+mr+cc   x1.104  per prompt x1.066 x1.119 x1.102
+
+== identity vs plain greedy, 16 tasks ==
+t0 d4: same (n=256)
+t0 d4+mr+cc: same (n=256)
+t1 d4: same (n=256)
+t1 d4+mr+cc: same (n=256)
+t2 d4: same (n=256)
+t2 d4+mr+cc: same (n=256)
+t3 d4: diverges at 151 (n=256)
+t3 d4+mr+cc: diverges at 151 (n=256)
+t4 d4: same (n=256)
+t4 d4+mr+cc: same (n=256)
+t5 d4: same (n=256)
+t5 d4+mr+cc: same (n=256)
+t6 d4: same (n=256)
+t6 d4+mr+cc: same (n=256)
+t7 d4: same (n=256)
+t7 d4+mr+cc: same (n=256)
+t8 d4: same (n=256)
+t8 d4+mr+cc: same (n=256)
+t9 d4: same (n=256)
+t9 d4+mr+cc: same (n=256)
+t10 d4: diverges at 56 (n=256)
+t10 d4+mr+cc: diverges at 56 (n=256)
+t11 d4: diverges at 33 (n=256)
+t11 d4+mr+cc: diverges at 33 (n=256)
+t12 d4: same (n=256)
+t12 d4+mr+cc: same (n=256)
+t13 d4: same (n=256)
+t13 d4+mr+cc: same (n=256)
+t14 d4: same (n=256)
+t14 d4+mr+cc: same (n=256)
+t15 d4: diverges at 202 (n=256)
+t15 d4+mr+cc: diverges at 202 (n=256)
+d4       identical 12/16; divergence at [151, 56, 33, 202]
+d4+mr+cc identical 12/16; divergence at [151, 56, 33, 202]
+peak 20.47 GB, active 19.02 GB
+wrote $PERF_OUT/drafter/ab_greedy.json

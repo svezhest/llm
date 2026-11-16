@@ -142,6 +142,11 @@ def test_memory_formulas():
     base = 2 * s.gdn_row + (8 << 20)
     assert s._reserve(r) == int(4900 * s.kv_fp16 * 1.05) + base          # under the start: fp16
     r.max_tokens = 2000                                                   # 6000 >= 5000
-    assert s._reserve(r) == int((5000 * s.kv_fp16 + 6000 * s.kv_q) * 1.05) + base
+    # until its cache is quantized the row holds the fp16 KV of up to start +
+    # a slab tokens beside their quantized copy; after (_kvq_mark) n x q only
+    assert s._reserve(r) == int((min(6000, 5000 + worker.PREFILL_STEP) * s.kv_fp16
+                                 + 6000 * s.kv_q) * 1.05) + base
+    assert s._bytes(6000, kvq=True) == int(6000 * s.kv_q * 1.05) + base
+    assert s._bytes(20000) == int(((5000 + worker.PREFILL_STEP) * s.kv_fp16 + 20000 * s.kv_q) * 1.05) + base
     r.max_tokens = 120000                                                 # no max_tokens: capped
     assert s._reserve(r) == s._bytes(4000 + worker.RESERVE_TOKENS)

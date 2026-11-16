@@ -5,6 +5,10 @@ sibling of scripts/perf/verify_mrqmm/dflash_ab.py with per-round statistics.
 
 Variants (comma separated):
   plain          no DFlash (eng.draft = None): the plain greedy loop
+  plainnf        plain with the fused GDN in-projection off (QWEN_GDN_FUSE=0 at
+                 run time); --ident plainnf: the fusion's identity at B = 1
+                 (bit-exact claim: a width-grouped or uniform fusion == the
+                 library's four calls, 2026-11-15)
   e<cap>/<blk>   DFlash; verify blocks of <= cap tokens through mlx-vlm's exact
                  verify kernels (QWEN_VERIFY_EXACT_MAX_T), longer ones through
                  mx.quantized_matmul (e0 = always quantized_matmul)
@@ -12,6 +16,9 @@ Variants (comma separated):
                  adN = adaptive with ceiling N, N = fixed N (1 anchor + N-1 drafts)
   m<cap>/<blk>   the same with QWEN_VERIFY_MRQMM on (verify blocks through mrqmm
                  where it covers the module; needs a kernel for the model's bits)
+  ...:va         the verify attention through the one-pass kernel (QWEN_VERIFY_ATT=2,
+                 vatt.py; the worker loaded with QWEN_VERIFY_ATT=2), else the vector
+                 kernel's path (QWEN_VERIFY_ATT=1)
 
 Per request: decode tok/s (tokens after the first / time from the first to the
 last token), rounds, accepted drafts per round, ms per round.
@@ -70,13 +77,19 @@ print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() /
       f"layers {list(cfg.target_layer_ids)}; draft bits {W.DRAFT_BITS}; "
       f"verify exact max T {W.VERIFY_EXACT_MAX_T}; VERIFY_MR {W.VERIFY_MR}", flush=True)
 MR0 = (W.VERIFY_MR, W.VERIFY_MR_HEAD)
+VA0 = W._VATT
 
 
 def set_variant(v):
     """Flip the globals the scheduler reads (idle scheduler: between requests)."""
-    if v == "plain":
+    W.GDN_FUSE = v != "plainnf"
+    if v in ("plain", "plainnf"):
         eng.draft = None
         return
+    v, _, att = v.partition(":")
+    assert att in ("", "va"), att
+    assert VA0 or not att, "':va' needs QWEN_VERIFY_ATT=2 (self-test passed)"
+    W._VATT = att == "va"
     knob, blk = v.split("/")
     eng.draft = DRAFT
     W.VERIFY_MR, W.VERIFY_MR_HEAD = MR0 if knob[0] == "m" else (False, False)
@@ -151,7 +164,7 @@ if not a.skip_speed:
     run(TASKS[0], "warm", False)                           # compile / warm everything once
     for v in VS:
         set_variant(v)
-        o = run("Say OK.", f"warm-{v}", v != "plain")
+        o = run("Say OK.", f"warm-{v}", not v.startswith("plain"))
         print(f"warm {v}: n={o['n']} ok", flush=True)
     for rnd in range(a.rounds):
         for ti, text in enumerate(TASKS[:NT]):
@@ -160,7 +173,7 @@ if not a.skip_speed:
                 order = order[::-1]
             for v in order:
                 set_variant(v)
-                o = run(text, f"s{rnd}-code{ti}-{v}", v != "plain")
+                o = run(text, f"s{rnd}-code{ti}-{v}", not v.startswith("plain"))
                 o.update(variant=v, round=rnd, task=ti)
                 res["speed"].append(o)
                 print(f"r{rnd} code{ti} {v:8s} n={o['n']:3d} tps={o['tps']:6.2f} "
@@ -190,7 +203,7 @@ if not a.skip_ident:
         ref = run(text, f"i-t{ti}-plain", False)["tokens"]
         for v in a.ident.split(","):
             set_variant(v)
-            got = run(text, f"i-t{ti}-{v}", True)["tokens"]
+            got = run(text, f"i-t{ti}-{v}", not v.startswith("plain"))["tokens"]
             div = next((i for i, (x, y) in enumerate(zip(ref, got)) if x != y),
                        None if len(ref) == len(got) else min(len(ref), len(got)))
             res["ident"].append(dict(task=ti, variant=v, same=div is None, diverge=div, n=len(ref)))

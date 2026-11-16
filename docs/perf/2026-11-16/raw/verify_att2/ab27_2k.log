@@ -1,0 +1,92 @@
+loaded in 11 s; active 16.51 GB; max_batch 1; drafter DFlash2DraftModel block 8 runtime 5 window 2048 layers [5, 19, 33, 47, 61]; draft bits 4; verify exact max T 8; VERIFY_MR True
+warm plain: n=2 ok
+warm m8/8: n=2 ok
+warm m8/8:va: n=2 ok
+r0 code0 plain    n=256 tps= 19.61 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code0 m8/8     n=256 tps= 41.15 accept= 61.4% per_round=4.22 round_ms= 126.5 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+r0 code0 m8/8:va  n=256 tps= 41.90 accept= 61.4% per_round=4.22 round_ms= 124.2 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+r0 code1 m8/8:va  n=256 tps= 24.98 accept= 30.3% per_round=2.08 round_ms= 123.0 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+r0 code1 m8/8     n=256 tps= 24.98 accept= 30.3% per_round=2.08 round_ms= 123.0 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+r0 code1 plain    n=256 tps= 19.97 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2 plain    n=256 tps= 19.93 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2 m8/8     n=256 tps= 30.00 accept= 40.5% per_round=2.82 round_ms= 126.9 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+r0 code2 m8/8:va  n=256 tps= 30.53 accept= 40.5% per_round=2.82 round_ms= 124.7 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+r0 code3 m8/8:va  n=256 tps= 38.30 accept= 55.3% per_round=3.83 round_ms= 125.6 hist={0: 6, 1: 7, 2: 5, 3: 9, 4: 7, 6: 2, 7: 17}
+r0 code3 m8/8     n=256 tps= 36.57 accept= 53.0% per_round=3.65 round_ms= 126.8 hist={0: 7, 1: 9, 2: 6, 3: 8, 4: 5, 5: 1, 6: 2, 7: 17}
+r0 code3 plain    n=256 tps= 19.64 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code4 plain    n=256 tps= 19.61 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code4 m8/8     n=256 tps= 33.31 accept= 49.2% per_round=3.40 round_ms= 132.0 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+r0 code4 m8/8:va  n=256 tps= 33.40 accept= 49.2% per_round=3.40 round_ms= 131.7 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+r1 code0 plain    n=256 tps= 19.07 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code0 m8/8:va  n=256 tps= 39.29 accept= 61.4% per_round=4.22 round_ms= 132.4 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+r1 code0 m8/8     n=256 tps= 38.59 accept= 61.4% per_round=4.22 round_ms= 134.8 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+r1 code1 m8/8     n=256 tps= 22.68 accept= 30.3% per_round=2.08 round_ms= 135.5 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+r1 code1 m8/8:va  n=256 tps= 22.58 accept= 30.3% per_round=2.08 round_ms= 136.0 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+r1 code1 plain    n=256 tps= 18.35 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code2 plain    n=256 tps= 18.38 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code2 m8/8:va  n=256 tps= 27.11 accept= 40.5% per_round=2.82 round_ms= 140.4 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+r1 code2 m8/8     n=256 tps= 27.10 accept= 40.5% per_round=2.82 round_ms= 140.4 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+r1 code3 m8/8     n=256 tps= 33.03 accept= 53.0% per_round=3.65 round_ms= 140.3 hist={0: 7, 1: 9, 2: 6, 3: 8, 4: 5, 5: 1, 6: 2, 7: 17}
+r1 code3 m8/8:va  n=256 tps= 34.19 accept= 55.3% per_round=3.83 round_ms= 140.7 hist={0: 6, 1: 7, 2: 5, 3: 9, 4: 7, 6: 2, 7: 17}
+r1 code3 plain    n=256 tps= 17.96 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code4 plain    n=256 tps= 17.96 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code4 m8/8:va  n=256 tps= 30.93 accept= 49.2% per_round=3.40 round_ms= 142.1 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+r1 code4 m8/8     n=256 tps= 30.88 accept= 49.2% per_round=3.40 round_ms= 142.4 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+r2 code0 m8/8:va  n=256 tps= 36.81 accept= 61.4% per_round=4.22 round_ms= 141.4 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+r2 code0 plain    n=256 tps= 17.80 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code0 m8/8     n=256 tps= 36.65 accept= 61.4% per_round=4.22 round_ms= 142.0 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+r2 code1 m8/8     n=256 tps= 21.61 accept= 30.3% per_round=2.08 round_ms= 142.2 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+r2 code1 plain    n=256 tps= 17.78 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code1 m8/8:va  n=256 tps= 21.73 accept= 30.3% per_round=2.08 round_ms= 141.4 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+r2 code2 m8/8:va  n=256 tps= 26.74 accept= 40.5% per_round=2.82 round_ms= 142.3 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+r2 code2 plain    n=256 tps= 17.74 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code2 m8/8     n=256 tps= 26.46 accept= 40.5% per_round=2.82 round_ms= 143.8 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+r2 code3 m8/8     n=256 tps= 32.59 accept= 53.0% per_round=3.65 round_ms= 142.2 hist={0: 7, 1: 9, 2: 6, 3: 8, 4: 5, 5: 1, 6: 2, 7: 17}
+r2 code3 plain    n=256 tps= 17.63 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code3 m8/8:va  n=256 tps= 33.72 accept= 55.3% per_round=3.83 round_ms= 142.7 hist={0: 6, 1: 7, 2: 5, 3: 9, 4: 7, 6: 2, 7: 17}
+r2 code4 m8/8:va  n=256 tps= 30.52 accept= 49.2% per_round=3.40 round_ms= 144.0 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+r2 code4 plain    n=256 tps= 17.57 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code4 m8/8     n=256 tps= 30.20 accept= 49.2% per_round=3.40 round_ms= 145.6 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+
+== speed: median decode tok/s (median over tasks of per-task medians over rounds) ==
+plain    tps  18.35  per task  19.1  18.3  18.4  18.0  18.0  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 15/15
+m8/8     tps  30.88  per task  38.6  22.7  27.1  33.0  30.9  accept  49.2%  drafts/round 3.40  round  140.3 ms  == plain 12/15
+m8/8:va  tps  30.93  per task  39.3  22.6  27.1  34.2  30.9  accept  49.2%  drafts/round 3.40  round  140.4 ms  == plain 15/15
+
+== identity vs plain greedy, 16 tasks ==
+t0 m8/8: same (n=256)
+t0 m8/8:va: same (n=256)
+t1 m8/8: same (n=256)
+t1 m8/8:va: same (n=256)
+t2 m8/8: same (n=256)
+t2 m8/8:va: same (n=256)
+t3 m8/8: diverges at 151 (n=256)
+t3 m8/8:va: same (n=256)
+t4 m8/8: same (n=256)
+t4 m8/8:va: same (n=256)
+t5 m8/8: same (n=256)
+t5 m8/8:va: diverges at 43 (n=256)
+t6 m8/8: same (n=256)
+t6 m8/8:va: same (n=256)
+t7 m8/8: same (n=256)
+t7 m8/8:va: same (n=256)
+t8 m8/8: same (n=256)
+t8 m8/8:va: same (n=256)
+t9 m8/8: same (n=256)
+t9 m8/8:va: same (n=256)
+t10 m8/8: diverges at 56 (n=256)
+t10 m8/8:va: same (n=256)
+t11 m8/8: diverges at 33 (n=256)
+t11 m8/8:va: diverges at 33 (n=256)
+t12 m8/8: same (n=256)
+t12 m8/8:va: diverges at 26 (n=256)
+t13 m8/8: same (n=256)
+t13 m8/8:va: same (n=256)
+t14 m8/8: same (n=256)
+t14 m8/8:va: same (n=256)
+t15 m8/8: diverges at 202 (n=256)
+t15 m8/8:va: diverges at 202 (n=256)
+m8/8     identical 12/16; divergence at [151, 56, 33, 202]
+m8/8:va  identical 12/16; divergence at [43, 33, 26, 202]
+peak 17.97 GB, active 16.52 GB
+wrote docs/perf/2026-11-16/raw/verify_att2/ab27_2k.json

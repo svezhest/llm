@@ -17,9 +17,8 @@ import worker_pb2 as pb
 
 from . import config as cfg
 from . import sizing
-from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, DRAFT_MTP,
-                     EVENT_POLL_S, FP16,
-                     GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, MAX_BATCH, MAX_CONTEXT,
+from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, DRAFT_MTP, EVENT_POLL_S, FP16,
+                     GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, LOOKUP, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
                      PROMPT_CACHE_GB, PROMPT_CACHE_REPLY, RESERVE_TOKENS, SAMPLING_KWARGS,
                      SPLIT_SPECIAL_TOKENS, TEXT_ONLY, VERIFY_MR_HEAD, VERIFY_MRQMM)
@@ -30,14 +29,55 @@ from .sizing import _batch_budget, _batch_cap, _fixed_slab, _prefill_reserve
 from .stream import _BPEDetokenizer, _Control, _done, _eos_ids, _GenState, _Reject, _StopFilter
 from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks, JSON_MAX_WS
 from .rows import _install_rows_attention
-from .kernels import (_draft_wide, _install_fast_paths, _install_gdn_fuse, _invariant_check,
-                      _log_invariant, _probe_verify_attention, _setup_verify_mrqmm, _setup_verify_qmv,
+from .kernels import (_draft_wide, _install_drafter_compile, _install_drafter_mrqmm,
+                      _install_fast_paths, _install_gdn_fuse, _invariant_check, _log_invariant,
+                      _probe_decode_att, _probe_verify_attention, _setup_verify_mrqmm, _setup_verify_qmv,
                       _widen_drafter)
 from .mtp import load_mtp, mtp_dir
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
 from .request import _Req
 from .scheduler import _Scheduler
+
+
+def _load_drafter(model, path, bits):
+    """A DFlash drafter as the worker runs it: loaded, checked against the
+    target, its linears quantized to `bits` (0 = as loaded), fp32 activations
+    for drafters that need them (QWEN_DRAFT_FP32). -> (draft, wide). Also
+    for tools that load a second drafter next to the engine's (D2 A/B)."""
+    from mlx_vlm.speculative.drafters import load_drafter, validate_drafter_compatibility
+    draft, kind = load_drafter(path)
+    if kind != "dflash":
+        raise RuntimeError(f"unsupported drafter kind {kind!r} (only dflash)")
+    validate_drafter_compatibility(model, draft, kind)
+    wide = _draft_wide(draft)
+    if FP16 and not wide:
+        draft.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
+    if bits:
+        import mlx.nn as nn
+        nn.quantize(draft, group_size=64, bits=bits,
+                    class_predicate=lambda _p, m: isinstance(m, nn.Linear)
+                    and m.weight.shape[1] % 64 == 0)
+    if wide:
+        _widen_drafter(draft, bool(bits))
+    mx.eval(draft.parameters())
+    if cfg.DRAFT_BLOCK:
+        draft.prefer_requested_block_size = True
+    return draft, wide
+
+
+def _setup_drafter_fast(draft, wide, keep_fp32=False):
+    """QWEN_DRAFT_MRQMM / QWEN_DRAFT_COMPILE at load (after the target's
+    mrqmm install: the 4-bit self-test): mrqmm_wide on the fp32 drafter's
+    linears, the compiled DFlash2 convolution. -> what the load log says."""
+    out = []
+    if _install_drafter_compile():
+        out.append(f"conv compiled: {'on' if cfg.DRAFT_COMPILE else 'off'} (QWEN_DRAFT_COMPILE)")
+    if wide:
+        import mrqmm
+        n = _install_drafter_mrqmm(draft, keep_fp32) if mrqmm.enabled() else 0
+        out.append(f"linears on mrqmm_wide: {n} modules")
+    return "; ".join(out) or "nothing"
 
 
 def _load_model(model_path, text_only=False):
@@ -130,32 +170,17 @@ class Engine:
         if DRAFT and cfg.BATCH_INVARIANT:
             log.warning("QWEN_DRAFT ignored: QWEN_BATCH_INVARIANT=1 (the verify rounds "
                         "differently from the batch's decode)")
-        elif DRAFT and KV_KWARGS["kv_bits"] is not None:
-            # The spec loop never re-quantizes the cache and rollback trims a
-            # quantized cache wrongly; the drafter is only worth it on the 9B,
-            # which runs an fp16 cache anyway.
-            log.warning("QWEN_DRAFT ignored: speculative decoding needs QWEN_KV_BITS=0")
         elif DRAFT and mtp_dir(DRAFT):            # the target's own MTP head (mtp.py)
             self.mtp = load_mtp(DRAFT, self.model.language_model, FP16)
         elif DRAFT:
-            from mlx_vlm.speculative.drafters import load_drafter, validate_drafter_compatibility
-            draft, kind = load_drafter(DRAFT)
-            if kind != "dflash":
-                raise RuntimeError(f"unsupported drafter kind {kind!r} (only dflash)")
-            validate_drafter_compatibility(self.model, draft, kind)
-            wide = _draft_wide(draft)
-            if FP16 and not wide:
-                draft.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
-            if DRAFT_BITS:
-                import mlx.nn as nn
-                nn.quantize(draft, group_size=64, bits=DRAFT_BITS,
-                            class_predicate=lambda _p, m: isinstance(m, nn.Linear)
-                            and m.weight.shape[1] % 64 == 0)
-            if wide:
-                _widen_drafter(draft, bool(DRAFT_BITS))
-            mx.eval(draft.parameters())
-            if cfg.DRAFT_BLOCK:
-                draft.prefer_requested_block_size = True
+            # Quantized KV too (2026-11-15): _spec quantizes its cache where
+            # the plain loop does (after every prefill slab and fed token past
+            # quantized_kv_start; no block crosses the start while the cache
+            # is fp16), and a verify block's commit / abort only moves a
+            # QuantizedKVCache's offset (mlx-vlm 0.7.6: its rows are
+            # quantized per token, so trimming is exact). The verify attends
+            # the quantized KV through the library's one-query calls.
+            draft, wide = _load_drafter(self.model, DRAFT, DRAFT_BITS)
             self.draft, self.draft_wide = draft, wide
             log.info("dflash drafter loaded: %s (%s %s, %s, block %s, target layers %s)", DRAFT,
                      type(draft).__name__, f"{DRAFT_BITS}-bit" if DRAFT_BITS else
@@ -242,16 +267,24 @@ class Engine:
                  CACHE_LIMIT_GB, CLEAR_CACHE, PROMPT_CACHE)
         lm = self.model.language_model
         log.info("prefill kernels: %s", _install_fast_paths())
+        _probe_decode_att(lm)
         sizing._FIXED_SLAB = _fixed_slab()            # after the fused-SDPA probe; never changes after
-        log.info("prefill slab: %s", f"{PREFILL_STEP} at any context (fp16 KV + fused SDPA)"
-                 if sizing._FIXED_SLAB else f"{PREFILL_STEP}, shrunk to slab x offset <= {PREFILL_BUDGET}")
+        kvq = KV_KWARGS["kv_bits"] is not None
+        log.info("prefill slab: %s", (f"{PREFILL_STEP} at any context (quantized KV dequantized for "
+                                      f"the fused SDPA: QWEN_KVQ_PREFILL_FUSED)" if kvq else
+                                      f"{PREFILL_STEP} at any context (fp16 KV + fused SDPA)")
+                 if sizing._FIXED_SLAB else f"{PREFILL_STEP}, shrunk to slab x offset <= {PREFILL_BUDGET}"
+                 + (" (QWEN_KVQ_PREFILL_FUSED=1 ignored: no fused SDPA)"
+                    if kvq and cfg.KVQ_PREFILL_FUSED else ""))
         if not _install_rows_attention(lm):
             log.warning("%s is not a qwen3_5 / qwen3_5_moe model: no batching (QWEN_MAX_BATCH=1)",
                         type(lm).__module__)
             self.max_batch = 1
         import pfqmm                       # after the fp16 cast (fp16 scales only); LM only
         pfqmm.install(lm)
-        spec = self.draft is not None or self.mtp is not None
+        # a verify path: a drafter, or QWEN_LOOKUP's rounds without one
+        spec = self.draft is not None or self.mtp is not None or (LOOKUP == "1" and KV_KWARGS["kv_bits"] is None
+                                          and not cfg.BATCH_INVARIANT)
         if self.max_batch >= 3 or (spec and VERIFY_MR_HEAD):
             # after the fp16 cast (the kernel takes fp16 scales only); the
             # language model only (never the vision tower or the drafter,
@@ -276,13 +309,20 @@ class Engine:
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
         if spec and cfg.VERIFY_QMV:
             log.info("verify through mrqmv (QWEN_VERIFY_QMV=%d): %s", cfg.VERIFY_QMV, _setup_verify_qmv(lm))
+        if self.draft is not None and (cfg.DRAFT_MRQMM or cfg.DRAFT_COMPILE):
+            log.info("drafter fast paths: %s", _setup_drafter_fast(self.draft, self.draft_wide))
         if spec:
             nq = _probe_verify_attention(lm)
             log.info("DFlash verify attention (QWEN_VERIFY_ATT): %s",
-                     f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)" if nq
+                     (f"{nq} queries per call (vector kernel, bit-equal to the one-query calls)"
+                      + (f" while the cache is fp16 (its first {KV_KWARGS['quantized_kv_start']} "
+                         f"tokens); quantized KV ({KV_KWARGS['kv_bits']}-bit): the library's "
+                         "one-query quantized calls (no quantized vector kernel)"
+                         if KV_KWARGS["kv_bits"] is not None else "")) if nq
                      else "the library's one-query calls")
         cap = _batch_cap(int(mx.device_info()["max_recommended_working_set_size"]), _WIRED_GB)
-        reserve = _prefill_reserve(lm.args.num_attention_heads)
+        reserve = _prefill_reserve(lm.args.num_attention_heads, lm.args.num_key_value_heads,
+                                   lm.args.head_dim)
         budget = _batch_budget(cap, mx.get_active_memory(), reserve)   # weights (+ drafter) = active now
         self.sched = _Scheduler(self, max_batch=self.max_batch, budget=budget, cap=cap,
                                 prefill_reserve=reserve, on_fault=_exit_soon)

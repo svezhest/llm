@@ -17,7 +17,10 @@ TTFT and latency, mean decode tok/s. --worker-log joins the worker's per-request
 log line (peak memory, worker-side ttft/tps) by request id, and the prompt-cache
 HIT/MISS/store lines (QWEN_PROMPT_CACHE=1) as hit / reused / store_* per request.
 
-    uv run python scripts/bench_concurrency.py --concurrency 1,2,4,8 --out bench.json
+    uv run python scripts/bench_concurrency.py --url http://127.0.0.1:8080 --concurrency 1,2,4,8 --out bench.json
+
+The default --url is port 8090, a measurement gateway (GATEWAY_ADDR=127.0.0.1:8090) kept
+apart from the serving one; the gateway's own default is 8080, so pass --url for that.
 """
 from __future__ import annotations
 
@@ -224,7 +227,9 @@ def parse_worker_log(path: str, ids: set[str]) -> dict[str, dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--url", default="http://127.0.0.1:8090")
+    ap.add_argument("--url", default="http://127.0.0.1:8090",
+                    help="gateway base URL (default: a measurement gateway on :8090; "
+                         "the gateway's own default port is 8080)")
     ap.add_argument("--model", default=None, help="default: first id of /v1/models")
     ap.add_argument("--concurrency", default="1,2,4,8")
     ap.add_argument("--requests-per-level", type=int, default=0, help="default max(8, 2*concurrency)")

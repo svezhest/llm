@@ -1,0 +1,16 @@
+drafter fast paths (engine's): conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules
+d5: conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 47 modules 1.72 GB
+d8: conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 46 modules 2.40 GB
+sequences ready [('code0', 142), ('code1', 134), ('code2', 130), ('code3', 135), ('code4', 126), ('code2k', 2139), ('en2k', 2125), ('ru2k', 2135)]
+accept d4+mr+cc     mean 3.237 of 7 (240 probes) code0=3.87 code1=2.57 code2=3.07 code3=4.00 code4=4.30 code2k=3.37 en2k=2.77 ru2k=1.97
+accept d5+mr+cc     mean 3.208 of 7 (240 probes) code0=3.90 code1=2.53 code2=3.07 code3=3.83 code4=4.23 code2k=3.43 en2k=2.77 ru2k=1.90
+accept d8+mr+cc     mean 3.254 of 7 (240 probes) code0=3.80 code1=2.70 code2=3.10 code3=3.87 code4=4.27 code2k=3.43 en2k=2.90 ru2k=1.97
+accept d5           mean 3.212 of 7 (240 probes) code0=3.90 code1=2.53 code2=3.07 code3=3.83 code4=4.27 code2k=3.43 en2k=2.77 ru2k=1.90
+accept d8           mean 3.254 of 7 (240 probes) code0=3.80 code1=2.70 code2=3.10 code3=3.87 code4=4.27 code2k=3.43 en2k=2.90 ru2k=1.97
+block d4+mr+cc     median  17.89 ms (min 16.48, 37 blocks)
+block d5+mr+cc     median  19.42 ms (min 17.28, 37 blocks)
+block d8+mr+cc     median  19.83 ms (min 17.74, 37 blocks)
+block d5           median  34.11 ms (min 32.05, 37 blocks)
+block d8           median  34.03 ms (min 32.03, 37 blocks)
+peak 25.10 GB
+wrote $PERF_OUT/drafter/draft_fast_bits.json

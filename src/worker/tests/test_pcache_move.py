@@ -567,11 +567,13 @@ def test_dflash_thinking_reply(dense, small, monkeypatch):
 
 
 # --- when it applies -----------------------------------------------------------------
-def test_off_with_a_batch_or_quantized_kv(dense, small, monkeypatch):
-    """The switch does nothing with max_batch > 1 or a quantized KV: the
-    entry stays in the cache while its row runs."""
+def test_off_with_a_batch(dense, small, monkeypatch):
+    """The switch does nothing with max_batch > 1: the entry stays in the
+    cache while its row runs. (Quantized KV: on since 2026-11-15,
+    tests/test_kvq8.py.)"""
     monkeypatch.setattr(worker, "PROMPT_CACHE_MOVE", True)
-    for kw in (dict(max_batch=2), dict(max_batch=1, kv_bits=8, kv_start=0)):
+    assert scheduler(dense, max_batch=1, kv_bits=8).move_state().startswith("on")
+    for kw in (dict(max_batch=2), dict(max_batch=2, kv_bits=8, kv_start=0)):
         sched = scheduler(dense, **kw)
         assert not sched._move_on() and sched.move_state().startswith("off: needs ")
         ids = rk.first(200)

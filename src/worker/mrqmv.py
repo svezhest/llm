@@ -211,9 +211,10 @@ def tested(w, scales, biases, max_rows: int = MAX_ROWS) -> bool:
 
 def install(lm, max_rows: int, fused=()) -> tuple[int, int]:
     """Marks every 4-bit g64 quantized linear of `lm` whose shape passes the
-    self-test (module.__dict__["_qmv"] = True) and every fused weight set
-    `fused` hands over ((module, w, scales, biases, split, ids) -> its
-    __dict__["_qmv_fused"]). -> (modules, fused sets) marked."""
+    self-test (module.__dict__["_qmv"] = True) and the fused GDN in-projection
+    groups `fused` hands over ((module, [(member positions, w, scales, biases,
+    split), ...], ids of the four modules) -> its __dict__["_qmv_fused"]: the
+    groups that pass). -> (modules, layers with a fused group) marked."""
     global MAX_ROWS
     MAX_ROWS = max(2, min(int(max_rows), 3))   # 4+ rows spill registers (2026-11-15: x5-x15 slower)
     n = 0
@@ -228,8 +229,9 @@ def install(lm, max_rows: int, fused=()) -> tuple[int, int]:
             m.__dict__["_qmv"] = True
             n += 1
     nf = 0
-    for m, w, sc, b, split, ids in fused:
-        if shape_ok(w, sc, b) and tested(w, sc, b, MAX_ROWS):
-            m.__dict__["_qmv_fused"] = (ids, w, sc, b, split)
+    for m, groups, ids in fused:
+        ok = tuple(g for g in groups if shape_ok(*g[1:4]) and tested(*g[1:4], MAX_ROWS))
+        if ok:
+            m.__dict__["_qmv_fused"] = (ids, ok)
             nf += 1
     return n, nf

@@ -1,0 +1,96 @@
+one tiny eval + sync: 0.195 ms
+loaded; drafter DFlash2DraftModel, verify att q 5, block 8; active 15.38 GiB
+spec0   prompt 2068 reused 0 ttft 14.79s n 512 tok/s 37.72 rounds 99 accepted/round 4.171717171717172
+spec1   prompt 2068 reused 2022 ttft 0.59s n 512 tok/s 39.14 rounds 97 accepted/round 4.278350515463917
+tokens equal to the first request: [True, True]
+
+[normal] 186 rounds (medians, ms):
+  period=134.16  draft_build=0.83  draft_submit=31.13  verify_build=6.73  verify_submit=80.76  walk=13.92  commit=0.48  own=0.61  tail=0.06  bubble_lo=1.96  gpu_busy=132.43
+         1993217 function calls (1983809 primitive calls) in 1.316 seconds
+
+   Ordered by: internal time
+   List reduced from 90 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    69188    0.216    0.000    0.232    0.000 repo/src/worker/mrqmm.py:542(mrqmm)
+     9408    0.108    0.000    0.582    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:228(_gated_delta)
+     9408    0.097    0.000    0.097    0.000 mlx_vlm/models/qwen3_5/gated_delta.py:595(gated_delta_update_with_states)
+    25088    0.074    0.000    0.348    0.000 repo/src/worker/qwen_worker/kernels.py:185(_verify_linears)
+    59780    0.063    0.000    0.340    0.000 repo/src/worker/qwen_worker/kernels.py:86(_mr_rows)
+   275576    0.053    0.000    0.074    0.000 mlx/nn/layers/base.py:99(__getattr__)
+   489425    0.052    0.000    0.052    0.000 {method 'get' of 'dict' objects}
+    59780    0.050    0.000    0.277    0.000 repo/src/worker/mrqmm.py:596(__call__)
+     9408    0.042    0.000    0.042    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:220(_normalize_gated_delta_qk)
+    69188    0.042    0.000    0.048    0.000 repo/src/worker/qwen_worker/kernels.py:77(_verify_mr)
+    12544    0.035    0.000    1.245    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:294(_layer)
+    12544    0.034    0.000    0.375    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:189(_feed_forward)
+    59780    0.031    0.000    0.031    0.000 repo/src/worker/mrqmm.py:569(_use)
+    62916    0.026    0.000    0.678    0.000 repo/scripts/perf/dflash2/spec_prof.py:225(w)
+    31556    0.026    0.000    0.026    0.000 mlx/nn/layers/normalization.py:163(__call__)
+     3136    0.025    0.000    0.025    0.000 mlx_vlm/models/cache.py:508(update_and_fetch)
+     3136    0.023    0.000    0.031    0.000 repo/src/worker/qwen_worker/kernels.py:118(_block_attention)
+     3136    0.021    0.000    0.074    0.000 mlx_vlm/models/qwen3_5/language.py:900(_prepare_projected_qkv)
+     9408    0.020    0.000    0.034    0.000 mlx_vlm/models/cache.py:954(update_window)
+     9408    0.020    0.000    0.022    0.000 mlx_vlm/models/qwen3_5/language.py:54(__call__)
+     3136    0.016    0.000    0.021    0.000 mlx_vlm/models/rope_utils.py:1244(apply_rotary)
+     3136    0.015    0.000    0.219    0.000 repo/src/worker/qwen_worker/kernels.py:167(_verify_attention)
+    76632    0.015    0.000    0.036    0.000 {built-in method builtins.hasattr}
+     9408    0.015    0.000    0.145    0.000 mlx_vlm/models/cache.py:926(update_recurrent)
+      196    0.014    0.000    0.032    0.000 mlx_vlm/speculative/cache_state.py:156(start_speculative_cache)
+     9408    0.014    0.000    0.016    0.000 mlx/nn/layers/convolution.py:77(__call__)
+    25284    0.010    0.000    0.177    0.000 repo/src/worker/qwen_worker/kernels.py:92(_verify_linear)
+    50176    0.010    0.000    0.201    0.000 repo/src/worker/qwen_worker/kernels.py:199(<genexpr>)
+      196    0.009    0.000    0.009    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+      196    0.009    0.000    1.264    0.006 mlx_vlm/models/qwen3_5/speculative_verifier.py:326(_model)
+18816/9408    0.009    0.000    0.150    0.000 mlx_vlm/models/qwen3_5/gated_delta.py:382(gated_delta_update)
+     9408    0.008    0.000    0.013    0.000 mlx_vlm/models/cache.py:1030(record_speculative_window)
+     9604    0.008    0.000    0.019    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:40(_helpers)
+    50176    0.007    0.000    0.021    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:211(<genexpr>)
+     9408    0.007    0.000    0.011    0.000 mlx_vlm/models/cache.py:997(record_speculative_states)
+
+
+
+         1993217 function calls (1983809 primitive calls) in 1.316 seconds
+
+   Ordered by: cumulative time
+   List reduced from 90 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      196    0.005    0.000    1.307    0.007 mlx_vlm/models/qwen3_5/language.py:1573(__call__)
+      196    0.001    0.000    1.301    0.007 mlx_vlm/models/qwen3_5/speculative_verifier.py:29(verify)
+      196    0.001    0.000    1.268    0.006 mlx_vlm/models/qwen3_5/speculative_verifier.py:378(__call__)
+      196    0.009    0.000    1.264    0.006 mlx_vlm/models/qwen3_5/speculative_verifier.py:326(_model)
+    12544    0.035    0.000    1.245    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:294(_layer)
+    62916    0.026    0.000    0.678    0.000 repo/scripts/perf/dflash2/spec_prof.py:225(w)
+     9408    0.108    0.000    0.582    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:228(_gated_delta)
+    12544    0.034    0.000    0.375    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:189(_feed_forward)
+    25088    0.074    0.000    0.348    0.000 repo/src/worker/qwen_worker/kernels.py:185(_verify_linears)
+    59780    0.063    0.000    0.340    0.000 repo/src/worker/qwen_worker/kernels.py:86(_mr_rows)
+    59780    0.050    0.000    0.277    0.000 repo/src/worker/mrqmm.py:596(__call__)
+    69188    0.216    0.000    0.232    0.000 repo/src/worker/mrqmm.py:542(mrqmm)
+     3136    0.015    0.000    0.219    0.000 repo/src/worker/qwen_worker/kernels.py:167(_verify_attention)
+    50176    0.010    0.000    0.201    0.000 repo/src/worker/qwen_worker/kernels.py:199(<genexpr>)
+    25284    0.010    0.000    0.177    0.000 repo/src/worker/qwen_worker/kernels.py:92(_verify_linear)
+18816/9408    0.009    0.000    0.150    0.000 mlx_vlm/models/qwen3_5/gated_delta.py:382(gated_delta_update)
+     9408    0.015    0.000    0.145    0.000 mlx_vlm/models/cache.py:926(update_recurrent)
+     9408    0.007    0.000    0.113    0.000 mlx_vlm/models/qwen3_5/gated_delta.py:403(<lambda>)
+     9408    0.097    0.000    0.097    0.000 mlx_vlm/models/qwen3_5/gated_delta.py:595(gated_delta_update_with_states)
+     3136    0.021    0.000    0.074    0.000 mlx_vlm/models/qwen3_5/language.py:900(_prepare_projected_qkv)
+   275576    0.053    0.000    0.074    0.000 mlx/nn/layers/base.py:99(__getattr__)
+   489425    0.052    0.000    0.052    0.000 {method 'get' of 'dict' objects}
+    69188    0.042    0.000    0.048    0.000 repo/src/worker/qwen_worker/kernels.py:77(_verify_mr)
+     9408    0.042    0.000    0.042    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:220(_normalize_gated_delta_qk)
+    76632    0.015    0.000    0.036    0.000 {built-in method builtins.hasattr}
+     9408    0.020    0.000    0.034    0.000 mlx_vlm/models/cache.py:954(update_window)
+      196    0.014    0.000    0.032    0.000 mlx_vlm/speculative/cache_state.py:156(start_speculative_cache)
+     3136    0.023    0.000    0.031    0.000 repo/src/worker/qwen_worker/kernels.py:118(_block_attention)
+    59780    0.031    0.000    0.031    0.000 repo/src/worker/mrqmm.py:569(_use)
+    12544    0.007    0.000    0.028    0.000 {built-in method builtins.all}
+    31556    0.026    0.000    0.026    0.000 mlx/nn/layers/normalization.py:163(__call__)
+     3136    0.025    0.000    0.025    0.000 mlx_vlm/models/cache.py:508(update_and_fetch)
+     9408    0.020    0.000    0.022    0.000 mlx_vlm/models/qwen3_5/language.py:54(__call__)
+    50176    0.007    0.000    0.021    0.000 mlx_vlm/models/qwen3_5/speculative_verifier.py:211(<genexpr>)
+     3136    0.016    0.000    0.021    0.000 mlx_vlm/models/rope_utils.py:1244(apply_rotary)
+
+
+

@@ -1,0 +1,1511 @@
+{
+ "variants": "plain,plain+tk,d4+mr,d4+mr+tk",
+ "rounds": 3,
+ "thinking": false,
+ "max_tokens": 256,
+ "thinking_budget": -1,
+ "model": "weights/qwen38-27b-mlx-4bit",
+ "draft": "weights/qwen38-27b-dflash2",
+ "draft_bits": 4,
+ "verify_mr": true,
+ "draft_block": 8,
+ "speed": [
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 17.715078041990637,
+   "tps": 15.211841711167205,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 0,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 17.75656954200531,
+   "tps": 15.386786747536915,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 0,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 17.304951500002062,
+   "tps": 21.451437187856023,
+   "finish": [
+    "length"
+   ],
+   "rounds": 79,
+   "drafted": 542,
+   "accepted": 177,
+   "accept": 32.656826568265686,
+   "per_round": 2.240506329113924,
+   "round_ms": 150.4723470506282,
+   "hist": {
+    "0": 15,
+    "1": 20,
+    "2": 16,
+    "3": 7,
+    "4": 12,
+    "5": 2,
+    "6": 3,
+    "7": 4
+   },
+   "blocks": {
+    "3": 1,
+    "4": 1,
+    "6": 1,
+    "8": 76
+   },
+   "variant": "d4+mr",
+   "round": 0,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 17.077924333003466,
+   "tps": 22.34777908932971,
+   "finish": [
+    "length"
+   ],
+   "rounds": 77,
+   "drafted": 538,
+   "accepted": 179,
+   "accept": 33.27137546468401,
+   "per_round": 2.324675324675325,
+   "round_ms": 148.1886991298177,
+   "hist": {
+    "0": 23,
+    "1": 15,
+    "2": 13,
+    "3": 4,
+    "4": 3,
+    "5": 7,
+    "6": 5,
+    "7": 7
+   },
+   "blocks": {
+    "7": 1,
+    "8": 76
+   },
+   "variant": "d4+mr+tk",
+   "round": 0,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 16.16453116699995,
+   "tps": 25.254467543144667,
+   "finish": [
+    "length"
+   ],
+   "rounds": 74,
+   "drafted": 514,
+   "accepted": 181,
+   "accept": 35.21400778210117,
+   "per_round": 2.445945945945946,
+   "round_ms": 136.4489645271238,
+   "hist": {
+    "0": 10,
+    "1": 23,
+    "2": 13,
+    "3": 9,
+    "4": 5,
+    "5": 6,
+    "6": 1,
+    "7": 7
+   },
+   "blocks": {
+    "4": 1,
+    "8": 73
+   },
+   "variant": "d4+mr+tk",
+   "round": 0,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 15.437805499997921,
+   "tps": 24.231595995380918,
+   "finish": [
+    "length"
+   ],
+   "rounds": 76,
+   "drafted": 516,
+   "accepted": 180,
+   "accept": 34.883720930232556,
+   "per_round": 2.3684210526315788,
+   "round_ms": 138.46645340795237,
+   "hist": {
+    "0": 19,
+    "1": 14,
+    "2": 14,
+    "3": 8,
+    "4": 8,
+    "5": 4,
+    "6": 1,
+    "7": 8
+   },
+   "blocks": {
+    "2": 1,
+    "4": 1,
+    "5": 1,
+    "6": 1,
+    "7": 1,
+    "8": 71
+   },
+   "variant": "d4+mr",
+   "round": 0,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 15.473768207986723,
+   "tps": 17.452338333354987,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 0,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 15.549954250003793,
+   "tps": 17.388772031476847,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 0,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 15.499554291993263,
+   "tps": 17.495421146061307,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 0,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 15.425376207989757,
+   "tps": 17.646774938810896,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 0,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 15.320676292001735,
+   "tps": 23.69847757845465,
+   "finish": [
+    "length"
+   ],
+   "rounds": 79,
+   "drafted": 544,
+   "accepted": 177,
+   "accept": 32.536764705882355,
+   "per_round": 2.240506329113924,
+   "round_ms": 136.20487183532853,
+   "hist": {
+    "0": 23,
+    "1": 11,
+    "2": 16,
+    "3": 12,
+    "4": 2,
+    "5": 6,
+    "6": 3,
+    "7": 6
+   },
+   "blocks": {
+    "3": 1,
+    "5": 1,
+    "7": 1,
+    "8": 76
+   },
+   "variant": "d4+mr",
+   "round": 0,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 15.242004916988662,
+   "tps": 24.002364186541474,
+   "finish": [
+    "length"
+   ],
+   "rounds": 79,
+   "drafted": 548,
+   "accepted": 177,
+   "accept": 32.2992700729927,
+   "per_round": 2.240506329113924,
+   "round_ms": 134.48042351910195,
+   "hist": {
+    "0": 20,
+    "1": 17,
+    "2": 11,
+    "3": 12,
+    "4": 8,
+    "5": 3,
+    "6": 1,
+    "7": 7
+   },
+   "blocks": {
+    "4": 1,
+    "7": 1,
+    "8": 77
+   },
+   "variant": "d4+mr+tk",
+   "round": 0,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.6077233749965671,
+   "tps": 18.456426726842583,
+   "finish": [
+    "length"
+   ],
+   "rounds": 112,
+   "drafted": 764,
+   "accepted": 143,
+   "accept": 18.717277486910994,
+   "per_round": 1.2767857142857142,
+   "round_ms": 123.36004948208158,
+   "hist": {
+    "0": 30,
+    "1": 45,
+    "2": 19,
+    "3": 14,
+    "4": 2,
+    "5": 2
+   },
+   "blocks": {
+    "2": 1,
+    "3": 1,
+    "4": 1,
+    "5": 1,
+    "6": 1,
+    "8": 107
+   },
+   "variant": "d4+mr+tk",
+   "round": 0,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.6203282079950441,
+   "tps": 20.106953550752277,
+   "finish": [
+    "length"
+   ],
+   "rounds": 102,
+   "drafted": 701,
+   "accepted": 153,
+   "accept": 21.82596291012839,
+   "per_round": 1.5,
+   "round_ms": 124.33509599998384,
+   "hist": {
+    "0": 33,
+    "1": 26,
+    "2": 23,
+    "3": 9,
+    "4": 6,
+    "5": 1,
+    "6": 3,
+    "7": 1
+   },
+   "blocks": {
+    "2": 1,
+    "4": 1,
+    "5": 1,
+    "8": 99
+   },
+   "variant": "d4+mr",
+   "round": 0,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.6626374589977786,
+   "tps": 18.40689906786724,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 0,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.7736795840028208,
+   "tps": 18.412723527402974,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 0,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.7853909169934923,
+   "tps": 18.363615024528826,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 0,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.7824354999902425,
+   "tps": 18.59127991005592,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 0,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.7423247499973513,
+   "tps": 13.23954457265204,
+   "finish": [
+    "length"
+   ],
+   "rounds": 155,
+   "drafted": 1075,
+   "accepted": 100,
+   "accept": 9.30232558139535,
+   "per_round": 0.6451612903225806,
+   "round_ms": 124.2611693547881,
+   "hist": {
+    "0": 88,
+    "1": 44,
+    "2": 17,
+    "3": 3,
+    "4": 2,
+    "5": 1
+   },
+   "blocks": {
+    "3": 1,
+    "4": 1,
+    "7": 1,
+    "8": 152
+   },
+   "variant": "d4+mr",
+   "round": 0,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.612819333007792,
+   "tps": 12.894016873827404,
+   "finish": [
+    "length"
+   ],
+   "rounds": 161,
+   "drafted": 1111,
+   "accepted": 94,
+   "accept": 8.46084608460846,
+   "per_round": 0.5838509316770186,
+   "round_ms": 122.83611439131576,
+   "hist": {
+    "0": 91,
+    "1": 49,
+    "2": 19,
+    "3": 1,
+    "4": 1
+   },
+   "blocks": {
+    "2": 1,
+    "3": 1,
+    "4": 1,
+    "7": 1,
+    "8": 157
+   },
+   "variant": "d4+mr+tk",
+   "round": 0,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.93999454099685,
+   "tps": 17.68265117479294,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 1,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 15.035082250004052,
+   "tps": 27.570368693204678,
+   "finish": [
+    "length"
+   ],
+   "rounds": 70,
+   "drafted": 477,
+   "accepted": 186,
+   "accept": 38.9937106918239,
+   "per_round": 2.657142857142857,
+   "round_ms": 132.1294315427492,
+   "hist": {
+    "0": 8,
+    "1": 20,
+    "2": 11,
+    "3": 10,
+    "4": 4,
+    "5": 10,
+    "6": 1,
+    "7": 6
+   },
+   "blocks": {
+    "2": 1,
+    "4": 1,
+    "5": 1,
+    "8": 67
+   },
+   "variant": "d4+mr+tk",
+   "round": 1,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.889577416994143,
+   "tps": 23.84975793473263,
+   "finish": [
+    "length"
+   ],
+   "rounds": 80,
+   "drafted": 560,
+   "accepted": 175,
+   "accept": 31.25,
+   "per_round": 2.1875,
+   "round_ms": 133.64915521251532,
+   "hist": {
+    "0": 24,
+    "1": 20,
+    "2": 11,
+    "3": 3,
+    "4": 4,
+    "5": 6,
+    "6": 6,
+    "7": 6
+   },
+   "blocks": {
+    "8": 80
+   },
+   "variant": "d4+mr",
+   "round": 1,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.895218791003572,
+   "tps": 18.031294211826047,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 1,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.8145977499953,
+   "tps": 18.17438444779097,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 1,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.756417583004804,
+   "tps": 25.61591446698401,
+   "finish": [
+    "length"
+   ],
+   "rounds": 74,
+   "drafted": 508,
+   "accepted": 182,
+   "accept": 35.826771653543304,
+   "per_round": 2.4594594594594597,
+   "round_ms": 134.5236357026167,
+   "hist": {
+    "0": 16,
+    "1": 21,
+    "2": 9,
+    "3": 6,
+    "4": 5,
+    "5": 6,
+    "6": 2,
+    "7": 9
+   },
+   "blocks": {
+    "3": 1,
+    "4": 1,
+    "7": 1,
+    "8": 71
+   },
+   "variant": "d4+mr",
+   "round": 1,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.595490916995914,
+   "tps": 28.944408765348452,
+   "finish": [
+    "length"
+   ],
+   "rounds": 68,
+   "drafted": 472,
+   "accepted": 188,
+   "accept": 39.83050847457627,
+   "per_round": 2.764705882352941,
+   "round_ms": 129.55870097057948,
+   "hist": {
+    "0": 15,
+    "1": 12,
+    "2": 11,
+    "3": 6,
+    "4": 8,
+    "5": 3,
+    "6": 2,
+    "7": 11
+   },
+   "blocks": {
+    "4": 1,
+    "8": 67
+   },
+   "variant": "d4+mr+tk",
+   "round": 1,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.589080291989376,
+   "tps": 18.21312218848887,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 1,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.5744130420062,
+   "tps": 18.33383657019004,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 1,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.775319291002234,
+   "tps": 20.076846623143922,
+   "finish": [
+    "length"
+   ],
+   "rounds": 100,
+   "drafted": 690,
+   "accepted": 155,
+   "accept": 22.463768115942027,
+   "per_round": 1.55,
+   "round_ms": 127.01197791990126,
+   "hist": {
+    "0": 38,
+    "1": 16,
+    "2": 24,
+    "3": 9,
+    "4": 6,
+    "5": 4,
+    "6": 1,
+    "7": 2
+   },
+   "blocks": {
+    "2": 1,
+    "5": 1,
+    "7": 1,
+    "8": 97
+   },
+   "variant": "d4+mr+tk",
+   "round": 1,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.487943624990294,
+   "tps": 24.915388337827633,
+   "finish": [
+    "length"
+   ],
+   "rounds": 79,
+   "drafted": 545,
+   "accepted": 177,
+   "accept": 32.477064220183486,
+   "per_round": 2.240506329113924,
+   "round_ms": 129.55238977211374,
+   "hist": {
+    "0": 23,
+    "1": 15,
+    "2": 13,
+    "3": 8,
+    "4": 4,
+    "5": 8,
+    "7": 8
+   },
+   "blocks": {
+    "2": 1,
+    "6": 1,
+    "8": 77
+   },
+   "variant": "d4+mr",
+   "round": 1,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.52768233299139,
+   "tps": 18.418870190293205,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 1,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.7582488329935586,
+   "tps": 18.925882446324675,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 1,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.7168842079991009,
+   "tps": 18.823392545953205,
+   "finish": [
+    "length"
+   ],
+   "rounds": 112,
+   "drafted": 771,
+   "accepted": 144,
+   "accept": 18.67704280155642,
+   "per_round": 1.2857142857142858,
+   "round_ms": 120.95512053565471,
+   "hist": {
+    "0": 35,
+    "1": 44,
+    "2": 12,
+    "3": 11,
+    "4": 7,
+    "5": 3
+   },
+   "blocks": {
+    "2": 1,
+    "4": 1,
+    "5": 1,
+    "8": 109
+   },
+   "variant": "d4+mr",
+   "round": 1,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.6008877499989467,
+   "tps": 18.21540650433532,
+   "finish": [
+    "length"
+   ],
+   "rounds": 117,
+   "drafted": 802,
+   "accepted": 139,
+   "accept": 17.331670822942645,
+   "per_round": 1.188034188034188,
+   "round_ms": 119.65075711971924,
+   "hist": {
+    "0": 42,
+    "1": 34,
+    "2": 27,
+    "3": 7,
+    "4": 5,
+    "5": 2
+   },
+   "blocks": {
+    "2": 1,
+    "3": 1,
+    "5": 1,
+    "6": 1,
+    "7": 1,
+    "8": 112
+   },
+   "variant": "d4+mr+tk",
+   "round": 1,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.6341628750087693,
+   "tps": 18.71338900878552,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 1,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.7580209169973386,
+   "tps": 18.78874655239501,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 1,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.7240067499951692,
+   "tps": 13.07141420180295,
+   "finish": [
+    "length"
+   ],
+   "rounds": 163,
+   "drafted": 1131,
+   "accepted": 92,
+   "accept": 8.134394341290893,
+   "per_round": 0.5644171779141104,
+   "round_ms": 119.68232004294755,
+   "hist": {
+    "0": 99,
+    "1": 43,
+    "2": 16,
+    "3": 3,
+    "4": 2
+   },
+   "blocks": {
+    "2": 1,
+    "4": 1,
+    "8": 161
+   },
+   "variant": "d4+mr+tk",
+   "round": 1,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.6042785409954377,
+   "tps": 12.954561678057239,
+   "finish": [
+    "length"
+   ],
+   "rounds": 161,
+   "drafted": 1123,
+   "accepted": 94,
+   "accept": 8.370436331255565,
+   "per_round": 0.5838509316770186,
+   "round_ms": 122.2620240683083,
+   "hist": {
+    "0": 102,
+    "1": 36,
+    "2": 13,
+    "3": 8,
+    "4": 2
+   },
+   "blocks": {
+    "5": 1,
+    "7": 1,
+    "8": 159
+   },
+   "variant": "d4+mr",
+   "round": 1,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.643025375000434,
+   "tps": 18.721751320718813,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 1,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.682398459000979,
+   "tps": 28.429116554927592,
+   "finish": [
+    "length"
+   ],
+   "rounds": 68,
+   "drafted": 469,
+   "accepted": 188,
+   "accept": 40.085287846481876,
+   "per_round": 2.764705882352941,
+   "round_ms": 131.907018382181,
+   "hist": {
+    "0": 9,
+    "1": 14,
+    "2": 13,
+    "3": 13,
+    "4": 3,
+    "5": 7,
+    "6": 1,
+    "7": 8
+   },
+   "blocks": {
+    "4": 1,
+    "5": 1,
+    "8": 66
+   },
+   "variant": "d4+mr",
+   "round": 2,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.683813458002987,
+   "tps": 25.317652665044445,
+   "finish": [
+    "length"
+   ],
+   "rounds": 77,
+   "drafted": 539,
+   "accepted": 179,
+   "accept": 33.20964749536178,
+   "per_round": 2.324675324675325,
+   "round_ms": 130.80550379224889,
+   "hist": {
+    "0": 21,
+    "1": 19,
+    "2": 12,
+    "3": 3,
+    "4": 5,
+    "5": 3,
+    "6": 6,
+    "7": 8
+   },
+   "blocks": {
+    "8": 77
+   },
+   "variant": "d4+mr+tk",
+   "round": 2,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.820691125001758,
+   "tps": 17.926297504091167,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 2,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2043,
+   "ttft": 14.8440724999964,
+   "tps": 18.15799888915655,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 2,
+   "task": 0,
+   "prompt_name": "code2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.764722958003404,
+   "tps": 18.216472124222914,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 2,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.722489417006727,
+   "tps": 18.129497240020754,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 2,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.675651875004405,
+   "tps": 28.855447405623384,
+   "finish": [
+    "length"
+   ],
+   "rounds": 68,
+   "drafted": 475,
+   "accepted": 188,
+   "accept": 39.578947368421055,
+   "per_round": 2.764705882352941,
+   "round_ms": 129.95813051469776,
+   "hist": {
+    "0": 12,
+    "1": 16,
+    "2": 8,
+    "3": 6,
+    "4": 10,
+    "5": 3,
+    "6": 8,
+    "7": 5
+   },
+   "blocks": {
+    "7": 1,
+    "8": 67
+   },
+   "variant": "d4+mr+tk",
+   "round": 2,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2029,
+   "ttft": 14.598296665993985,
+   "tps": 30.773616433804523,
+   "finish": [
+    "length"
+   ],
+   "rounds": 63,
+   "drafted": 441,
+   "accepted": 192,
+   "accept": 43.53741496598639,
+   "per_round": 3.0476190476190474,
+   "round_ms": 131.52887169844544,
+   "hist": {
+    "0": 9,
+    "1": 11,
+    "2": 13,
+    "3": 6,
+    "4": 7,
+    "5": 3,
+    "6": 4,
+    "7": 10
+   },
+   "blocks": {
+    "8": 63
+   },
+   "variant": "d4+mr",
+   "round": 2,
+   "task": 1,
+   "prompt_name": "en2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.545830124989152,
+   "tps": 23.11650992441167,
+   "finish": [
+    "length"
+   ],
+   "rounds": 85,
+   "drafted": 588,
+   "accepted": 171,
+   "accept": 29.081632653061224,
+   "per_round": 2.011764705882353,
+   "round_ms": 129.777375988402,
+   "hist": {
+    "0": 21,
+    "1": 22,
+    "2": 17,
+    "3": 7,
+    "4": 4,
+    "5": 9,
+    "6": 2,
+    "7": 3
+   },
+   "blocks": {
+    "2": 1,
+    "7": 1,
+    "8": 83
+   },
+   "variant": "d4+mr",
+   "round": 2,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.528561541999807,
+   "tps": 27.625813983102045,
+   "finish": [
+    "length"
+   ],
+   "rounds": 72,
+   "drafted": 499,
+   "accepted": 183,
+   "accept": 36.673346693386776,
+   "per_round": 2.5416666666666665,
+   "round_ms": 128.20135069442688,
+   "hist": {
+    "0": 18,
+    "1": 16,
+    "2": 6,
+    "3": 9,
+    "4": 6,
+    "5": 6,
+    "6": 3,
+    "7": 8
+   },
+   "blocks": {
+    "3": 1,
+    "8": 71
+   },
+   "variant": "d4+mr+tk",
+   "round": 2,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.525174041991704,
+   "tps": 18.31844208618233,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 2,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 2039,
+   "ttft": 14.527348375006113,
+   "tps": 18.4762978178167,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 2,
+   "task": 2,
+   "prompt_name": "ru2k"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.7557354999880772,
+   "tps": 19.155858951390794,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 2,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.7575479170045583,
+   "tps": 19.034802162818938,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 2,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.709205833991291,
+   "tps": 19.25863203718355,
+   "finish": [
+    "length"
+   ],
+   "rounds": 112,
+   "drafted": 776,
+   "accepted": 144,
+   "accept": 18.556701030927837,
+   "per_round": 1.2857142857142858,
+   "round_ms": 118.22156993756445,
+   "hist": {
+    "0": 36,
+    "1": 38,
+    "2": 19,
+    "3": 12,
+    "4": 3,
+    "5": 4
+   },
+   "blocks": {
+    "3": 1,
+    "5": 1,
+    "8": 110
+   },
+   "variant": "d4+mr+tk",
+   "round": 2,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 43,
+   "ttft": 0.5923239999974612,
+   "tps": 19.549884606808412,
+   "finish": [
+    "length"
+   ],
+   "rounds": 107,
+   "drafted": 739,
+   "accepted": 148,
+   "accept": 20.027063599458728,
+   "per_round": 1.3831775700934579,
+   "round_ms": 121.90238551400432,
+   "hist": {
+    "0": 36,
+    "1": 32,
+    "2": 22,
+    "3": 9,
+    "4": 2,
+    "5": 2,
+    "6": 1,
+    "7": 3
+   },
+   "blocks": {
+    "2": 1,
+    "5": 1,
+    "7": 1,
+    "8": 104
+   },
+   "variant": "d4+mr",
+   "round": 2,
+   "task": 3,
+   "prompt_name": "en_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.5917948340065777,
+   "tps": 12.868741459659528,
+   "finish": [
+    "length"
+   ],
+   "rounds": 161,
+   "drafted": 1111,
+   "accepted": 95,
+   "accept": 8.550855085508552,
+   "per_round": 0.5900621118012422,
+   "round_ms": 123.07737603106085,
+   "hist": {
+    "0": 106,
+    "1": 31,
+    "2": 12,
+    "3": 8,
+    "4": 4
+   },
+   "blocks": {
+    "2": 1,
+    "3": 1,
+    "4": 1,
+    "7": 1,
+    "8": 157
+   },
+   "variant": "d4+mr",
+   "round": 2,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.6012852499989094,
+   "tps": 13.605169843368081,
+   "finish": [
+    "length"
+   ],
+   "rounds": 153,
+   "drafted": 1053,
+   "accepted": 102,
+   "accept": 9.686609686609687,
+   "per_round": 0.6666666666666666,
+   "round_ms": 122.50245207185657,
+   "hist": {
+    "0": 84,
+    "1": 41,
+    "2": 23,
+    "3": 5
+   },
+   "blocks": {
+    "2": 1,
+    "3": 1,
+    "4": 1,
+    "6": 1,
+    "7": 1,
+    "8": 148
+   },
+   "variant": "d4+mr+tk",
+   "round": 2,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.6450863330101129,
+   "tps": 18.33851935874712,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain",
+   "round": 2,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  },
+  {
+   "n": 256,
+   "prompt": 52,
+   "ttft": 0.7754415829986101,
+   "tps": 18.54059758309531,
+   "finish": [
+    "length"
+   ],
+   "variant": "plain+tk",
+   "round": 2,
+   "task": 4,
+   "prompt_name": "ru_prose"
+  }
+ ],
+ "ident": [],
+ "prompts": [
+  "code2k",
+  "en2k",
+  "ru2k",
+  "en_prose",
+  "ru_prose"
+ ],
+ "speed_summary": {
+  "plain": {
+   "tps": 18.31844208618233,
+   "per_task": [
+    17.68265117479294,
+    18.129497240020754,
+    18.31844208618233,
+    18.71338900878552,
+    18.363615024528826
+   ],
+   "accept": null,
+   "per_round": null,
+   "round_ms": null,
+   "same_as_plain": "15/15",
+   "ratio": 0.9914563115841232,
+   "ratio_per_prompt": [
+    0.9872397070580422,
+    0.9963577200565352,
+    0.9914563115841232,
+    0.9936804301556487,
+    0.9891007707037212
+   ]
+  },
+  "plain+tk": {
+   "tps": 18.418870190293205,
+   "per_task": [
+    18.031294211826047,
+    18.17438444779097,
+    18.418870190293205,
+    18.925882446324675,
+    18.59127991005592
+   ],
+   "accept": null,
+   "per_round": null,
+   "round_ms": null,
+   "same_as_plain": "0/15",
+   "ratio": 1.0,
+   "ratio_per_prompt": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  "d4+mr": {
+   "tps": 23.69847757845465,
+   "per_task": [
+    23.84975793473263,
+    25.61591446698401,
+    23.69847757845465,
+    19.549884606808412,
+    12.954561678057239
+   ],
+   "accept": 31.25,
+   "per_round": 2.1875,
+   "round_ms": 129.777375988402,
+   "same_as_plain": "0/15",
+   "ratio": 1.322686971581356,
+   "ratio_per_prompt": [
+    1.3941466493184436,
+    1.4094515575242785,
+    1.3429353329788394,
+    1.0205694590055963,
+    0.6940845030471301
+   ]
+  },
+  "d4+mr+tk": {
+   "tps": 24.002364186541474,
+   "per_task": [
+    25.317652665044445,
+    28.855447405623384,
+    24.002364186541474,
+    18.456426726842583,
+    13.07141420180295
+   ],
+   "accept": 32.2992700729927,
+   "per_round": 2.240506329113924,
+   "round_ms": 128.20135069442688,
+   "same_as_plain": "0/15",
+   "ratio": 1.360155851126803,
+   "ratio_per_prompt": [
+    1.4524006510265761,
+    1.5840304977193442,
+    1.360155851126803,
+    1.0026907117159023,
+    0.698193987190568
+   ]
+  }
+ },
+ "peak_gb": 16.783624637,
+ "active_gb": 16.439727283
+}

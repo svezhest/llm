@@ -57,7 +57,8 @@ the same rows (2.3e-4..1.4e-3) and 4-6x below a solo qmv row's (0.9-1.4e-3);
 rows are NOT bit-equal to a solo qmv row (15-23 % of the elements are), but a
 row's bits are the same at every row count 3..16 and whatever sits beside it
 (KS 8 in both buckets, _config).
-4 bits (QWEN_MRQMM4=1, default 0 until a GPU gate; the lmstudio-community
+4 bits (QWEN_MRQMM4=1, default 0: gated on the 27B 2026-11-15, numerics in class but
+DFlash identity 12/16 at near-ties, the 35B's shared expert ungated; the lmstudio-community
 4-bit 27B, every linear 4-bit g64): the weight side _WSIDE[4] (a 64-group is
 8 aligned words; a thread's 16 weights are 2 of them, regrouped once per group
 into 16-bit lanes, so step st is one shift and one mask), dispatched exactly
@@ -73,6 +74,16 @@ error) leaves every 4-bit call on quantized_matmul, logged. Random 4-bit
 weights of the 27B's shapes (2026-11-10): 76 ms at 8 rows, x1.64 of their
 own solo row (46.5 ms) -- the kernel is MMA-bound there like the 5-bit one,
 so a 4-bit build gains its smaller weights only (solo row / plain decode).
+6 bits (QWEN_MRQMM6=1, default 0 until a GPU gate; mixed-precision builds:
+oQ4e's lm_head 248320 x 5120 and its last layer's k/v): the weight side
+_WSIDE[6] (a thread's 16 weights are 3 aligned words of the 12-word group,
+regrouped once per group into 4 words of 16-bit lanes; step st is one shift
+and one mask), same config, dispatch and load self-test as 4 bits. Without
+it a DFlash verify block streams a 6-bit lm_head once per token (mlx-vlm's
+exact verify kernels take 4 / 5 / 8 bits only; 6 falls to per-token qmv) and
+the drafter's head runs quantized_matmul's qmm. Chosen over re-quantizing the
+head to 8 bits at load: no memory, no second rounding, and the solo-row
+decode (which shares the head) reads 6 bits, not 8.
 
 Batch-invariant mode (set_invariant, the worker's QWEN_BATCH_INVARIANT=1): row m
 of the output is then the same bits whatever the number of rows (1..16) and
@@ -119,24 +130,26 @@ MIN_N = 512
 BITS = 8
 GROUP = 64
 # Bit widths the kernel exists for. 8 is always dispatched; 5 (the 27B 5-bit)
-# only with QWEN_MRQMM5=1 and 4 (the 27B 4-bit) only with QWEN_MRQMM4=1
+# only with QWEN_MRQMM5=1, 4 (the 27B 4-bit) only with QWEN_MRQMM4=1 and 6
+# (oQ4e's lm_head / k/v) only with QWEN_MRQMM6=1
 # (default 0 both: every such call stays on quantized_matmul, the worker is
 # unchanged bit for bit), never in batch-invariant mode (its guarantee is gated
-# on the 8-bit kernel only: 5- / 4-bit modules stay "uncovered" there,
+# on the 8-bit kernel only: 5- / 4- / 6-bit modules stay "uncovered" there,
 # max_batch 2 as before). One knob per width: each width's kernel is gated on
 # its own, and a model mixing widths (the 35B: 4-bit shared expert) takes only
 # the widths asked for.
-KERNEL_BITS = (8, 5, 4)
-KNOBS = {5: "QWEN_MRQMM5", 4: "QWEN_MRQMM4"}
+KERNEL_BITS = (8, 5, 4, 6)
+KNOBS = {5: "QWEN_MRQMM5", 4: "QWEN_MRQMM4", 6: "QWEN_MRQMM6"}
 # Widths self-tested on the GPU before their first dispatch (`_selftest`): 4
-# (new, no GPU gate yet). 5 is not (gated by tests/test_mrqmm.py and the
+# and 6 (new, no GPU gate yet). 5 is not (gated by tests/test_mrqmm.py and the
 # 2026-11-10 runs; adding it here would change its load, not its numbers).
-SELFTEST_BITS = (4,)
+SELFTEST_BITS = (4, 6)
 _TESTED = {}                  # bits -> (passed, detail): once per process
 
 
 def knob(bits: int) -> bool:
-    """QWEN_MRQMM5 / QWEN_MRQMM4 for 5 / 4 bits (read at every call: tests set them)."""
+    """QWEN_MRQMM5 / QWEN_MRQMM4 / QWEN_MRQMM6 for 5 / 4 / 6 bits (read at
+    every call: tests set them)."""
     return bits in KNOBS and os.environ.get(KNOBS[bits], "0") == "1"
 
 
@@ -146,6 +159,10 @@ def bits5() -> bool:
 
 def bits4() -> bool:
     return knob(4)
+
+
+def bits6() -> bool:
+    return knob(6)
 
 
 def _bits_on(bits: int) -> bool:
@@ -338,6 +355,38 @@ _WSIDE = {
           // -> half2 (0x6400 | q) - 1024 = q, exact
           const uint q = (wq[i][st / 4] >> uint(4 * (st % 4))) & 0x000f000fu;
 """),
+    # 6 bits (oQ4e's lm_head and last k/v): a 64-group is 48 bytes = 12 words,
+    # weight k at bit 6k, LSB first across bytes (MLX: 4 values per 3 bytes,
+    # kernels/quantized.h `dequantize`). The thread's 16 weights k in
+    # [8fn, 8fn + 16) are bits [48fn, 48fn + 96): 3 ALIGNED words from word
+    # 3 * (fn / 2) (fn is even). Regrouped once per group into 4 words of two
+    # 16-bit lanes, word j holding weights 2j, 2j + 1 (bits [12j, 12j + 12)) of
+    # the low (weights 0..7) / high (8..15) 48-bit half: step st is one shift
+    # (0 or 6) and one mask. Bits 12..15 of a lane are left unmasked: after the
+    # shift they land in bits 6..9 of the lane, cleared by the step's mask.
+    6: dict(
+        WDECL="""    // weights (6-bit): thread reads words [3*(fn/2), +3) of each 12-word group of row n0+8i+fm
+    const device uint* wp[NA];
+""",
+        WPTR="""      wp[i] = (const device uint*)w + size_t(r) * (K / 64 * 12) + 3 * (fn / 2);
+""",
+        WQDECL="""      uint4 wq[NA];
+""",
+        WLOAD="""        {
+          const device uint* p = wp[i] + 12 * g;
+          const uint a0 = p[0], a1 = p[1], a2 = p[2];
+          // low half: bits 0..47 = a0 | a1[0:16]; high half: bits 48..95 = a1[16:32] | a2
+          const uint h0 = (a1 >> 16) | (a2 << 16), h1 = a2 >> 16;
+          wq[i] = uint4(insert_bits(a0, h0, 16u, 16u),
+                        insert_bits(a0 >> 12, h0 >> 12, 16u, 16u),
+                        insert_bits((a0 >> 24) | (a1 << 8), (h0 >> 24) | (h1 << 8), 16u, 16u),
+                        insert_bits(a1 >> 4, h1 >> 4, 16u, 16u));
+        }
+""",
+        WSTEP="""          // A elements (k = 8fn + st, 8fn + 8 + st): bits [6*(st%2), +6) of both lanes of word st/2
+          // -> half2 (0x6400 | q) - 1024 = q, exact
+          const uint q = (wq[i][st / 2] >> uint(6 * (st % 2))) & 0x003f003fu;
+"""),
 }
 
 
@@ -352,6 +401,23 @@ def _src(bits: int) -> str:
 
 _SRC = _src(BITS)             # the 8-bit kernel's source
 
+# The wide variant (mrqmm_wide, the fp32 DFlash2 drafter: QWEN_DRAFT_MRQMM):
+# the same kernel, fp32 output scaled per row on the way out (y = acc *
+# rs[m]); fp16 x is the caller's row-prescaled input (power-of-two scale, so
+# the un-scale is exact).
+_STORE = ("if (m < M0) y[size_t(m) * N + n] = T(acc[i][mb].x);",
+          "if (m + 1 < M0) y[size_t(m + 1) * N + n] = T(acc[i][mb].y);")
+_STORE_WIDE = ("if (m < M0) y[size_t(m) * N + n] = acc[i][mb].x * rs[m];",
+               "if (m + 1 < M0) y[size_t(m + 1) * N + n] = acc[i][mb].y * rs[m + 1];")
+
+
+def _src_wide(bits: int) -> str:
+    s = _src(bits)
+    for a, b in zip(_STORE, _STORE_WIDE):
+        assert s.count(a) == 1, a
+        s = s.replace(a, b)
+    return s
+
 
 # Batch-invariant mode (set_invariant): one K split for every row count, 1..16
 # rows and any N take the kernel. Off = the speed rules above, bit for bit.
@@ -359,7 +425,7 @@ INVARIANT = False
 INVARIANT_KS = 8
 INVARIANT_NA16 = 2            # NA at 9..16 rows (placement only: free to retune)
 
-_KERNELS = {}                 # (K, N, MB, NA, KS, bits) -> compiled metal_kernel
+_KERNELS = {}                 # (K, N, MB, NA, KS, bits[, "wide"]) -> compiled metal_kernel
 _CALLS = {}                   # (x.shape, x.dtype, w.shape, cfg) -> (kernel, kwargs, m0 array)
 _LOCK = threading.Lock()      # cache misses only (warm-up at load vs the scheduler thread)
 
@@ -369,7 +435,7 @@ def _config(K: int, N: int, MB: int, bits: int = BITS) -> tuple[int, int]:
     simdgroups splitting K, per row bucket. Measured on M1 Max (results/mrqmm.md):
     8 rows -> 2 x 8, 16 rows -> 4 x 4 (more MMAs per x fragment); a narrow
     layer keeps NA 2 so that it still spreads over enough simdgroups.
-    5 / 4 bits (27B shapes, 2026-11-10): 8 rows -> 4 x 8 (4-11 % under 2 x 8;
+    5 / 4 / 6 bits (27B shapes, 2026-11-10; 6 not swept yet): 8 rows -> 4 x 8 (4-11 % under 2 x 8;
     the kernel is MMA-bound there, ~4.7 TFLOPS), 16 rows -> 2 x 8 (within 1 %
     of 4 x 4), so KS is 8 in both buckets and a row's bits are the same at
     every row count 3..16. 2 x 16 at 8 rows is another 6-7 % faster for
@@ -391,28 +457,31 @@ def _config(K: int, N: int, MB: int, bits: int = BITS) -> tuple[int, int]:
     return na, ks
 
 
-def _get_kernel(K, N, MB, na, ks, bits=BITS):
+def _get_kernel(K, N, MB, na, ks, bits=BITS, wide=False):
     """One metal_kernel per shape/config with the constants baked into the
     source: template arguments cost ~6 us of host time per call (mlx 0.31),
-    a plain call ~1.5 us."""
-    key = (K, N, MB, na, ks, bits)
+    a plain call ~1.5 us. wide: the fp32-output variant (_src_wide)."""
+    key = (K, N, MB, na, ks, bits) + (("wide",) if wide else ())
     k = _KERNELS.get(key)
     if k is None:
         consts = (f"using T = half;\n    constexpr int K = {K}, N = {N}, MB = {MB}, NA = {na}, "
                   f"KS = {ks};\n")
         k = _KERNELS[key] = mx.fast.metal_kernel(
-            name=f"mrqmm{bits}_g64_k{K}_n{N}_mb{MB}_a{na}_s{ks}",
-            input_names=["x", "w", "scales", "biases", "m0"], output_names=["y"],
-            source=consts + _src(bits), header=_HEADER)
+            name=f"mrqmm{bits}{'w' if wide else ''}_g64_k{K}_n{N}_mb{MB}_a{na}_s{ks}",
+            input_names=["x", "w", "scales", "biases", "m0"] + (["rs"] if wide else []),
+            output_names=["y"],
+            source=consts + (_src_wide(bits) if wide else _src(bits)), header=_HEADER)
     return k
 
 
-def _call(K, N, rows, cfg=None, bits=BITS):
+def _call(K, N, rows, cfg=None, bits=BITS, wide=False):
     MB = 1 if rows <= 8 else 2
     na, ks = cfg or _config(K, N, MB, bits)
     tiles = -(-N // (8 * na))
     kw = dict(grid=(32 * ks * tiles, 1, 1), threadgroup=(32 * ks, 1, 1),
-              output_shapes=[(rows, N)], output_dtypes=[mx.float16])
+              output_shapes=[(rows, N)], output_dtypes=[mx.float32 if wide else mx.float16])
+    if wide:
+        return _get_kernel(K, N, MB, na, ks, bits, True), kw
     return _get_kernel(K, N, MB, na, ks, bits), kw
 
 
@@ -439,7 +508,7 @@ def _layout_ok(w: mx.array, scales: mx.array, biases, bits: int, group_size: int
 
 def supported(w: mx.array, scales: mx.array, biases, bits: int, group_size: int, mode="affine") -> bool:
     """Weights the kernel can take (any row count): 8-bit, 5-bit with
-    QWEN_MRQMM5=1, 4-bit with QWEN_MRQMM4=1 (`_bits_on`) once its self-test
+    QWEN_MRQMM5=1, 4- / 6-bit with QWEN_MRQMM4 / 6=1 (`_bits_on`) once its self-test
     passed (run here on these weights if no weights of that width were
     tested yet: `_tested`)."""
     return (_bits_on(bits) and _layout_ok(w, scales, biases, bits, group_size, mode)
@@ -540,7 +609,7 @@ def _selftest(w, scales, biases, bits: int) -> str | None:
 
 
 def mrqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, cfg=None) -> mx.array:
-    """x[..., K] (fp16, 1..16 rows) @ dequant(w)^T for 8-bit (or 5- / 4-bit)
+    """x[..., K] (fp16, 1..16 rows) @ dequant(w)^T for 8-bit (or 5- / 4- / 6-bit)
     g64 affine weights -> [..., N]. The bit width is the packed row's: w.shape[1]
     words for x's K values (8: K / 4, 5: K * 5 / 32, 4: K / 8; whatever
     QWEN_MRQMM5 / 4 say: the knobs are the dispatch's, `supported`). Checks only the x side (rows,
@@ -566,6 +635,33 @@ def mrqmm(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, cfg=None
     return kernel(inputs=[x, w, scales, biases, m0], **kw)[0]
 
 
+_WIDE_CALLS = {}              # (x.shape, w.shape, cfg) -> (kernel, kwargs, m0 array)
+
+
+def mrqmm_wide(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array, rs: mx.array,
+               cfg=None) -> mx.array:
+    """mrqmm with an fp32 output scaled per row: y[m] = (x[m] @ dequant(w)^T)
+    * rs[m]. x fp16 (..., K), 1..16 rows; rs fp32 with one value per row (the
+    inverse of the caller's power-of-two prescale: _drafter_linear). The sums
+    are the fp32 accumulators of mrqmm, never rounded to fp16."""
+    N = w.shape[0]
+    key = (x.shape, w.shape, cfg)
+    c = _WIDE_CALLS.get(key)
+    if c is None:
+        K = x.shape[-1]
+        rows = x.size // K
+        bits = _bits_of(K, w.shape[1])
+        if not (1 <= rows <= MAX_ROWS and x.dtype == mx.float16 and bits is not None
+                and K % GROUP == 0 and scales.shape[-1] * GROUP == K):
+            raise ValueError(f"mrqmm_wide: x {x.shape} {x.dtype} vs w {w.shape}")
+        with _LOCK:
+            kernel, kw = _call(K, N, rows, cfg, bits, wide=True)
+            kw["output_shapes"] = [(*x.shape[:-1], N)]
+            c = _WIDE_CALLS[key] = (kernel, kw, mx.array([rows], dtype=mx.int32))
+    kernel, kw, m0 = c
+    return kernel(inputs=[x, w, scales, biases, m0, rs], **kw)[0]
+
+
 def _use(x: mx.array, n: int | None = None) -> bool:
     """Decode-shaped fp16 input with MIN_ROWS..MAX_ROWS rows for a layer of n
     outputs (>= MIN_N; None: vetted by the caller); batch-invariant:
@@ -587,6 +683,7 @@ def set_invariant(on: bool):
     with _LOCK:
         INVARIANT = bool(on)
         _CALLS.clear()
+        _WIDE_CALLS.clear()
 
 
 class MRQuantizedLinear(nn.QuantizedLinear):
@@ -603,7 +700,7 @@ class MRQuantizedLinear(nn.QuantizedLinear):
 
 
 def _module_ok(m) -> bool:
-    """Weights the kernel takes (8-bit, or 5- / 4-bit with QWEN_MRQMM5 /
+    """Weights the kernel takes (8-bit, or 5- / 4- / 6-bit with QWEN_MRQMM5 / 6 /
     QWEN_MRQMM4 = 1, 4-bit after its self-test; affine g64, fp16 scales and
     biases)."""
     return (type(m) in (nn.QuantizedLinear, MRQuantizedLinear)
@@ -617,7 +714,7 @@ def enabled() -> bool:
 
 def install(model, warmup: bool = True) -> int:
     """Swap every supported nn.QuantizedLinear of `model` (8-bit, with
-    QWEN_MRQMM5=1 / QWEN_MRQMM4=1 and not batch-invariant also 5- / 4-bit;
+    QWEN_MRQMM5 / 4 / 6 = 1 and not batch-invariant also 5- / 4- / 6-bit;
     g64, fp16 scales/biases, N >= MIN_N; any N in batch-invariant mode) to
     MRQuantizedLinear; every other module is left alone. A width in
     SELFTEST_BITS is self-tested first on its first module of N >= MIN_N

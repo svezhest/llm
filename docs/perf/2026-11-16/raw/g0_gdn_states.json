@@ -1,0 +1,92 @@
+[
+ {
+  "label": "27b-48calls",
+  "versions": {
+   "mlx": "0.32.3",
+   "mlx-vlm": "0.7.6"
+  },
+  "B": 1,
+  "T": 1,
+  "impl": "vlm",
+  "sec": 4.3990010453853756e-05,
+  "dy": 0.0,
+  "dstate": 0.0,
+  "bytes": 6324512,
+  "n_layers": 48
+ },
+ {
+  "label": "27b-48calls",
+  "versions": {
+   "mlx": "0.32.3",
+   "mlx-vlm": "0.7.6"
+  },
+  "B": 1,
+  "T": 1,
+  "impl": "states",
+  "sec": 5.1545572963126084e-05,
+  "dy": 0.0,
+  "dstate": 0.0,
+  "bytes": 9470240,
+  "n_layers": 48
+ },
+ {
+  "label": "27b-48calls",
+  "versions": {
+   "mlx": "0.32.3",
+   "mlx-vlm": "0.7.6"
+  },
+  "B": 1,
+  "T": 1,
+  "impl": "fast",
+  "sec": 4.142056225949394e-05,
+  "dy": 7.62939453125e-06,
+  "dstate": 2.4691224098205566e-05,
+  "bytes": 6324512,
+  "n_layers": 48
+ },
+ {
+  "label": "27b-48calls",
+  "versions": {
+   "mlx": "0.32.3",
+   "mlx-vlm": "0.7.6"
+  },
+  "B": 1,
+  "T": 8,
+  "impl": "vlm",
+  "sec": 7.485460416016092e-05,
+  "dy": 0.0,
+  "dstate": 0.0,
+  "bytes": 6555904,
+  "n_layers": 48
+ },
+ {
+  "label": "27b-48calls",
+  "versions": {
+   "mlx": "0.32.3",
+   "mlx-vlm": "0.7.6"
+  },
+  "B": 1,
+  "T": 8,
+  "impl": "states",
+  "sec": 0.00011375260404141348,
+  "dy": 0.0,
+  "dstate": 0.0,
+  "bytes": 31721728,
+  "n_layers": 48
+ },
+ {
+  "label": "27b-48calls",
+  "versions": {
+   "mlx": "0.32.3",
+   "mlx-vlm": "0.7.6"
+  },
+  "B": 1,
+  "T": 8,
+  "impl": "fast",
+  "sec": 4.890798967001805e-05,
+  "dy": 1.52587890625e-05,
+  "dstate": 1.424551010131836e-05,
+  "bytes": 6555904,
+  "n_layers": 48
+ }
+]

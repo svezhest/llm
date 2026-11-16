@@ -47,11 +47,7 @@ TEXT_ONLY = os.environ.get("QWEN_TEXT_ONLY", "0") == "1"
 # docs/perf/2026-10-24/design/special_tokens.md.
 SPLIT_SPECIAL_TOKENS = os.environ.get("QWEN_SPLIT_SPECIAL_TOKENS", "0") == "1"
 
-# Context ceiling (prompt + generation). Model supports 262144 natively, but on
-# 32 GB it's bounded by KV-cache memory. The weights are already 3-bit, so a
-# 4-bit KV cache (~20 KiB/token) is a balanced match — 128K costs ~2.6 GB
-# (model ~18 GB + KV still fits the default ~21.8 GB Metal wired limit; raise
-# iogpu.wired_limit_mb for more headroom if needed).
+# Context ceiling (prompt + generation): bounded by KV-cache memory on 32 GB, not by the model.
 # Context window (prompt + generation). 131072 is the shipped default for all
 # three models; the 27B can run 200K (`QWEN_MAX_CONTEXT=204800`) — see README
 # "Context & memory" for the KV budget before raising it.
@@ -289,13 +285,19 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # Speculative decoding (QWEN_DRAFT=<dir>): a DFlash block-diffusion drafter
 # (e.g. z-lab/Qwen3.5-9B-DFlash, trained on the base Qwen3.5-9B — it also works
 # on the Ornith finetunes, ~60% token acceptance). Exact-greedy walk, so it is
-# only used when the request is greedy (temperature 0, no presence penalty) and
-# text-only; otherwise the plain loop runs. A thinking budget is honoured
+# only used when the request is greedy (temperature 0, no presence / frequency /
+# repetition penalty: _Penalties.active) and text-only; otherwise the plain loop
+# runs. The default QWEN_PRESENCE_PENALTY is 1.5, so set it to 0 (or the request
+# must) for DFlash to run at all. A thinking budget is honoured
 # inside the rounds (2026-11-11: the block is cut where the budget forces the
 # next token, \n</think> go through plain steps; _Scheduler._spec).
 # Output is identical to the plain greedy loop up to fp16 noise.
 DRAFT = os.environ.get("QWEN_DRAFT", "")
-DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
+# QWEN_DRAFT_BLOCK: tokens per verify round (the last accepted token + N - 1
+# drafts), fixed. 0 = automatic: VERIFY_MR_BLOCK (8) when QWEN_VERIFY_MRQMM=1 and
+# mrqmm covers the target (kernels._setup_verify_mrqmm sets it at load), else
+# mlx-vlm's adaptive block (up to the drafter's trained size).
+DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))
 # Drafter weight bits (0 = keep fp16). The target verifies every draft, so the
 # drafter's precision only moves acceptance, not output: measured 4-bit ≈ 8-bit
 # ≈ fp16 acceptance (~60%), and the round gets cheaper (fp16 ~100 ms → 4-bit
@@ -312,6 +314,23 @@ DRAFT_BITS = int(os.environ.get("QWEN_DRAFT_BITS", "4"))
 # With QWEN_DRAFT_BITS=0 the weights stay as loaded (bf16: correct, but ~10x
 # slower per block on M1/M2; fp32 weights would be 2x the memory).
 DRAFT_FP32 = os.environ.get("QWEN_DRAFT_FP32", "")
+# QWEN_DRAFT_MRQMM (1; 0 = off): the fp32 drafter's quantized linears (QWEN_DRAFT_FP32
+# with QWEN_DRAFT_BITS 4 / 5 / 8) through mrqmm's wide variant for 1..16 rows:
+# each row prescaled by an exact power of two to max |x| in [2^10, 2^11), cast
+# to fp16, the kernel's fp32 sums written in fp32 times the inverse scale
+# (kernels._drafter_linear), the scales / biases held in fp16 (checked exact).
+# Instead of quantized_matmul in fp32 (dequantization-bound at 8 rows). Only
+# the drafter: the target verifies, so acceptance is all it can move. 27B 4-bit
+# + DFlash2 (2026-11-16, docs/perf/2026-11-16/drafter.md): drafter block 31.3 ->
+# 17.4 ms, the same drafts on 240 probes, DFlash decode x1.117 in-run (code /
+# en / ru 2K prompts x1.13 / x1.12 / x1.11). Read at call time (cfg.DRAFT_MRQMM:
+# tools flip it; installed at load only when on).
+DRAFT_MRQMM = os.environ.get("QWEN_DRAFT_MRQMM", "1") == "1"
+# QWEN_DRAFT_COMPILE (0 / 1): the DFlash2 drafter's grouped dynamic causal
+# convolution (2 per layer and call, ~8 elementwise ops each) as one compiled
+# function. Block -0.65 ms, decode +0.3 % (under the 3 % gate): off.
+# Read at call time (cfg.DRAFT_COMPILE).
+DRAFT_COMPILE = os.environ.get("QWEN_DRAFT_COMPILE", "0") == "1"
 # QWEN_DRAFT_TAIL: with the prompt cache, every checkpoint a DFlash row
 # stores (the entry's end: QWEN_DRAFT_TAIL_END) carries the drafter's context there:
 # the target's hidden states (the drafter's layers) of the last N positions.
@@ -346,6 +365,40 @@ DRAFT_TAIL_END = int(os.environ.get("QWEN_DRAFT_TAIL_END", "2048"))
 # plain decoding on low acceptance was tried and lost: a probe of 8 rounds
 # costs ~0.5 s, and the drafter restarts cold (~130 ms rounds, lower accept).
 DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
+# QWEN_LOOKUP: prompt lookup decoding (lookup.py, _Scheduler._spec): a round's
+# draft is the continuation of the latest earlier occurrence of the text's
+# last QWEN_LOOKUP_N..QWEN_LOOKUP_NMAX tokens (prompt + output; no MLX op),
+# verified by the target as a drafter's block (same verify path, same
+# exactness class). Used when the match is >= QWEN_LOOKUP_MIN tokens and
+# leaves >= 2 drafts (a verify block of >= 3 rows), at most QWEN_LOOKUP_K
+# drafts (<= 15: mrqmm's 16 rows).
+#   "0" (default) off.
+#   "draft": rows the drafter takes only (below); plain rows stay the plain loop.
+#   "1": with a drafter (QWEN_DRAFT), a lookup round when a match exists, else
+#        the drafter's block (its context = every position since its last
+#        block); without a drafter (a lone greedy row, fp16 KV, no thinking
+#        budget: _spec_ok), lookup rounds between plain steps (step-ahead bursts
+#        of <= QWEN_LOOKUP_BURST steps, the plain loop's sampler: bit-identical
+#        to it between rounds; the rounds' verify rows are not: DFlash's class).
+#   "splice": with a drafter, the drafter's block every round; where a match
+#        exists and its continuation agrees with the drafter on the first
+#        token, the (longer) continuation instead (a host read of the drafts).
+LOOKUP = os.environ.get("QWEN_LOOKUP", "0") or "0"
+LOOKUP_N = int(os.environ.get("QWEN_LOOKUP_N", "3"))
+LOOKUP_NMAX = int(os.environ.get("QWEN_LOOKUP_NMAX", "32"))
+LOOKUP_MIN = int(os.environ.get("QWEN_LOOKUP_MIN", "4"))
+LOOKUP_K = min(15, int(os.environ.get("QWEN_LOOKUP_K", "15")))
+# QWEN_LOOKUP_K0: adaptive drafts per lookup round: start at K0, 2k+1 after a
+# round whose drafts were all accepted (up to QWEN_LOOKUP_K), back to K0 after
+# one that was not (a match into text that does not copy costs a short block).
+# 0 = always QWEN_LOOKUP_K. 27B 4-bit verify (mrqmm buckets): 4 rows 99 ms,
+# 8 rows 106, 12 rows 155, 16 rows 159 (a plain step 55): so 7, then 15.
+LOOKUP_K0 = int(os.environ.get("QWEN_LOOKUP_K0", "7"))
+# QWEN_LOOKUP_BACKOFF: a lookup round that kept fewer than half its drafts
+# doubles the match length the next one needs (up to QWEN_LOOKUP_NMAX), a fully
+# accepted one resets it to QWEN_LOOKUP_MIN (_Gate). 0 = off.
+LOOKUP_BACKOFF = os.environ.get("QWEN_LOOKUP_BACKOFF", "1") == "1"
+LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 # MTP drafting (qwen_worker/mtp.py): QWEN_DRAFT may also name the target's own
 # MTP head split into a drafter dir (scripts/perf/mtp/split_mtp.py; the kind is
 # detected from its config), and QWEN_DRAFT_MTP loads one beside a DFlash
@@ -397,12 +450,21 @@ VERIFY_QMV = int(os.environ.get("QWEN_VERIFY_QMV") or "0")
 # QWEN_MRQMM4 (default 0, read by mrqmm at load): the same for 4-bit affine g64
 # modules (the lmstudio-community 4-bit 27B, weights/qwen38-27b-mlx-4bit: every
 # linear 4-bit), everywhere QWEN_MRQMM5 takes 5-bit ones. A knob of its own:
-# no GPU gate yet, and a model mixing widths (the 35B's 4-bit shared expert)
+# gated on the 27B 4-bit (docs/perf/2026-11-16/profile_27b.md §5: DFlash x1.75,
+# KL <= 1e-5, identity 12/16 at near-ties; default stays 0), and a model mixing widths (the 35B's 4-bit shared expert)
 # must not be pulled in by QWEN_MRQMM5. Self-tested on the GPU at load before
 # its first dispatch (mrqmm._selftest: the unpack exactly + real-scale rows vs
 # an fp32 reference); a failure leaves every 4-bit call on quantized_matmul
 # (load log "self-test FAILED"). Ignored with QWEN_BATCH_INVARIANT=1. Gate:
 # scripts/perf/dflash2/gate_mrqmm4.sh.
+#
+# QWEN_MRQMM6 (default 0, read by mrqmm at load): the same for 6-bit affine g64
+# modules (the mixed-precision oQ4e 27B, weights/qwen38-27b-mlx-oq4e: its
+# lm_head and the last layer's k / v). Above all the DFlash verify block's head
+# and the drafter's head: mlx-vlm's exact verify kernels take only 4 / 5 / 8
+# bits, so without it a 6-bit head is read once per block token. Self-tested
+# like 4 bits. Ignored with QWEN_BATCH_INVARIANT=1. Gate:
+# scripts/perf/dflash2/gate_oq4e.sh (docs/perf/2026-11-15/design/oq4e_speed.md).
 
 # Prefill matmul (QWEN_PFQMM, default 1, read by pfqmm.install at load; 0 =
 # always quantized_matmul): on M1/M2 MLX's qmm_t uses 32x32 output tiles and
@@ -652,6 +714,24 @@ SDPA_FUSED = os.environ.get("QWEN_SDPA_FUSED", "1") != "0"
 #   threshold (KL fused vs unfused 7e-6), not the slab cuts at the defaults.
 SDPA_FUSED_MIN_Q = 512
 SDPA_FUSED_MIN_KV = int(os.environ.get("QWEN_SDPA_FUSED_MIN_KV") or "32768")
+# QWEN_KVQ_PREFILL_FUSED (0): quantized KV (QWEN_KV_BITS 8 / 4) past
+#   quantized_kv_start: a prefill slab that the fp16 path would send to the
+#   fused kernel (fp16 queries, causal, >= SDPA_FUSED_MIN_KV keys, >= 512
+#   queries or scores over PREFILL_BUDGET) dequantizes the layer's cached
+#   keys / values to fp16 (mx.dequantize: the exact values the quantized
+#   matmuls use) and runs MLX's fused SDPA over them, instead of the
+#   library's quantized SDPA (two quantized matmuls over a materialized fp16
+#   slab x keys x heads score matrix). The stored cache stays quantized. With
+#   it _step keeps quantized slabs at PREFILL_STEP past the threshold, as for
+#   fp16 KV (frozen at load: _FIXED_SLAB), and the prefill reserve holds one
+#   layer's dequantized K + V at QWEN_MAX_CONTEXT keys x 1.6, the measured
+#   slab transient (27B: 2 x 128K x 4 x 256 x 2 B = 512 MiB -> 819 MiB). Numerics: attention over the dequantized KV with
+#   fp32 scores inside the kernel -- closer to the fp32 reference over the
+#   same dequantized KV than the quantized SDPA, whose scores and
+#   probabilities are rounded to fp16 (tests/test_kvq8.py); not the old
+#   path's bits, hence off until the GPU gate (docs/perf/2026-11-15/design/
+#   kv_q8.md). Decode / DFlash verify keep the library's quantized calls.
+KVQ_PREFILL_FUSED = os.environ.get("QWEN_KVQ_PREFILL_FUSED", "0") == "1"
 GDN_FAST = os.environ.get("QWEN_GDN_FAST", "0") == "1"
 GDN_FAST_MIN_T = 16
 VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
@@ -665,7 +745,31 @@ VERIFY_EXACT_MAX_T = int(os.environ.get("QWEN_VERIFY_EXACT_MAX_T") or "8")
 #   one-query calls (checked at load on random data, _probe_verify_attention:
 #   else off) and reads the KV once: 3.4 / 4.6 ms for 3 / 5 queries. A longer
 #   block goes in chunks. fp16 KV, a lone row. 0 = the library's calls.
-VERIFY_ATT = os.environ.get("QWEN_VERIFY_ATT", "1") == "1"
+#   "2": the block's G x T query rows per kv head attend the KV together in one
+#   pass (vatt.py: steel-attention MMA loop over key chunks with the block's
+#   causal tail, fp32 partials + merge), the KV read once a round whatever T
+#   (<= 16, head_dim 256) -- not the per-query calls' bits (the fused-attention
+#   numerics class: fp32 throughout, error vs an fp32 reference <= MLX's own
+#   kernel's); self-tested at load against an fp32 reference for every block
+#   size (_probe_verify_attention), else "1". docs/perf/2026-11-16/verify_att2.md
+#   Default "2" since 2026-11-16: DFlash x1.35 at 32K / x1.48 at 60K on the 27B,
+#   equal at short context, tokens == plain on every long run; on 16 short tasks
+#   12/16 == plain greedy, exactly as "1" on the 4-bit 27B (the mrqmm verify
+#   decides those near-ties, gaps <= 0.016, not the attention). "1" = the
+#   library's bits per query.
+_VERIFY_ATT_MODE = os.environ.get("QWEN_VERIFY_ATT", "2")
+VERIFY_ATT = _VERIFY_ATT_MODE in ("1", "2")
+VERIFY_ATT2 = _VERIFY_ATT_MODE == "2"
+# QWEN_DECODE_ATT (0 = off): a decode step's attention over >= this many fp16
+#   keys through the same one-pass kernel (vatt.py, one query: the G query
+#   heads of a kv head as one 8-row MMA block, the KV read once, fp32 partials)
+#   instead of MLX's 2-pass vector SDPA, which reads the KV at ~90 GB/s on the
+#   27B layout (G 6: one simdgroup per query head over strided keys): one layer
+#   at 60K keys 2.85 -> 0.99 ms, at 8K equal (microbench, verify_att2.md). Every
+#   decode row (a lone row's step and each row of a batch), fp16 KVCache only;
+#   not MLX's bits (fp32 partials; error vs fp32 <= MLX's). Self-tested at load
+#   (_probe_decode_att), else off.
+DECODE_ATT_MIN_KV = int(os.environ.get("QWEN_DECODE_ATT") or "0")
 
 
 # QWEN_VERIFY_MRQMM (1): DFlash rounds through mrqmm, the batched-decode
@@ -710,5 +814,8 @@ VERIFY_MR_BLOCK = 8
 #   weights, +1.2 GB on the 9B); 0.7 runs four launches per GDN layer.
 #   Per output row the same kernel and K order: bit-identical to the unfused
 #   calls on qmv; with mrqmm the narrow b/a projections (N=32, else on qmv)
-#   ride along in the multi-row kernel, as on the old stack.
+#   ride along in the multi-row kernel, as on the old stack. A mixed-width
+#   layer (oQ4e) is fused per (bits, group) group of >= 2 projections, each
+#   group its own concatenation and matmul (mrqmm only with N >= MIN_N); a
+#   projection alone at its width keeps its own call (kernels._gdn_groups).
 GDN_FUSE = os.environ.get("QWEN_GDN_FUSE", "1") != "0"

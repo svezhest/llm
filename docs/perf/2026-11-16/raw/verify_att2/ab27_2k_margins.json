@@ -1,0 +1,104 @@
+{
+ "source": "../../docs/perf/2026-11-16/raw/verify_att2/ab27_2k.json",
+ "rows": [
+  {
+   "task": 3,
+   "variant": "m8/8",
+   "diverge": 151,
+   "prompt_tokens": 39,
+   "prompt_matches_worker": true,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 7.906,
+   "steps_with_smaller_gap": 0,
+   "steps": 151,
+   "token": "\n"
+  },
+  {
+   "task": 5,
+   "variant": "m8/8:va",
+   "diverge": 43,
+   "prompt_tokens": 37,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 7.156,
+   "steps_with_smaller_gap": 1,
+   "steps": 43,
+   "token": "/my"
+  },
+  {
+   "task": 10,
+   "variant": "m8/8",
+   "diverge": 56,
+   "prompt_tokens": 34,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0312,
+   "median_gap_before": 8.227,
+   "steps_with_smaller_gap": 0,
+   "steps": 56,
+   "token": " Edge"
+  },
+  {
+   "task": 11,
+   "variant": "m8/8",
+   "diverge": 33,
+   "prompt_tokens": 35,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0,
+   "median_gap_before": 2.297,
+   "steps_with_smaller_gap": 0,
+   "steps": 33,
+   "token": ","
+  },
+  {
+   "task": 11,
+   "variant": "m8/8:va",
+   "diverge": 33,
+   "prompt_tokens": 35,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0,
+   "median_gap_before": 2.297,
+   "steps_with_smaller_gap": 0,
+   "steps": 33,
+   "token": ","
+  },
+  {
+   "task": 12,
+   "variant": "m8/8:va",
+   "diverge": 26,
+   "prompt_tokens": 40,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 1.266,
+   "steps_with_smaller_gap": 1,
+   "steps": 26,
+   "token": " through"
+  },
+  {
+   "task": 15,
+   "variant": "m8/8",
+   "diverge": 202,
+   "prompt_tokens": 37,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 2.43,
+   "steps_with_smaller_gap": 5,
+   "steps": 202,
+   "token": " disk"
+  },
+  {
+   "task": 15,
+   "variant": "m8/8:va",
+   "diverge": 202,
+   "prompt_tokens": 37,
+   "prompt_matches_worker": null,
+   "gap_at_diverge": 0.0156,
+   "median_gap_before": 2.43,
+   "steps_with_smaller_gap": 5,
+   "steps": 202,
+   "token": " disk"
+  }
+ ],
+ "gap_p1": 0.015625,
+ "gap_p5": 0.15625,
+ "gap_p50": 3.3984375
+}

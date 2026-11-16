@@ -1,0 +1,80 @@
+loaded in 12 s; active 16.40 GB; max_batch 1; drafter DFlash2DraftModel block 8 runtime 5 window 2048 layers [5, 19, 33, 47, 61]; draft bits 4; verify exact max T 8; VERIFY_MR True
+drafter fast paths (engine's): conv compiled: off (QWEN_DRAFT_COMPILE); linears on mrqmm_wide: 0 modules
+warm plain: n=2 ok
+warm plain+tk: n=1 ok
+warm d4+mr: n=2 ok
+warm d4+mr+tk: n=2 ok
+r0 code2k plain      n=256 tps= 15.21 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2k plain+tk   n=256 tps= 15.39 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 code2k d4+mr      n=256 tps= 21.45 accept= 32.7% per_round=2.24 round_ms= 150.5 hist={0: 15, 1: 20, 2: 16, 3: 7, 4: 12, 5: 2, 6: 3, 7: 4}
+r0 code2k d4+mr+tk   n=256 tps= 22.35 accept= 33.3% per_round=2.32 round_ms= 148.2 hist={0: 23, 1: 15, 2: 13, 3: 4, 4: 3, 5: 7, 6: 5, 7: 7}
+r0 en2k   d4+mr+tk   n=256 tps= 25.25 accept= 35.2% per_round=2.45 round_ms= 136.4 hist={0: 10, 1: 23, 2: 13, 3: 9, 4: 5, 5: 6, 6: 1, 7: 7}
+r0 en2k   d4+mr      n=256 tps= 24.23 accept= 34.9% per_round=2.37 round_ms= 138.5 hist={0: 19, 1: 14, 2: 14, 3: 8, 4: 8, 5: 4, 6: 1, 7: 8}
+r0 en2k   plain+tk   n=256 tps= 17.45 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 en2k   plain      n=256 tps= 17.39 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru2k   plain      n=256 tps= 17.50 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru2k   plain+tk   n=256 tps= 17.65 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru2k   d4+mr      n=256 tps= 23.70 accept= 32.5% per_round=2.24 round_ms= 136.2 hist={0: 23, 1: 11, 2: 16, 3: 12, 4: 2, 5: 6, 6: 3, 7: 6}
+r0 ru2k   d4+mr+tk   n=256 tps= 24.00 accept= 32.3% per_round=2.24 round_ms= 134.5 hist={0: 20, 1: 17, 2: 11, 3: 12, 4: 8, 5: 3, 6: 1, 7: 7}
+r0 en_prose d4+mr+tk   n=256 tps= 18.46 accept= 18.7% per_round=1.28 round_ms= 123.4 hist={0: 30, 1: 45, 2: 19, 3: 14, 4: 2, 5: 2}
+r0 en_prose d4+mr      n=256 tps= 20.11 accept= 21.8% per_round=1.50 round_ms= 124.3 hist={0: 33, 1: 26, 2: 23, 3: 9, 4: 6, 5: 1, 6: 3, 7: 1}
+r0 en_prose plain+tk   n=256 tps= 18.41 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 en_prose plain      n=256 tps= 18.41 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru_prose plain      n=256 tps= 18.36 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru_prose plain+tk   n=256 tps= 18.59 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r0 ru_prose d4+mr      n=256 tps= 13.24 accept=  9.3% per_round=0.65 round_ms= 124.3 hist={0: 88, 1: 44, 2: 17, 3: 3, 4: 2, 5: 1}
+r0 ru_prose d4+mr+tk   n=256 tps= 12.89 accept=  8.5% per_round=0.58 round_ms= 122.8 hist={0: 91, 1: 49, 2: 19, 3: 1, 4: 1}
+r1 code2k plain      n=256 tps= 17.68 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 code2k d4+mr+tk   n=256 tps= 27.57 accept= 39.0% per_round=2.66 round_ms= 132.1 hist={0: 8, 1: 20, 2: 11, 3: 10, 4: 4, 5: 10, 6: 1, 7: 6}
+r1 code2k d4+mr      n=256 tps= 23.85 accept= 31.2% per_round=2.19 round_ms= 133.6 hist={0: 24, 1: 20, 2: 11, 3: 3, 4: 4, 5: 6, 6: 6, 7: 6}
+r1 code2k plain+tk   n=256 tps= 18.03 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 en2k   plain+tk   n=256 tps= 18.17 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 en2k   d4+mr      n=256 tps= 25.62 accept= 35.8% per_round=2.46 round_ms= 134.5 hist={0: 16, 1: 21, 2: 9, 3: 6, 4: 5, 5: 6, 6: 2, 7: 9}
+r1 en2k   d4+mr+tk   n=256 tps= 28.94 accept= 39.8% per_round=2.76 round_ms= 129.6 hist={0: 15, 1: 12, 2: 11, 3: 6, 4: 8, 5: 3, 6: 2, 7: 11}
+r1 en2k   plain      n=256 tps= 18.21 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 ru2k   plain      n=256 tps= 18.33 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 ru2k   d4+mr+tk   n=256 tps= 20.08 accept= 22.5% per_round=1.55 round_ms= 127.0 hist={0: 38, 1: 16, 2: 24, 3: 9, 4: 6, 5: 4, 6: 1, 7: 2}
+r1 ru2k   d4+mr      n=256 tps= 24.92 accept= 32.5% per_round=2.24 round_ms= 129.6 hist={0: 23, 1: 15, 2: 13, 3: 8, 4: 4, 5: 8, 7: 8}
+r1 ru2k   plain+tk   n=256 tps= 18.42 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 en_prose plain+tk   n=256 tps= 18.93 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 en_prose d4+mr      n=256 tps= 18.82 accept= 18.7% per_round=1.29 round_ms= 121.0 hist={0: 35, 1: 44, 2: 12, 3: 11, 4: 7, 5: 3}
+r1 en_prose d4+mr+tk   n=256 tps= 18.22 accept= 17.3% per_round=1.19 round_ms= 119.7 hist={0: 42, 1: 34, 2: 27, 3: 7, 4: 5, 5: 2}
+r1 en_prose plain      n=256 tps= 18.71 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 ru_prose plain      n=256 tps= 18.79 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r1 ru_prose d4+mr+tk   n=256 tps= 13.07 accept=  8.1% per_round=0.56 round_ms= 119.7 hist={0: 99, 1: 43, 2: 16, 3: 3, 4: 2}
+r1 ru_prose d4+mr      n=256 tps= 12.95 accept=  8.4% per_round=0.58 round_ms= 122.3 hist={0: 102, 1: 36, 2: 13, 3: 8, 4: 2}
+r1 ru_prose plain+tk   n=256 tps= 18.72 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code2k d4+mr      n=256 tps= 28.43 accept= 40.1% per_round=2.76 round_ms= 131.9 hist={0: 9, 1: 14, 2: 13, 3: 13, 4: 3, 5: 7, 6: 1, 7: 8}
+r2 code2k d4+mr+tk   n=256 tps= 25.32 accept= 33.2% per_round=2.32 round_ms= 130.8 hist={0: 21, 1: 19, 2: 12, 3: 3, 4: 5, 5: 3, 6: 6, 7: 8}
+r2 code2k plain      n=256 tps= 17.93 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 code2k plain+tk   n=256 tps= 18.16 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en2k   plain+tk   n=256 tps= 18.22 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en2k   plain      n=256 tps= 18.13 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en2k   d4+mr+tk   n=256 tps= 28.86 accept= 39.6% per_round=2.76 round_ms= 130.0 hist={0: 12, 1: 16, 2: 8, 3: 6, 4: 10, 5: 3, 6: 8, 7: 5}
+r2 en2k   d4+mr      n=256 tps= 30.77 accept= 43.5% per_round=3.05 round_ms= 131.5 hist={0: 9, 1: 11, 2: 13, 3: 6, 4: 7, 5: 3, 6: 4, 7: 10}
+r2 ru2k   d4+mr      n=256 tps= 23.12 accept= 29.1% per_round=2.01 round_ms= 129.8 hist={0: 21, 1: 22, 2: 17, 3: 7, 4: 4, 5: 9, 6: 2, 7: 3}
+r2 ru2k   d4+mr+tk   n=256 tps= 27.63 accept= 36.7% per_round=2.54 round_ms= 128.2 hist={0: 18, 1: 16, 2: 6, 3: 9, 4: 6, 5: 6, 6: 3, 7: 8}
+r2 ru2k   plain      n=256 tps= 18.32 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 ru2k   plain+tk   n=256 tps= 18.48 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en_prose plain+tk   n=256 tps= 19.16 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en_prose plain      n=256 tps= 19.03 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 en_prose d4+mr+tk   n=256 tps= 19.26 accept= 18.6% per_round=1.29 round_ms= 118.2 hist={0: 36, 1: 38, 2: 19, 3: 12, 4: 3, 5: 4}
+r2 en_prose d4+mr      n=256 tps= 19.55 accept= 20.0% per_round=1.38 round_ms= 121.9 hist={0: 36, 1: 32, 2: 22, 3: 9, 4: 2, 5: 2, 6: 1, 7: 3}
+r2 ru_prose d4+mr      n=256 tps= 12.87 accept=  8.6% per_round=0.59 round_ms= 123.1 hist={0: 106, 1: 31, 2: 12, 3: 8, 4: 4}
+r2 ru_prose d4+mr+tk   n=256 tps= 13.61 accept=  9.7% per_round=0.67 round_ms= 122.5 hist={0: 84, 1: 41, 2: 23, 3: 5}
+r2 ru_prose plain      n=256 tps= 18.34 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+r2 ru_prose plain+tk   n=256 tps= 18.54 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+
+== speed: median decode tok/s (median over tasks of per-task medians over rounds) ==
+plain      tps  18.32  per prompt  17.7  18.1  18.3  18.7  18.4  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 15/15
+plain+tk   tps  18.42  per prompt  18.0  18.2  18.4  18.9  18.6  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 0/15
+d4+mr      tps  23.70  per prompt  23.8  25.6  23.7  19.5  13.0  accept  31.2%  drafts/round 2.19  round  129.8 ms  == plain 0/15
+d4+mr+tk   tps  24.00  per prompt  25.3  28.9  24.0  18.5  13.1  accept  32.3%  drafts/round 2.24  round  128.2 ms  == plain 0/15
+
+== paired ratio vs plain+tk (median over rounds x prompts; per prompt) ==
+plain      x0.991  per prompt x0.987 x0.996 x0.991 x0.994 x0.989
+plain+tk   x1.000  per prompt x1.000 x1.000 x1.000 x1.000 x1.000
+d4+mr      x1.323  per prompt x1.394 x1.409 x1.343 x1.021 x0.694
+d4+mr+tk   x1.360  per prompt x1.452 x1.584 x1.360 x1.003 x0.698
+peak 16.78 GB, active 16.44 GB
+wrote $PERF_OUT/drafter/ab_sampling.json
