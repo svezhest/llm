@@ -47,11 +47,7 @@ TEXT_ONLY = os.environ.get("QWEN_TEXT_ONLY", "0") == "1"
 # docs/perf/2026-10-24/design/special_tokens.md.
 SPLIT_SPECIAL_TOKENS = os.environ.get("QWEN_SPLIT_SPECIAL_TOKENS", "0") == "1"
 
-# Context ceiling (prompt + generation). Model supports 262144 natively, but on
-# 32 GB it's bounded by KV-cache memory. The weights are already 3-bit, so a
-# 4-bit KV cache (~20 KiB/token) is a balanced match — 128K costs ~2.6 GB
-# (model ~18 GB + KV still fits the default ~21.8 GB Metal wired limit; raise
-# iogpu.wired_limit_mb for more headroom if needed).
+# Context ceiling (prompt + generation): bounded by KV-cache memory on 32 GB, not by the model.
 # Context window (prompt + generation). 131072 is the shipped default for all
 # three models; the 27B can run 200K (`QWEN_MAX_CONTEXT=204800`) — see README
 # "Context & memory" for the KV budget before raising it.
@@ -289,13 +285,19 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # Speculative decoding (QWEN_DRAFT=<dir>): a DFlash block-diffusion drafter
 # (e.g. z-lab/Qwen3.5-9B-DFlash, trained on the base Qwen3.5-9B — it also works
 # on the Ornith finetunes, ~60% token acceptance). Exact-greedy walk, so it is
-# only used when the request is greedy (temperature 0, no presence penalty) and
-# text-only; otherwise the plain loop runs. A thinking budget is honoured
+# only used when the request is greedy (temperature 0, no presence / frequency /
+# repetition penalty: _Penalties.active) and text-only; otherwise the plain loop
+# runs. The default QWEN_PRESENCE_PENALTY is 1.5, so set it to 0 (or the request
+# must) for DFlash to run at all. A thinking budget is honoured
 # inside the rounds (2026-11-11: the block is cut where the budget forces the
 # next token, \n</think> go through plain steps; _Scheduler._spec).
 # Output is identical to the plain greedy loop up to fp16 noise.
 DRAFT = os.environ.get("QWEN_DRAFT", "")
-DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))   # 0 = adaptive
+# QWEN_DRAFT_BLOCK: tokens per verify round (the last accepted token + N - 1
+# drafts), fixed. 0 = automatic: VERIFY_MR_BLOCK (8) when QWEN_VERIFY_MRQMM=1 and
+# mrqmm covers the target (kernels._setup_verify_mrqmm sets it at load), else
+# mlx-vlm's adaptive block (up to the drafter's trained size).
+DRAFT_BLOCK = int(os.environ.get("QWEN_DRAFT_BLOCK", "0"))
 # Drafter weight bits (0 = keep fp16). The target verifies every draft, so the
 # drafter's precision only moves acceptance, not output: measured 4-bit ≈ 8-bit
 # ≈ fp16 acceptance (~60%), and the round gets cheaper (fp16 ~100 ms → 4-bit
@@ -363,6 +365,40 @@ DRAFT_TAIL_END = int(os.environ.get("QWEN_DRAFT_TAIL_END", "2048"))
 # plain decoding on low acceptance was tried and lost: a probe of 8 rounds
 # costs ~0.5 s, and the drafter restarts cold (~130 ms rounds, lower accept).
 DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
+# QWEN_LOOKUP: prompt lookup decoding (lookup.py, _Scheduler._spec): a round's
+# draft is the continuation of the latest earlier occurrence of the text's
+# last QWEN_LOOKUP_N..QWEN_LOOKUP_NMAX tokens (prompt + output; no MLX op),
+# verified by the target as a drafter's block (same verify path, same
+# exactness class). Used when the match is >= QWEN_LOOKUP_MIN tokens and
+# leaves >= 2 drafts (a verify block of >= 3 rows), at most QWEN_LOOKUP_K
+# drafts (<= 15: mrqmm's 16 rows).
+#   "0" (default) off.
+#   "draft": rows the drafter takes only (below); plain rows stay the plain loop.
+#   "1": with a drafter (QWEN_DRAFT), a lookup round when a match exists, else
+#        the drafter's block (its context = every position since its last
+#        block); without a drafter (a lone greedy row, fp16 KV, no thinking
+#        budget: _spec_ok), lookup rounds between plain steps (step-ahead bursts
+#        of <= QWEN_LOOKUP_BURST steps, the plain loop's sampler: bit-identical
+#        to it between rounds; the rounds' verify rows are not: DFlash's class).
+#   "splice": with a drafter, the drafter's block every round; where a match
+#        exists and its continuation agrees with the drafter on the first
+#        token, the (longer) continuation instead (a host read of the drafts).
+LOOKUP = os.environ.get("QWEN_LOOKUP", "0") or "0"
+LOOKUP_N = int(os.environ.get("QWEN_LOOKUP_N", "3"))
+LOOKUP_NMAX = int(os.environ.get("QWEN_LOOKUP_NMAX", "32"))
+LOOKUP_MIN = int(os.environ.get("QWEN_LOOKUP_MIN", "4"))
+LOOKUP_K = min(15, int(os.environ.get("QWEN_LOOKUP_K", "15")))
+# QWEN_LOOKUP_K0: adaptive drafts per lookup round: start at K0, 2k+1 after a
+# round whose drafts were all accepted (up to QWEN_LOOKUP_K), back to K0 after
+# one that was not (a match into text that does not copy costs a short block).
+# 0 = always QWEN_LOOKUP_K. 27B 4-bit verify (mrqmm buckets): 4 rows 99 ms,
+# 8 rows 106, 12 rows 155, 16 rows 159 (a plain step 55): so 7, then 15.
+LOOKUP_K0 = int(os.environ.get("QWEN_LOOKUP_K0", "7"))
+# QWEN_LOOKUP_BACKOFF: a lookup round that kept fewer than half its drafts
+# doubles the match length the next one needs (up to QWEN_LOOKUP_NMAX), a fully
+# accepted one resets it to QWEN_LOOKUP_MIN (_Gate). 0 = off.
+LOOKUP_BACKOFF = os.environ.get("QWEN_LOOKUP_BACKOFF", "1") == "1"
+LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs
@@ -387,7 +423,8 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # QWEN_MRQMM4 (default 0, read by mrqmm at load): the same for 4-bit affine g64
 # modules (the lmstudio-community 4-bit 27B, weights/qwen38-27b-mlx-4bit: every
 # linear 4-bit), everywhere QWEN_MRQMM5 takes 5-bit ones. A knob of its own:
-# no GPU gate yet, and a model mixing widths (the 35B's 4-bit shared expert)
+# gated on the 27B 4-bit (docs/perf/2026-11-16/profile_27b.md §5: DFlash x1.75,
+# KL <= 1e-5, identity 12/16 at near-ties; default stays 0), and a model mixing widths (the 35B's 4-bit shared expert)
 # must not be pulled in by QWEN_MRQMM5. Self-tested on the GPU at load before
 # its first dispatch (mrqmm._selftest: the unpack exactly + real-scale rows vs
 # an fp32 reference); a failure leaves every 4-bit call on quantized_matmul

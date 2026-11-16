@@ -1,0 +1,312 @@
+{
+ "2048": {
+  "raw": {
+   "base": [
+    51.246755248939735,
+    59.352473876060685,
+    51.70618749980349
+   ]
+  },
+  "build": {
+   "base": [
+    3.3160260009026388,
+    3.4066511234414065,
+    3.2027082506829174
+   ]
+  },
+  "median": {
+   "base": 51.70618749980349
+  },
+  "build_median": {
+   "base": 3.3160260009026388
+  },
+  "deltas": {},
+  "nodes": 2381,
+  "top_ops": [
+   [
+    "QuantizedMatmul",
+    353
+   ],
+   [
+    "Reshape",
+    320
+   ],
+   [
+    "RMSNorm",
+    305
+   ],
+   [
+    "Broadcast",
+    128
+   ],
+   [
+    "Add",
+    128
+   ],
+   [
+    "Split",
+    112
+   ],
+   [
+    "Multiply",
+    112
+   ],
+   [
+    "ExpandDims",
+    97
+   ],
+   [
+    "Concatenate",
+    80
+   ],
+   [
+    "CustomKernel",
+    80
+   ],
+   [
+    "Sigmoid",
+    64
+   ],
+   [
+    "CompiledSigmoidBroadcastBroadcastMultiplyBroadcastBroadcastMultiply",
+    64
+   ],
+   [
+    "Transpose",
+    64
+   ],
+   [
+    "Squeeze",
+    53
+   ],
+   [
+    "CompiledAsTypeBroadcastBroadcastMultiply",
+    48
+   ],
+   [
+    "Sum",
+    48
+   ],
+   [
+    "AsType",
+    48
+   ],
+   [
+    "CompiledSigmoidBroadcastBroadcastMultiply",
+    48
+   ],
+   [
+    "CompiledAsTypeExpNegativeBroadcastBroadcastAddBroadcastBroadcastLogAddExpAsTypeBroadcastBroadcastMultiplyExp",
+    48
+   ],
+   [
+    "CompiledAsTypeSigmoidBroadcastBroadcastMultiplyAsTypeBroadcastBroadcastMultiplyAsType",
+    48
+   ],
+   [
+    "Full",
+    32
+   ],
+   [
+    "SliceUpdate",
+    32
+   ],
+   [
+    "Slice",
+    32
+   ],
+   [
+    "CustomTransforms",
+    16
+   ],
+   [
+    "ScaledDotProductAttention",
+    16
+   ],
+   [
+    "Gather",
+    3
+   ],
+   [
+    "Quantize",
+    1
+   ],
+   [
+    "ArgReduce",
+    1
+   ]
+  ],
+  "pipe": [
+   [
+    49.98010400595376,
+    46.07035449589603,
+    0.015416997484862804
+   ],
+   [
+    60.04725000093458,
+    55.97643749933923,
+    0.015625497326254845
+   ],
+   [
+    51.535500497266185,
+    47.85027050093049,
+    0.015083001926541328
+   ]
+  ],
+  "env": {},
+  "prefill_peak_gib": 16.88274782896042
+ },
+ "8192": {
+  "raw": {
+   "base": [
+    52.42161975002091,
+    58.12147399956302,
+    53.639755125914235
+   ]
+  },
+  "build": {
+   "base": [
+    2.881010501369019,
+    3.66808850048983,
+    3.5320677488925867
+   ]
+  },
+  "median": {
+   "base": 53.639755125914235
+  },
+  "build_median": {
+   "base": 3.5320677488925867
+  },
+  "deltas": {},
+  "nodes": 2285,
+  "top_ops": [
+   [
+    "QuantizedMatmul",
+    353
+   ],
+   [
+    "Reshape",
+    320
+   ],
+   [
+    "RMSNorm",
+    305
+   ],
+   [
+    "Add",
+    128
+   ],
+   [
+    "Split",
+    112
+   ],
+   [
+    "Multiply",
+    112
+   ],
+   [
+    "ExpandDims",
+    97
+   ],
+   [
+    "Broadcast",
+    96
+   ],
+   [
+    "CustomKernel",
+    80
+   ],
+   [
+    "Sigmoid",
+    64
+   ],
+   [
+    "CompiledSigmoidBroadcastBroadcastMultiplyBroadcastBroadcastMultiply",
+    64
+   ],
+   [
+    "Transpose",
+    64
+   ],
+   [
+    "Squeeze",
+    53
+   ],
+   [
+    "Concatenate",
+    48
+   ],
+   [
+    "CompiledAsTypeBroadcastBroadcastMultiply",
+    48
+   ],
+   [
+    "Sum",
+    48
+   ],
+   [
+    "AsType",
+    48
+   ],
+   [
+    "CompiledSigmoidBroadcastBroadcastMultiply",
+    48
+   ],
+   [
+    "CompiledAsTypeExpNegativeBroadcastBroadcastAddBroadcastBroadcastLogAddExpAsTypeBroadcastBroadcastMultiplyExp",
+    48
+   ],
+   [
+    "CompiledAsTypeSigmoidBroadcastBroadcastMultiplyAsTypeBroadcastBroadcastMultiplyAsType",
+    48
+   ],
+   [
+    "SliceUpdate",
+    32
+   ],
+   [
+    "Slice",
+    32
+   ],
+   [
+    "CustomTransforms",
+    16
+   ],
+   [
+    "ScaledDotProductAttention",
+    16
+   ],
+   [
+    "Gather",
+    3
+   ],
+   [
+    "Quantize",
+    1
+   ],
+   [
+    "ArgReduce",
+    1
+   ]
+  ],
+  "pipe": [
+   [
+    51.42704149329802,
+    47.660000003816094,
+    0.015895995602477342
+   ],
+   [
+    53.96677100361558,
+    50.416937498084735,
+    0.01616649387869984
+   ],
+   [
+    53.56506299722241,
+    49.58993750187801,
+    0.016667007002979517
+   ]
+  ],
+  "env": {},
+  "prefill_peak_gib": 18.065601537004113
+ }
+}

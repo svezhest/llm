@@ -15,6 +15,14 @@
   <key>WorkingDirectory</key><string>/Users/user/Projects/llm/src/worker</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <!-- The model: a path relative to WorkingDirectory (or absolute). Without
+         QWEN_MODEL the worker loads its built-in default, weights/qwen36-35b-a3b-mlx-ud3
+         (the 35B), which needs `sudo sysctl iogpu.wired_limit_mb=28672` re-applied after
+         every boot plus QWEN_WIRED_LIMIT_GB / QWEN_PREFILL_STEP (README "Run (dev)").
+         The 9B below needs no sysctl, so it is the safe choice for a boot-time agent.
+         Add the rest of your recipe (QWEN_PROMPT_CACHE, QWEN_DRAFT, ...) here too. -->
+    <key>QWEN_MODEL</key><string>../../weights/ornith15-9b-mlx-8bit</string>
+    <key>QWEN_KV_BITS</key><string>0</string>
     <key>LOG_LEVEL</key><string>INFO</string>
     <key>HF_HUB_DISABLE_XET</key><string>1</string>
   </dict>

@@ -1,0 +1,250 @@
+2026-11-15 10:09:55,213 INFO qwen.worker loading model: /Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit
+2026-11-15 10:09:58,803 INFO qwen.worker QWEN_TEXT_ONLY=1: vision tower not loaded (333 tensors, 0.86 GiB of checkpoint weights never read); image requests will be refused
+2026-11-15 10:09:58,966 INFO qwen.worker language model cast to float16 (QWEN_FP16=1)
+2026-11-15 10:09:58,967 INFO mlx_vlm.speculative.drafters Auto-detected --draft-kind='dflash' for drafter '/Users/user/Projects/llm/weights/qwen38-27b-dflash2' (model_type='qwen3').
+2026-11-15 10:10:00,583 INFO qwen.worker dflash drafter loaded: /Users/user/Projects/llm/weights/qwen38-27b-dflash2 (DFlash2DraftModel 4-bit, fp32 activations (QWEN_DRAFT_FP32), block adaptive, target layers [5, 19, 33, 47, 61])
+2026-11-15 10:10:00,583 INFO qwen.worker eos token ids: [248044, 248046]
+2026-11-15 10:10:03,350 INFO qwen.worker wired limit set to 27.0 GB
+2026-11-15 10:10:03,350 INFO qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
+2026-11-15 10:10:04,373 INFO qwen.worker prefill kernels: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+2026-11-15 10:10:04,373 INFO qwen.worker prefill slab: 2048 at any context (fp16 KV + fused SDPA)
+2026-11-15 10:10:05,136 INFO worker.pfqmm pfqmm 4-bit g64: tested, 401 modules on (lm_head K=5120 N=248320 M=256/264/288/296)
+2026-11-15 10:10:05,136 INFO worker.pfqmm pfqmm: 401 modules on the 64-row prefill qmm, >= 64 rows (4-bit g64 tested)
+2026-11-15 10:10:05,446 INFO worker.mrqmm mrqmm 4-bit g64 self-test passed (lm_head K=5120 N=248320): QWEN_MRQMM4 on the kernel
+2026-11-15 10:10:05,450 INFO worker.mrqmm mrqmm: 401 modules on the multi-row kernel (4-bit, QWEN_MRQMM4) for 3..16 decode rows (linear_attn.in_proj_qkv x48, linear_attn.in_proj_z x48, linear_attn.out_proj x48, lm_head x1, mlp.down_proj x64, mlp.gate_proj x64, mlp.up_proj x64, self_attn.k_proj x16, self_attn.o_proj x16, self_attn.q_proj x16, self_attn.v_proj x16); left on quantized_matmul: 4-bit g64 N < 512 x96
+2026-11-15 10:10:05,596 INFO qwen.worker GDN decode in-projections fused (QWEN_GDN_FUSE): 48 layers
+2026-11-15 10:10:05,599 INFO qwen.worker DFlash through mrqmm (QWEN_VERIFY_MRQMM=1): verify blocks of 3..16 tokens + drafter lm_head (48 GDN layers fused), block 8
+2026-11-15 10:10:05,605 INFO qwen.worker DFlash verify attention (QWEN_VERIFY_ATT): 5 queries per call (vector kernel, bit-equal to the one-query calls)
+2026-11-15 10:10:05,607 INFO qwen.worker batching: max_batch 16, KV budget 7.23 GiB (cap 27.0 GiB, prefill reserve 3.4 GiB), KV 65536 B/token, recurrent state 146.8 MiB/row, reserve <= 4096 new tokens/row, prefill share 0.50, prompt cache off
+2026-11-15 10:10:05,607 INFO qwen.worker cascade attention (QWEN_CASCADE): off (no prompt cache)
+2026-11-15 10:10:05,607 INFO qwen.worker prompt cache move (QWEN_PROMPT_CACHE_MOVE): off
+2026-11-15 10:10:05,608 INFO qwen.worker model loaded in 6928 ms
+loaded in 10 s; active 16.51 GB; max_batch 16; drafter DFlash2DraftModel block 8 runtime 5 window 2048 layers [5, 19, 33, 47, 61]; draft bits 4; verify exact max T 8; VERIFY_MR True
+2026-11-15 10:10:15,654 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=15.8 mean_rows=1.00 step_ms=59.9 gbps=246 decode_s=9.5 prefill_s=0.5 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+warm plain: n=2 ok
+2026-11-15 10:10:22,813 INFO qwen.worker dflash: 2 tokens, accept rate 7% (1/14 drafts)
+warm m8/8: n=2 ok
+2026-11-15 10:10:24,024 INFO qwen.worker dflash: 2 tokens, accept rate 7% (1/14 drafts)
+warm e0/8: n=2 ok
+2026-11-15 10:10:25,668 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=12.3 mean_rows=1.00 step_ms=57.3 gbps=257 decode_s=7.0 prefill_s=2.9 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:10:35,686 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.9 mean_rows=1.00 step_ms=56.0 gbps=263 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r0 code0 plain    n=256 tps= 17.94 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:10:45,737 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code0-m8/8 steps/s=5.7 mean_rows=1.00 step_ms=57.1 gbps=258 decode_s=3.3 prefill_s=6.8 reserved=0.31/7.23GiB pcache=0.00GiB active=15.59GiB groups=0 grouped=0
+2026-11-15 10:10:46,403 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+r0 code0 m8/8     n=256 tps= 37.93 accept= 61.4% per_round=4.22 round_ms= 137.2 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+2026-11-15 10:10:55,832 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code0-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:11:03,264 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+r0 code0 e0/8     n=256 tps= 15.72 accept= 61.4% per_round=4.22 round_ms= 331.0 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+2026-11-15 10:11:05,917 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:11:16,203 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:11:26,232 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=16.24GiB groups=0 grouped=0
+2026-11-15 10:11:31,281 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+r0 code1 e0/8     n=256 tps=  9.30 accept= 30.3% per_round=2.08 round_ms= 330.4 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+2026-11-15 10:11:36,244 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code1-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:11:43,017 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+r0 code1 m8/8     n=256 tps= 22.79 accept= 30.3% per_round=2.08 round_ms= 134.8 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+2026-11-15 10:11:46,272 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=5.4 mean_rows=1.00 step_ms=50.4 gbps=292 decode_s=2.7 prefill_s=7.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:11:56,314 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.4 mean_rows=1.00 step_ms=54.3 gbps=272 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+r0 code1 plain    n=256 tps= 18.71 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:12:06,327 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.7 mean_rows=1.00 step_ms=52.9 gbps=279 decode_s=9.4 prefill_s=0.6 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r0 code2 plain    n=256 tps= 18.93 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:12:16,411 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code2-m8/8 steps/s=9.7 mean_rows=1.00 step_ms=52.8 gbps=279 decode_s=5.2 prefill_s=4.9 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:12:21,314 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+r0 code2 m8/8     n=256 tps= 28.05 accept= 40.5% per_round=2.82 round_ms= 135.7 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+2026-11-15 10:12:26,532 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code2-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:12:36,657 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code2-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:12:43,917 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+r0 code2 e0/8     n=256 tps= 11.58 accept= 40.5% per_round=2.82 round_ms= 328.7 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+2026-11-15 10:12:46,823 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code3-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.2 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:12:57,032 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code3-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.2 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:13:01,841 INFO qwen.worker dflash: 256 tokens, accept rate 55% (203/367 drafts)
+r0 code3 e0/8     n=256 tps= 14.69 accept= 55.3% per_round=3.83 round_ms= 327.5 hist={0: 6, 1: 7, 2: 5, 3: 9, 4: 7, 6: 2, 7: 17}
+2026-11-15 10:13:07,078 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code3-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:13:09,842 INFO qwen.worker dflash: 256 tokens, accept rate 53% (201/379 drafts)
+r0 code3 m8/8     n=256 tps= 34.35 accept= 53.0% per_round=3.65 round_ms= 135.0 hist={0: 7, 1: 9, 2: 6, 3: 8, 4: 5, 5: 1, 6: 2, 7: 17}
+2026-11-15 10:13:17,103 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=12.5 mean_rows=1.00 step_ms=53.8 gbps=274 decode_s=6.7 prefill_s=3.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r0 code3 plain    n=256 tps= 18.67 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:13:27,112 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.3 mean_rows=1.00 step_ms=52.6 gbps=280 decode_s=9.6 prefill_s=0.4 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:13:37,115 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.7 mean_rows=1.00 step_ms=53.5 gbps=276 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+r0 code4 plain    n=256 tps= 18.85 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:13:46,481 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+r0 code4 m8/8     n=256 tps= 32.27 accept= 49.2% per_round=3.40 round_ms= 136.3 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+2026-11-15 10:13:47,207 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code4-e0/8 steps/s=1.9 mean_rows=1.00 step_ms=53.8 gbps=274 decode_s=1.0 prefill_s=9.0 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:13:57,519 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s0-code4-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:14:06,011 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+r0 code4 e0/8     n=256 tps= 13.31 accept= 49.2% per_round=3.40 round_ms= 330.4 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+2026-11-15 10:14:07,566 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=2.1 mean_rows=1.00 step_ms=49.4 gbps=298 decode_s=1.0 prefill_s=9.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:14:17,575 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.4 mean_rows=1.00 step_ms=54.4 gbps=271 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r1 code0 plain    n=256 tps= 18.44 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:14:27,851 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code0-e0/8 steps/s=5.1 mean_rows=1.00 step_ms=55.3 gbps=266 decode_s=2.9 prefill_s=7.4 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:14:37,300 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+r1 code0 e0/8     n=256 tps= 15.82 accept= 61.4% per_round=4.22 round_ms= 329.0 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+2026-11-15 10:14:37,893 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code0-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.55GiB groups=0 grouped=0
+2026-11-15 10:14:44,551 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+r1 code0 m8/8     n=256 tps= 38.31 accept= 61.4% per_round=4.22 round_ms= 135.8 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+2026-11-15 10:14:47,995 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code1-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:14:56,415 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+r1 code1 m8/8     n=256 tps= 22.63 accept= 30.3% per_round=2.08 round_ms= 135.8 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+2026-11-15 10:14:58,132 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:15:08,219 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:15:18,495 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:15:24,445 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+r1 code1 e0/8     n=256 tps=  9.30 accept= 30.3% per_round=2.08 round_ms= 330.4 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+2026-11-15 10:15:28,544 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=7.0 mean_rows=1.00 step_ms=51.0 gbps=289 decode_s=3.6 prefill_s=6.5 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:15:38,588 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.8 mean_rows=1.00 step_ms=56.1 gbps=263 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+r1 code1 plain    n=256 tps= 18.27 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:15:48,635 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.4 mean_rows=1.00 step_ms=53.6 gbps=275 decode_s=9.4 prefill_s=0.6 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r1 code2 plain    n=256 tps= 18.55 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:15:58,681 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code2-e0/8 steps/s=9.0 mean_rows=1.00 step_ms=54.4 gbps=271 decode_s=4.9 prefill_s=5.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:16:08,700 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code2-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:16:16,799 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+r1 code2 e0/8     n=256 tps= 11.32 accept= 40.5% per_round=2.82 round_ms= 336.3 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+2026-11-15 10:16:18,800 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code2-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:16:26,557 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+r1 code2 m8/8     n=256 tps= 27.72 accept= 40.5% per_round=2.82 round_ms= 137.3 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+2026-11-15 10:16:28,913 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code3-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:16:34,675 INFO qwen.worker dflash: 256 tokens, accept rate 53% (201/379 drafts)
+r1 code3 m8/8     n=256 tps= 33.82 accept= 53.0% per_round=3.65 round_ms= 137.1 hist={0: 7, 1: 9, 2: 6, 3: 8, 4: 5, 5: 1, 6: 2, 7: 17}
+2026-11-15 10:16:39,104 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code3-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.2 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:16:49,413 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code3-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:16:52,960 INFO qwen.worker dflash: 256 tokens, accept rate 55% (203/367 drafts)
+r1 code3 e0/8     n=256 tps= 14.41 accept= 55.3% per_round=3.83 round_ms= 333.8 hist={0: 6, 1: 7, 2: 5, 3: 9, 4: 7, 6: 2, 7: 17}
+2026-11-15 10:16:59,437 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=10.8 mean_rows=1.00 step_ms=55.2 gbps=267 decode_s=6.0 prefill_s=4.1 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r1 code3 plain    n=256 tps= 18.29 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:17:09,451 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.9 mean_rows=1.00 step_ms=53.8 gbps=274 decode_s=9.6 prefill_s=0.4 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:17:19,502 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.5 mean_rows=1.00 step_ms=54.0 gbps=273 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r1 code4 plain    n=256 tps= 18.57 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:17:29,627 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code4-e0/8 steps/s=4.0 mean_rows=1.00 step_ms=54.6 gbps=270 decode_s=2.2 prefill_s=7.9 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:17:39,684 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s1-code4-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.58GiB groups=0 grouped=0
+2026-11-15 10:17:41,512 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+r1 code4 e0/8     n=256 tps= 13.20 accept= 49.2% per_round=3.40 round_ms= 333.0 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+2026-11-15 10:17:49,769 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+r1 code4 m8/8     n=256 tps= 32.30 accept= 49.2% per_round=3.40 round_ms= 136.1 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+2026-11-15 10:17:59,881 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code0-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:18:06,763 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+r2 code0 e0/8     n=256 tps= 15.59 accept= 61.4% per_round=4.22 round_ms= 333.8 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+2026-11-15 10:18:09,925 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=5.3 mean_rows=1.00 step_ms=49.9 gbps=295 decode_s=2.6 prefill_s=7.4 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:18:19,952 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.8 mean_rows=1.00 step_ms=56.3 gbps=262 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+r2 code0 plain    n=256 tps= 18.22 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:18:28,834 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+r2 code0 m8/8     n=256 tps= 37.88 accept= 61.4% per_round=4.22 round_ms= 137.4 hist={0: 5, 1: 5, 2: 6, 3: 4, 4: 5, 5: 2, 6: 6, 7: 16}
+2026-11-15 10:18:30,041 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code1-m8/8 steps/s=2.6 mean_rows=1.00 step_ms=54.6 gbps=270 decode_s=1.4 prefill_s=8.7 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:18:40,120 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code1-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.58GiB groups=0 grouped=0
+2026-11-15 10:18:40,882 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+r2 code1 m8/8     n=256 tps= 22.33 accept= 30.3% per_round=2.08 round_ms= 137.6 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+2026-11-15 10:18:50,141 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=16.2 mean_rows=1.00 step_ms=53.9 gbps=273 decode_s=8.7 prefill_s=1.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r2 code1 plain    n=256 tps= 18.41 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:19:00,202 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code1-e0/8 steps/s=9.4 mean_rows=1.00 step_ms=54.9 gbps=269 decode_s=5.2 prefill_s=4.8 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:19:10,486 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:19:20,519 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code1-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.59GiB groups=0 grouped=0
+2026-11-15 10:19:23,474 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+r2 code1 e0/8     n=256 tps=  9.31 accept= 30.3% per_round=2.08 round_ms= 330.0 hist={0: 17, 1: 21, 2: 15, 3: 14, 4: 9, 5: 2, 6: 1, 7: 4}
+2026-11-15 10:19:30,782 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code2-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:19:40,879 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code2-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:19:46,606 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+r2 code2 e0/8     n=256 tps= 11.31 accept= 40.5% per_round=2.82 round_ms= 336.6 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+2026-11-15 10:19:50,896 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=7.3 mean_rows=1.00 step_ms=51.7 gbps=285 decode_s=3.8 prefill_s=6.2 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:20:00,899 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.8 mean_rows=1.00 step_ms=56.2 gbps=262 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+r2 code2 plain    n=256 tps= 18.20 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:20:11,015 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code2-m8/8 steps/s=0.6 mean_rows=1.00 step_ms=54.0 gbps=273 decode_s=0.3 prefill_s=9.8 reserved=0.31/7.23GiB pcache=0.00GiB active=16.58GiB groups=0 grouped=0
+2026-11-15 10:20:11,174 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+r2 code2 m8/8     n=256 tps= 27.66 accept= 40.5% per_round=2.82 round_ms= 137.6 hist={0: 15, 1: 11, 2: 10, 3: 5, 4: 7, 5: 8, 6: 2, 7: 9}
+2026-11-15 10:20:19,308 INFO qwen.worker dflash: 256 tokens, accept rate 53% (201/379 drafts)
+r2 code3 m8/8     n=256 tps= 33.93 accept= 53.0% per_round=3.65 round_ms= 136.7 hist={0: 7, 1: 9, 2: 6, 3: 8, 4: 5, 5: 1, 6: 2, 7: 17}
+2026-11-15 10:20:21,048 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=2.4 mean_rows=1.00 step_ms=49.9 gbps=295 decode_s=1.2 prefill_s=8.8 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:20:31,061 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.4 mean_rows=1.00 step_ms=54.4 gbps=271 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r2 code3 plain    n=256 tps= 18.44 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:20:41,195 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code3-e0/8 steps/s=4.8 mean_rows=1.00 step_ms=55.4 gbps=266 decode_s=2.7 prefill_s=7.4 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:20:51,225 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code3-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.59GiB groups=0 grouped=0
+2026-11-15 10:20:52,084 INFO qwen.worker dflash: 256 tokens, accept rate 55% (203/367 drafts)
+r2 code3 e0/8     n=256 tps= 14.52 accept= 55.3% per_round=3.83 round_ms= 331.3 hist={0: 6, 1: 7, 2: 5, 3: 9, 4: 7, 6: 2, 7: 17}
+2026-11-15 10:21:01,470 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code4-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.2 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:21:11,551 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code4-e0/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=16.29GiB groups=0 grouped=0
+2026-11-15 10:21:11,739 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+r2 code4 e0/8     n=256 tps= 13.22 accept= 49.2% per_round=3.40 round_ms= 332.6 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+2026-11-15 10:21:21,568 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.5 mean_rows=1.00 step_ms=54.4 gbps=271 decode_s=9.5 prefill_s=0.5 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+r2 code4 plain    n=256 tps= 18.19 accept=  0.0% per_round=0.00 round_ms=   0.0 hist=
+2026-11-15 10:21:31,620 INFO qwen.worker batch: rows=0 waiting=0 prefilling=s2-code4-m8/8 steps/s=8.2 mean_rows=1.00 step_ms=56.0 gbps=263 decode_s=4.6 prefill_s=5.4 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:21:34,664 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+r2 code4 m8/8     n=256 tps= 31.68 accept= 49.2% per_round=3.40 round_ms= 138.8 hist={0: 3, 1: 13, 2: 10, 3: 6, 4: 9, 5: 2, 6: 5, 7: 10}
+
+== speed: median decode tok/s (median over tasks of per-task medians over rounds) ==
+plain    tps  18.44  per task  18.2  18.4  18.6  18.4  18.6  accept   0.0%  drafts/round 0.00  round    0.0 ms  == plain 15/15
+m8/8     tps  32.27  per task  37.9  22.6  27.7  33.9  32.3  accept  49.2%  drafts/round 3.40  round  136.7 ms  == plain 12/15
+e0/8     tps  13.22  per task  15.7   9.3  11.3  14.5  13.2  accept  49.2%  drafts/round 3.40  round  331.0 ms  == plain 15/15
+
+== identity vs plain greedy, 16 tasks ==
+2026-11-15 10:21:41,628 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=11.8 mean_rows=1.00 step_ms=54.2 gbps=272 decode_s=6.4 prefill_s=3.6 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:21:51,695 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t0-m8/8 steps/s=13.8 mean_rows=1.00 step_ms=54.3 gbps=271 decode_s=7.5 prefill_s=2.5 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:21:56,605 INFO qwen.worker dflash: 256 tokens, accept rate 61% (207/337 drafts)
+t0 m8/8: same (n=256)
+2026-11-15 10:22:01,714 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=8.6 mean_rows=1.00 step_ms=52.9 gbps=279 decode_s=4.5 prefill_s=5.5 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:22:11,788 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t1-m8/8 steps/s=17.0 mean_rows=1.00 step_ms=54.6 gbps=270 decode_s=9.3 prefill_s=0.7 reserved=0.31/7.23GiB pcache=0.00GiB active=15.55GiB groups=0 grouped=0
+2026-11-15 10:22:21,854 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t1-m8/8 steps/s=0.0 mean_rows=0.00 step_ms=0.0 gbps=0 decode_s=0.0 prefill_s=10.1 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+2026-11-15 10:22:23,127 INFO qwen.worker dflash: 256 tokens, accept rate 30% (173/571 drafts)
+t1 m8/8: same (n=256)
+2026-11-15 10:22:31,873 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=15.2 mean_rows=1.00 step_ms=54.0 gbps=273 decode_s=8.2 prefill_s=1.8 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:22:41,893 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t2-m8/8 steps/s=10.5 mean_rows=1.00 step_ms=54.9 gbps=268 decode_s=5.8 prefill_s=4.2 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:22:47,672 INFO qwen.worker dflash: 256 tokens, accept rate 40% (189/467 drafts)
+t2 m8/8: same (n=256)
+2026-11-15 10:22:51,898 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=7.1 mean_rows=1.00 step_ms=51.5 gbps=286 decode_s=3.7 prefill_s=6.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:23:01,922 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.9 mean_rows=1.00 step_ms=56.0 gbps=263 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+2026-11-15 10:23:10,678 INFO qwen.worker dflash: 256 tokens, accept rate 53% (201/379 drafts)
+t3 m8/8: diverges at 151 (n=256)
+2026-11-15 10:23:11,964 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=2.6 mean_rows=1.00 step_ms=51.8 gbps=285 decode_s=1.3 prefill_s=8.7 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:23:21,987 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=18.1 mean_rows=1.00 step_ms=55.4 gbps=266 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:23:32,115 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t4-m8/8 steps/s=5.6 mean_rows=1.00 step_ms=55.9 gbps=263 decode_s=3.2 prefill_s=6.9 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:23:33,824 INFO qwen.worker dflash: 256 tokens, accept rate 49% (197/400 drafts)
+t4 m8/8: same (n=256)
+2026-11-15 10:23:42,160 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.0 mean_rows=1.00 step_ms=55.0 gbps=268 decode_s=7.8 prefill_s=2.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:23:52,168 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t5-m8/8 steps/s=11.6 mean_rows=1.00 step_ms=55.9 gbps=264 decode_s=6.5 prefill_s=3.5 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:23:57,167 INFO qwen.worker dflash: 256 tokens, accept rate 53% (201/381 drafts)
+t5 m8/8: same (n=256)
+2026-11-15 10:24:02,190 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=8.3 mean_rows=1.00 step_ms=53.7 gbps=275 decode_s=4.5 prefill_s=5.6 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:24:12,751 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t6-m8/8 steps/s=16.5 mean_rows=1.00 step_ms=56.3 gbps=262 decode_s=9.8 prefill_s=0.7 reserved=0.31/7.23GiB pcache=0.00GiB active=15.55GiB groups=0 grouped=0
+2026-11-15 10:24:18,494 INFO qwen.worker dflash: 256 tokens, accept rate 75% (214/287 drafts)
+t6 m8/8: same (n=256)
+2026-11-15 10:24:22,781 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=6.9 mean_rows=1.00 step_ms=54.1 gbps=272 decode_s=3.7 prefill_s=6.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:24:32,811 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.7 mean_rows=1.00 step_ms=56.3 gbps=262 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+2026-11-15 10:24:42,905 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t7-m8/8 steps/s=1.0 mean_rows=1.00 step_ms=55.5 gbps=266 decode_s=0.6 prefill_s=9.5 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:24:46,487 INFO qwen.worker dflash: 256 tokens, accept rate 27% (168/611 drafts)
+t7 m8/8: same (n=256)
+2026-11-15 10:24:52,941 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=10.6 mean_rows=1.00 step_ms=55.5 gbps=265 decode_s=5.9 prefill_s=4.1 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:25:02,953 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t8-m8/8 steps/s=15.1 mean_rows=1.00 step_ms=55.9 gbps=264 decode_s=8.4 prefill_s=1.5 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:25:09,749 INFO qwen.worker dflash: 256 tokens, accept rate 54% (202/372 drafts)
+t8 m8/8: same (n=256)
+2026-11-15 10:25:12,956 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=5.5 mean_rows=1.00 step_ms=52.2 gbps=282 decode_s=2.9 prefill_s=7.1 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:25:23,008 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.5 mean_rows=1.00 step_ms=57.1 gbps=258 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+2026-11-15 10:25:31,336 INFO qwen.worker dflash: 256 tokens, accept rate 68% (211/309 drafts)
+t9 m8/8: same (n=256)
+2026-11-15 10:25:33,049 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=4.9 mean_rows=1.00 step_ms=53.4 gbps=276 decode_s=2.6 prefill_s=7.4 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:25:43,094 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.6 mean_rows=1.00 step_ms=56.7 gbps=260 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:25:53,178 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t10-m8/8 steps/s=5.7 mean_rows=1.00 step_ms=56.8 gbps=259 decode_s=3.2 prefill_s=6.8 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:25:54,474 INFO qwen.worker dflash: 256 tokens, accept rate 56% (203/362 drafts)
+t10 m8/8: diverges at 56 (n=256)
+2026-11-15 10:26:03,224 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=14.5 mean_rows=1.00 step_ms=55.9 gbps=264 decode_s=8.2 prefill_s=1.9 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:26:13,356 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t11-m8/8 steps/s=11.0 mean_rows=1.00 step_ms=57.0 gbps=259 decode_s=6.3 prefill_s=3.8 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:26:20,116 INFO qwen.worker dflash: 256 tokens, accept rate 40% (188/475 drafts)
+t11 m8/8: diverges at 33 (n=256)
+2026-11-15 10:26:23,380 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=5.3 mean_rows=1.00 step_ms=51.0 gbps=289 decode_s=2.7 prefill_s=7.3 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:26:33,403 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.2 mean_rows=1.00 step_ms=58.3 gbps=253 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+2026-11-15 10:26:43,407 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t12-m8/8 steps/s=3.2 mean_rows=1.00 step_ms=56.4 gbps=261 decode_s=1.8 prefill_s=8.2 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:26:46,279 INFO qwen.worker dflash: 256 tokens, accept rate 37% (184/495 drafts)
+t12 m8/8: same (n=256)
+2026-11-15 10:26:53,409 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=12.0 mean_rows=1.00 step_ms=57.0 gbps=258 decode_s=6.8 prefill_s=3.2 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:27:03,550 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t13-m8/8 steps/s=13.5 mean_rows=1.00 step_ms=56.9 gbps=259 decode_s=7.8 prefill_s=2.3 reserved=0.31/7.23GiB pcache=0.00GiB active=16.55GiB groups=0 grouped=0
+2026-11-15 10:27:12,750 INFO qwen.worker dflash: 256 tokens, accept rate 34% (179/526 drafts)
+t13 m8/8: same (n=256)
+2026-11-15 10:27:13,550 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=0.5 mean_rows=1.00 step_ms=49.6 gbps=297 decode_s=0.2 prefill_s=9.7 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:27:23,554 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.7 mean_rows=1.00 step_ms=56.5 gbps=261 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:27:33,582 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t14-m8/8 steps/s=7.5 mean_rows=1.00 step_ms=57.5 gbps=256 decode_s=4.3 prefill_s=5.7 reserved=0.31/7.23GiB pcache=0.00GiB active=16.56GiB groups=0 grouped=0
+2026-11-15 10:27:39,697 INFO qwen.worker dflash: 256 tokens, accept rate 34% (178/531 drafts)
+t14 m8/8: same (n=256)
+2026-11-15 10:27:43,623 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=6.4 mean_rows=1.00 step_ms=52.7 gbps=279 decode_s=3.4 prefill_s=6.7 reserved=0.31/7.23GiB pcache=0.00GiB active=15.57GiB groups=0 grouped=0
+2026-11-15 10:27:53,649 INFO qwen.worker batch: rows=1 waiting=0 prefilling=- steps/s=17.4 mean_rows=1.00 step_ms=57.6 gbps=256 decode_s=10.0 prefill_s=0.0 reserved=0.31/7.23GiB pcache=0.00GiB active=15.58GiB groups=0 grouped=0
+2026-11-15 10:28:03,733 INFO qwen.worker batch: rows=0 waiting=0 prefilling=i-t15-m8/8 steps/s=1.9 mean_rows=1.00 step_ms=56.0 gbps=263 decode_s=1.1 prefill_s=9.0 reserved=0.31/7.23GiB pcache=0.00GiB active=16.57GiB groups=0 grouped=0
+2026-11-15 10:28:05,493 INFO qwen.worker dflash: 256 tokens, accept rate 38% (186/489 drafts)
+t15 m8/8: diverges at 202 (n=256)
+m8/8     identical 12/16; divergence at [151, 56, 33, 202]
+peak 17.97 GB, active 16.52 GB
+wrote $PERF_OUT/mrqmm4/ab27_4bit.json

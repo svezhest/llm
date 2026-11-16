@@ -1,0 +1,111 @@
+loaded in 10 s; active 16.51 GB; max_batch 1; drafter DFlash2DraftModel; DRAFT_BLOCK 8; VERIFY_MR True
+turn 1: 213 tokens (['stop'])
+warm plain: n=2
+warm dflash: n=2
+warm hyb:k0=3+backoff=1+nmax=32: n=2
+warm lplain:k0=3+backoff=1+nmax=32: n=2
+r0 rewrite_a plain            n= 384 prompt= 1958 reused=    0 tps= 19.72 ttft= 13.33 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 rewrite_a dflash           n= 384 prompt= 1958 reused= 1957 tps= 30.70 ttft=  0.07 dflash=99r 285/693 lookup=0r 0/0 plain=0
+r0 rewrite_a hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 1958 reused= 1957 tps= 72.71 ttft=  0.06 dflash=5r 14/35 lookup=32r 333/377 plain=0
+r0 rewrite_a lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 1958 reused= 1957 tps= 78.66 ttft=  0.07 dflash=0r 0/0 lookup=28r 336/356 plain=20
+r0 rewrite_b plain            n= 384 prompt= 2469 reused=    0 tps= 19.71 ttft= 15.68 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 rewrite_b lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 2469 reused= 2468 tps= 79.29 ttft=  0.07 dflash=0r 0/0 lookup=26r 341/343 plain=17
+r0 rewrite_b hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 2469 reused= 2468 tps= 84.37 ttft=  0.08 dflash=6r 17/42 lookup=27r 334/340 plain=0
+r0 rewrite_b dflash           n= 384 prompt= 2469 reused= 2468 tps= 31.18 ttft=  0.08 dflash=96r 288/668 lookup=0r 0/0 plain=0
+r0 reemit    hyb:k0=3+backoff=1+nmax=32 n= 269 prompt=  309 reused=    0 tps= 86.39 ttft=  2.52 dflash=8r 51/56 lookup=15r 196/205 plain=0
+r0 reemit    lplain:k0=3+backoff=1+nmax=32 n= 269 prompt=  309 reused=  308 tps= 54.67 ttft=  0.06 dflash=0r 0/0 lookup=17r 198/211 plain=54
+r0 reemit    plain            n= 269 prompt=  309 reused=  308 tps= 19.75 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 reemit    dflash           n= 269 prompt=  309 reused=  308 tps= 50.76 ttft=  0.07 dflash=41r 229/287 lookup=0r 0/0 plain=0
+r0 code      hyb:k0=3+backoff=1+nmax=32 n= 384 prompt=   46 reused=    0 tps= 41.71 ttft=  0.54 dflash=69r 303/479 lookup=5r 6/23 plain=0
+r0 code      dflash           n= 384 prompt=   46 reused=   45 tps= 42.49 ttft=  0.06 dflash=71r 312/493 lookup=0r 0/0 plain=0
+r0 code      plain            n= 384 prompt=   46 reused=   45 tps= 19.51 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 code      lplain:k0=3+backoff=1+nmax=32 n= 384 prompt=   46 reused=   45 tps= 19.40 ttft=  0.08 dflash=0r 0/0 lookup=5r 6/19 plain=372
+r0 code2k    plain            n= 384 prompt= 3589 reused=    0 tps= 18.25 ttft= 24.92 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 code2k    dflash           n= 384 prompt= 3589 reused= 3588 tps= 34.72 ttft=  0.07 dflash=77r 307/531 lookup=0r 0/0 plain=0
+r0 code2k    hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 3589 reused= 3588 tps= 35.43 ttft=  0.07 dflash=62r 210/427 lookup=15r 97/122 plain=0
+r0 code2k    lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 3589 reused= 3588 tps= 22.09 ttft=  0.07 dflash=0r 0/0 lookup=17r 95/126 plain=271
+r0 en2k      plain            n= 384 prompt= 2630 reused=    0 tps= 18.19 ttft= 18.43 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 en2k      lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 2630 reused= 2629 tps= 18.25 ttft=  0.08 dflash=0r 0/0 lookup=1r 1/3 plain=381
+r0 en2k      hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 2630 reused= 2629 tps= 16.81 ttft=  0.08 dflash=161r 222/1118 lookup=1r 0/3 plain=0
+r0 en2k      dflash           n= 384 prompt= 2630 reused= 2629 tps= 16.80 ttft=  0.07 dflash=162r 222/1125 lookup=0r 0/0 plain=0
+r0 ru2k      hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 2699 reused=    0 tps= 14.69 ttft= 19.33 dflash=178r 202/1243 lookup=2r 1/6 plain=0
+r0 ru2k      lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 2699 reused= 2698 tps= 18.16 ttft=  0.07 dflash=0r 0/0 lookup=2r 2/6 plain=379
+r0 ru2k      plain            n= 384 prompt= 2699 reused= 2698 tps= 18.33 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r0 ru2k      dflash           n= 384 prompt= 2699 reused= 2698 tps= 15.10 ttft=  0.07 dflash=179r 204/1250 lookup=0r 0/0 plain=0
+r1 rewrite_a plain            n= 384 prompt= 1958 reused=    0 tps= 18.21 ttft= 14.05 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 rewrite_a lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 1958 reused= 1957 tps= 67.66 ttft=  0.08 dflash=0r 0/0 lookup=28r 336/356 plain=20
+r1 rewrite_a hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 1958 reused= 1957 tps= 69.25 ttft=  0.07 dflash=5r 14/35 lookup=32r 333/377 plain=0
+r1 rewrite_a dflash           n= 384 prompt= 1958 reused= 1957 tps= 27.63 ttft=  0.07 dflash=99r 285/693 lookup=0r 0/0 plain=0
+r1 rewrite_b hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 2469 reused=    0 tps= 73.30 ttft= 17.58 dflash=5r 15/35 lookup=28r 336/347 plain=0
+r1 rewrite_b lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 2469 reused= 2468 tps= 72.76 ttft=  0.08 dflash=0r 0/0 lookup=26r 341/343 plain=17
+r1 rewrite_b plain            n= 384 prompt= 2469 reused= 2468 tps= 18.22 ttft=  0.13 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 rewrite_b dflash           n= 384 prompt= 2469 reused= 2468 tps= 28.04 ttft=  0.07 dflash=96r 288/668 lookup=0r 0/0 plain=0
+r1 reemit    hyb:k0=3+backoff=1+nmax=32 n= 269 prompt=  309 reused=    0 tps= 80.71 ttft=  2.74 dflash=8r 51/56 lookup=15r 196/205 plain=0
+r1 reemit    dflash           n= 269 prompt=  309 reused=  308 tps= 57.37 ttft=  0.07 dflash=34r 236/238 lookup=0r 0/0 plain=0
+r1 reemit    plain            n= 269 prompt=  309 reused=  308 tps= 18.56 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 reemit    lplain:k0=3+backoff=1+nmax=32 n= 269 prompt=  309 reused=  308 tps= 49.15 ttft=  0.08 dflash=0r 0/0 lookup=17r 198/211 plain=54
+r1 code      plain            n= 384 prompt=   46 reused=    0 tps= 18.48 ttft=  0.70 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 code      dflash           n= 384 prompt=   46 reused=   45 tps= 35.34 ttft=  0.07 dflash=79r 304/549 lookup=0r 0/0 plain=0
+r1 code      hyb:k0=3+backoff=1+nmax=32 n= 384 prompt=   46 reused=   45 tps= 34.93 ttft=  0.06 dflash=78r 294/542 lookup=4r 7/16 plain=0
+r1 code      lplain:k0=3+backoff=1+nmax=32 n= 384 prompt=   46 reused=   45 tps= 18.46 ttft=  0.07 dflash=0r 0/0 lookup=5r 6/19 plain=372
+r1 code2k    plain            n= 384 prompt= 3589 reused=    0 tps= 17.76 ttft= 25.71 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 code2k    lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 3589 reused= 3588 tps= 21.68 ttft=  0.08 dflash=0r 0/0 lookup=17r 95/126 plain=271
+r1 code2k    hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 3589 reused= 3588 tps= 34.78 ttft=  0.07 dflash=62r 210/427 lookup=15r 97/122 plain=0
+r1 code2k    dflash           n= 384 prompt= 3589 reused= 3588 tps= 34.51 ttft=  0.07 dflash=77r 307/531 lookup=0r 0/0 plain=0
+r1 en2k      hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 2630 reused=    0 tps= 17.31 ttft= 18.80 dflash=151r 231/1048 lookup=1r 0/3 plain=0
+r1 en2k      lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 2630 reused= 2629 tps= 18.08 ttft=  0.07 dflash=0r 0/0 lookup=1r 1/3 plain=381
+r1 en2k      plain            n= 384 prompt= 2630 reused= 2629 tps= 18.32 ttft=  0.12 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 en2k      dflash           n= 384 prompt= 2630 reused= 2629 tps= 16.62 ttft=  0.07 dflash=162r 222/1125 lookup=0r 0/0 plain=0
+r1 ru2k      hyb:k0=3+backoff=1+nmax=32 n= 384 prompt= 2699 reused=    0 tps= 14.57 ttft= 19.28 dflash=178r 202/1243 lookup=2r 1/6 plain=0
+r1 ru2k      dflash           n= 384 prompt= 2699 reused= 2698 tps= 14.83 ttft=  0.07 dflash=178r 205/1243 lookup=0r 0/0 plain=0
+r1 ru2k      plain            n= 384 prompt= 2699 reused= 2698 tps= 18.27 ttft=  0.11 dflash=0r 0/0 lookup=0r 0/0 plain=0
+r1 ru2k      lplain:k0=3+backoff=1+nmax=32 n= 384 prompt= 2699 reused= 2698 tps= 18.12 ttft=  0.08 dflash=0r 0/0 lookup=2r 2/6 plain=379
+
+== median decode tok/s per workload (over rounds); xN = vs dflash / vs plain; identity vs plain ==
+rewrite_a plain            tps  18.97 [19.7 18.2] x0.650 dflash x1.000 plain  n=384.0  == plain 2/2 
+rewrite_a dflash           tps  29.16 [30.7 27.6] x1.000 dflash x1.538 plain  n=384.0  == plain 2/2 
+rewrite_a hyb:k0=3+backoff=1+nmax=32 tps  70.98 [72.7 69.2] x2.434 dflash x3.742 plain  n=384.0  == plain 2/2 
+rewrite_a lplain:k0=3+backoff=1+nmax=32 tps  73.16 [78.7 67.7] x2.509 dflash x3.857 plain  n=384.0  == plain 2/2 
+rewrite_b plain            tps  18.96 [19.7 18.2] x0.640 dflash x1.000 plain  n=384.0  == plain 2/2 
+rewrite_b dflash           tps  29.61 [31.2 28.0] x1.000 dflash x1.561 plain  n=384.0  == plain 2/2 
+rewrite_b hyb:k0=3+backoff=1+nmax=32 tps  78.84 [84.4 73.3] x2.663 dflash x4.157 plain  n=384.0  == plain 2/2 
+rewrite_b lplain:k0=3+backoff=1+nmax=32 tps  76.02 [79.3 72.8] x2.567 dflash x4.009 plain  n=384.0  == plain 2/2 
+reemit    plain            tps  19.16 [19.8 18.6] x0.354 dflash x1.000 plain  n=269.0  == plain 2/2 
+reemit    dflash           tps  54.06 [50.8 57.4] x1.000 dflash x2.822 plain  n=269.0  == plain 2/2 
+reemit    hyb:k0=3+backoff=1+nmax=32 tps  83.55 [86.4 80.7] x1.545 dflash x4.361 plain  n=269.0  == plain 2/2 
+reemit    lplain:k0=3+backoff=1+nmax=32 tps  51.91 [54.7 49.1] x0.960 dflash x2.710 plain  n=269.0  == plain 2/2 
+code      plain            tps  19.00 [19.5 18.5] x0.488 dflash x1.000 plain  n=384.0  == plain 2/2 
+code      dflash           tps  38.92 [42.5 35.3] x1.000 dflash x2.048 plain  n=384.0  == plain 2/2 
+code      hyb:k0=3+backoff=1+nmax=32 tps  38.32 [41.7 34.9] x0.985 dflash x2.017 plain  n=384.0  == plain 2/2 
+code      lplain:k0=3+backoff=1+nmax=32 tps  18.93 [19.4 18.5] x0.486 dflash x0.996 plain  n=384.0  == plain 2/2 
+code2k    plain            tps  18.00 [18.2 17.8] x0.520 dflash x1.000 plain  n=384.0  == plain 2/2 
+code2k    dflash           tps  34.61 [34.7 34.5] x1.000 dflash x1.923 plain  n=384.0  == plain 0/2 [213, 213]
+code2k    hyb:k0=3+backoff=1+nmax=32 tps  35.10 [35.4 34.8] x1.014 dflash x1.950 plain  n=384.0  == plain 0/2 [213, 213]
+code2k    lplain:k0=3+backoff=1+nmax=32 tps  21.89 [22.1 21.7] x0.632 dflash x1.216 plain  n=384.0  == plain 0/2 [379, 379]
+en2k      plain            tps  18.25 [18.2 18.3] x1.093 dflash x1.000 plain  n=384.0  == plain 2/2 
+en2k      dflash           tps  16.71 [16.8 16.6] x1.000 dflash x0.915 plain  n=384.0  == plain 0/2 [27, 27]
+en2k      hyb:k0=3+backoff=1+nmax=32 tps  17.06 [16.8 17.3] x1.021 dflash x0.935 plain  n=384.0  == plain 0/2 [27, 27]
+en2k      lplain:k0=3+backoff=1+nmax=32 tps  18.17 [18.3 18.1] x1.087 dflash x0.995 plain  n=384.0  == plain 2/2 
+ru2k      plain            tps  18.30 [18.3 18.3] x1.223 dflash x1.000 plain  n=384.0  == plain 2/2 
+ru2k      dflash           tps  14.96 [15.1 14.8] x1.000 dflash x0.818 plain  n=384.0  == plain 0/2 [280, 280]
+ru2k      hyb:k0=3+backoff=1+nmax=32 tps  14.63 [14.7 14.6] x0.978 dflash x0.799 plain  n=384.0  == plain 0/2 [280, 280]
+ru2k      lplain:k0=3+backoff=1+nmax=32 tps  18.14 [18.2 18.1] x1.213 dflash x0.991 plain  n=384.0  == plain 0/2 [280, 280]
+
+== oracle rounds on code: K perfect drafts per verify round (no drafter) ==
+r0 K= 0 tps= 18.40 rounds=383 ms/round=  54.4 same=True
+r0 K= 3 tps= 40.54 rounds=96 ms/round=  98.4 same=True
+r0 K= 7 tps= 75.22 rounds=48 ms/round= 106.1 same=True
+r0 K=11 tps= 76.82 rounds=32 ms/round= 155.8 same=True
+r0 K=15 tps=101.14 rounds=24 ms/round= 157.8 same=True
+r1 K=15 tps= 99.83 rounds=24 ms/round= 159.9 same=True
+r1 K=11 tps= 77.79 rounds=32 ms/round= 153.9 same=True
+r1 K= 7 tps= 75.36 rounds=48 ms/round= 105.9 same=True
+r1 K= 3 tps= 39.75 rounds=96 ms/round= 100.4 same=True
+r1 K= 0 tps= 18.19 rounds=383 ms/round=  55.0 same=True
+K= 0 (verify rows  1): median   54.7 ms/round,  18.29 tok/s
+K= 3 (verify rows  4): median   99.4 ms/round,  40.14 tok/s
+K= 7 (verify rows  8): median  106.0 ms/round,  75.29 tok/s
+K=11 (verify rows 12): median  154.8 ms/round,  77.31 tok/s
+K=15 (verify rows 16): median  158.8 ms/round, 100.49 tok/s
+peak 19.24 GB
+wrote ./docs/perf/2026-11-16/raw/lookup_ab2.json

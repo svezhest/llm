@@ -1,0 +1,251 @@
+{
+ "commit": "7437e623f186e4ecf85d595386d94d0543fd312a",
+ "tokenizer": "qwen38-27b-mlx-4bit",
+ "render": "HF chat template, add_generation_prompt, enable_thinking=False",
+ "corpora": {
+  "code": {
+   "file_header": "// file: {path}\n",
+   "files": [
+    "src/worker/qwen_worker/__init__.py",
+    "src/worker/qwen_worker/chat.py",
+    "src/worker/qwen_worker/config.py",
+    "src/worker/qwen_worker/engine.py",
+    "src/worker/qwen_worker/grammar.py",
+    "src/worker/qwen_worker/kernels.py",
+    "src/worker/qwen_worker/logprobs.py",
+    "src/worker/qwen_worker/nosync.py",
+    "src/worker/qwen_worker/pcache.py",
+    "src/worker/qwen_worker/request.py",
+    "src/worker/qwen_worker/rows.py",
+    "src/worker/qwen_worker/sampler.py",
+    "src/worker/qwen_worker/sched_admit.py",
+    "src/worker/qwen_worker/sched_cascade.py",
+    "src/worker/qwen_worker/sched_decode.py",
+    "src/worker/qwen_worker/sched_prefill.py",
+    "src/worker/qwen_worker/sched_spec.py",
+    "src/worker/qwen_worker/sched_store.py",
+    "src/worker/qwen_worker/scheduler.py",
+    "src/worker/qwen_worker/server.py",
+    "src/worker/qwen_worker/sizing.py",
+    "src/worker/qwen_worker/stream.py",
+    "src/gateway/src/api.rs",
+    "src/gateway/src/journal.rs",
+    "src/gateway/src/logging.rs",
+    "src/gateway/src/main.rs",
+    "src/gateway/src/metrics.rs",
+    "src/gateway/src/pb.rs",
+    "src/gateway/src/pool.rs",
+    "src/gateway/src/request.rs",
+    "src/gateway/src/worker_client.rs",
+    "src/proto/worker.proto"
+   ]
+  },
+  "en": {
+   "file_header": "<!-- file: {path} -->\n",
+   "files": [
+    "README.md",
+    "docs/TUTORIAL.md"
+   ]
+  },
+  "ru": {
+   "file_header": "<!-- файл: {path} -->\n",
+   "files": [
+    "docs/perf/2026-10-16/HANDOFF-appworld.md",
+    "docs/perf/2026-10-17/REPORT-appworld-run-1017.md",
+    "docs/perf/2026-10-21/design/logprobs.md",
+    "docs/perf/2026-10-24/deepinfer_ideas.md",
+    "docs/perf/2026-10-24/design/chain_tail.md",
+    "docs/perf/2026-10-24/design/sampler_topk.md",
+    "docs/perf/2026-10-24/design/special_tokens.md",
+    "docs/perf/2026-10-24/design/verify_mrqmm.md",
+    "docs/perf/2026-10-24/step_metric.md",
+    "docs/perf/2026-11-10/design/dflash2_27b_plan.md",
+    "docs/perf/2026-11-10/dflash2_27b.md"
+   ]
+  },
+  "ppl_en": {
+   "file_header": "",
+   "files": [
+    "README.md",
+    "docs/TUTORIAL.md",
+    "BACKLOG.md"
+   ],
+   "sha256": "46f14000e38f1f72f13211740e1529c299a4d979fa4a369dae519c761e323325",
+   "hf_tokens": 55741
+  },
+  "ppl_ru": {
+   "file_header": "",
+   "files": [
+    "docs/perf/2026-10-16/HANDOFF-appworld.md",
+    "docs/perf/2026-10-17/REPORT-appworld-run-1017.md",
+    "docs/perf/2026-10-21/design/logprobs.md",
+    "docs/perf/2026-10-24/deepinfer_ideas.md",
+    "docs/perf/2026-10-24/design/chain_tail.md",
+    "docs/perf/2026-10-24/design/sampler_topk.md",
+    "docs/perf/2026-10-24/design/special_tokens.md",
+    "docs/perf/2026-10-24/design/verify_mrqmm.md",
+    "docs/perf/2026-10-24/step_metric.md",
+    "docs/perf/2026-11-10/design/dflash2_27b_plan.md",
+    "docs/perf/2026-11-10/dflash2_27b.md"
+   ],
+   "sha256": "32e3f47afb6f14da05a2ca01a35d7cb06a7c8c8548cb1490be5d796bcf5b4422",
+   "hf_tokens": 47736
+  }
+ },
+ "prompts": [
+  {
+   "id": "code-2k-0",
+   "cls": "code",
+   "ctx": 2048,
+   "corpus": "code",
+   "header": "You are a coding assistant. Source files of a project follow; use them only if relevant.\n\n",
+   "task": "Write a Python function that parses an ISO-8601 duration string like 'P3DT4H5M' into seconds, then explain the edge cases.",
+   "n_chars": 7317,
+   "n_tokens": 2047,
+   "sha256_tag00": "e10bc05b11ac999be681f525607ee987425d04d82f1d1967d3238303f5bdab49"
+  },
+  {
+   "id": "code-2k-1",
+   "cls": "code",
+   "ctx": 2048,
+   "corpus": "code",
+   "header": "You are a coding assistant. Source files of a project follow; use them only if relevant.\n\n",
+   "task": "Implement an LRU cache in Rust with O(1) get and put, and walk through the ownership issues you run into.",
+   "n_chars": 7342,
+   "n_tokens": 2047,
+   "sha256_tag00": "8a10a3517342d3d67f2abfcc30e85fbca7e669b25ce56a19d33a38d65f9ce0d2"
+  },
+  {
+   "id": "code-2k-2",
+   "cls": "code",
+   "ctx": 2048,
+   "corpus": "code",
+   "header": "You are a coding assistant. Source files of a project follow; use them only if relevant.\n\n",
+   "task": "Write a Go worker pool that processes jobs from a channel with a bounded number of goroutines and graceful shutdown.",
+   "n_chars": 7351,
+   "n_tokens": 2048,
+   "sha256_tag00": "33aa135402b21d489d9747323978a9fea0ce1d25dda59a1fcf6355cef9ec0131"
+  },
+  {
+   "id": "en-2k-0",
+   "cls": "en",
+   "ctx": 2048,
+   "corpus": "en",
+   "header": "You are a helpful writer. Notes of a software project follow; use them only if relevant.\n\n",
+   "task": "Write a long, detailed essay (at least 800 words) about the history of the printing press and how it changed European society. Use full paragraphs, no lists or headings.",
+   "n_chars": 6018,
+   "n_tokens": 2048,
+   "sha256_tag00": "ec82cacf3cfd7b6ff9601b3169f9976272a386c328f287851888366fa4ede21d"
+  },
+  {
+   "id": "en-2k-1",
+   "cls": "en",
+   "ctx": 2048,
+   "corpus": "en",
+   "header": "You are a helpful writer. Notes of a software project follow; use them only if relevant.\n\n",
+   "task": "Write a short story (at least 800 words) about a lighthouse keeper who finds a message in a bottle. Use rich, descriptive prose and dialogue.",
+   "n_chars": 6026,
+   "n_tokens": 2048,
+   "sha256_tag00": "911ea7c191c3540c34299b249080eb3dadc97d0bbe8611e695c368659783196d"
+  },
+  {
+   "id": "en-2k-2",
+   "cls": "en",
+   "ctx": 2048,
+   "corpus": "en",
+   "header": "You are a helpful writer. Notes of a software project follow; use them only if relevant.\n\n",
+   "task": "Explain to a curious teenager, in flowing prose of at least 800 words, why the Earth has seasons and why places near the equator barely notice them. No lists or headings.",
+   "n_chars": 6014,
+   "n_tokens": 2048,
+   "sha256_tag00": "28892e44d15c65ea0e745357ef47038bba5d7af99c403428830ed259fa314d03"
+  },
+  {
+   "id": "ru-2k-0",
+   "cls": "ru",
+   "ctx": 2048,
+   "corpus": "ru",
+   "header": "Ты — полезный помощник. Ниже — заметки программного проекта; используй их, только если они относятся к делу.\n\n",
+   "task": "Напиши подробное эссе (не меньше 800 слов) об истории книгопечатания и о том, как оно изменило европейское общество. Пиши связными абзацами, без списков и заголовков.",
+   "n_chars": 4547,
+   "n_tokens": 2047,
+   "sha256_tag00": "283ca0edadb653d41206d6eb420bdc540cecba19fb58c8bae0c453dbfdf9fb18"
+  },
+  {
+   "id": "ru-2k-1",
+   "cls": "ru",
+   "ctx": 2048,
+   "corpus": "ru",
+   "header": "Ты — полезный помощник. Ниже — заметки программного проекта; используй их, только если они относятся к делу.\n\n",
+   "task": "Напиши рассказ (не меньше 800 слов) о смотрителе маяка, который находит письмо в бутылке. Используй богатый описательный язык и диалоги.",
+   "n_chars": 4559,
+   "n_tokens": 2048,
+   "sha256_tag00": "98dcc537e6b3739937ba49bc89ff7b759c77a4b37f282ec04889afac131ca095"
+  },
+  {
+   "id": "ru-2k-2",
+   "cls": "ru",
+   "ctx": 2048,
+   "corpus": "ru",
+   "header": "Ты — полезный помощник. Ниже — заметки программного проекта; используй их, только если они относятся к делу.\n\n",
+   "task": "Объясни любознательному подростку связной прозой (не меньше 800 слов), почему на Земле бывают времена года и почему возле экватора их почти не замечают. Без списков и заголовков.",
+   "n_chars": 4544,
+   "n_tokens": 2048,
+   "sha256_tag00": "871db6827b89823b829167688828242d471daef78f1df1ecb3955aa39520a9de"
+  },
+  {
+   "id": "code-8k-0",
+   "cls": "code",
+   "ctx": 8192,
+   "corpus": "code",
+   "header": "You are a coding assistant. Source files of a project follow; use them only if relevant.\n\n",
+   "task": "Write a Python function that parses an ISO-8601 duration string like 'P3DT4H5M' into seconds, then explain the edge cases.",
+   "n_chars": 30180,
+   "n_tokens": 8192,
+   "sha256_tag00": "6b58c44e21f09b65b4cc337656cac019363c0c5713a2c5d12c8ef81836562fce"
+  },
+  {
+   "id": "ru-8k-0",
+   "cls": "ru",
+   "ctx": 8192,
+   "corpus": "ru",
+   "header": "Ты — полезный помощник. Ниже — заметки программного проекта; используй их, только если они относятся к делу.\n\n",
+   "task": "Напиши подробное эссе (не меньше 800 слов) об истории книгопечатания и о том, как оно изменило европейское общество. Пиши связными абзацами, без списков и заголовков.",
+   "n_chars": 18730,
+   "n_tokens": 8191,
+   "sha256_tag00": "e1b15dde9d03906c3b17133f6c457c4951ba8e146d68409a980dff9caaaa124a"
+  },
+  {
+   "id": "code-32k-0",
+   "cls": "code",
+   "ctx": 32768,
+   "corpus": "code",
+   "header": "You are a coding assistant. Source files of a project follow; use them only if relevant.\n\n",
+   "task": "Write a Python function that parses an ISO-8601 duration string like 'P3DT4H5M' into seconds, then explain the edge cases.",
+   "n_chars": 117838,
+   "n_tokens": 32768,
+   "sha256_tag00": "744db987d6c646909429e1099eda8730e5b78fae21c29df87db8d253b5cb60fc"
+  },
+  {
+   "id": "ru-32k-0",
+   "cls": "ru",
+   "ctx": 32768,
+   "corpus": "ru",
+   "header": "Ты — полезный помощник. Ниже — заметки программного проекта; используй их, только если они относятся к делу.\n\n",
+   "task": "Напиши подробное эссе (не меньше 800 слов) об истории книгопечатания и о том, как оно изменило европейское общество. Пиши связными абзацами, без списков и заголовков.",
+   "n_chars": 83411,
+   "n_tokens": 32768,
+   "sha256_tag00": "1d22a4e00b034048150196cec97a439603297d482306a5b601ab6aba4ac38d74"
+  },
+  {
+   "id": "code-80k-0",
+   "cls": "code",
+   "ctx": 81920,
+   "corpus": "code",
+   "header": "You are a coding assistant. Source files of a project follow; use them only if relevant.\n\n",
+   "task": "Write a Python function that parses an ISO-8601 duration string like 'P3DT4H5M' into seconds, then explain the edge cases.",
+   "n_chars": 300741,
+   "n_tokens": 81919,
+   "sha256_tag00": "9d7f0028325bf1cd7e631f7046a56456283b904bf1307157c39442f8c850df40"
+  }
+ ]
+}

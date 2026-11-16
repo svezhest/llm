@@ -125,6 +125,25 @@ def test_move_dflash_rows(dense, small, monkeypatch, kv):
     assert len(b.ctx) == 3 and all(r > 0 for _, _, r in b.trace[1:])
 
 
+def test_move_taken_buffers_keep_the_quantized_layout(dense, small, monkeypatch, kv):
+    """A row whose buffers run a KVCache step or more past its entry gives
+    the entry copies (_Seg.take empties the row's cache objects): the store
+    that follows must still describe its layers as quantized (it read the
+    emptied caches as fp16: the 27B gate's 80K read restore raised
+    TypeError). Forced on the tiny model with a 4-token step."""
+    from mlx_vlm.models.cache import QuantizedKVCache
+    monkeypatch.setattr(QuantizedKVCache, "step", 4, raising=False)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_MOVE", True)
+    monkeypatch.setattr(worker, "PROMPT_CACHE_REPLY", False)    # the prompt part of the buffers only
+    p = Play(dense, True, **kv)
+    ids = rk.first(390, system=60, user=10)
+    p.do(ids, 6, "a", prompt_cache="off")
+    (e,) = p.pc.entries
+    assert e.quantized and [lay[0] for lay in e.layout].count("q") == 2
+    cold = run(scheduler(dense, max_batch=1, **kv), [request(ids, 6, "cold")])["cold"]
+    assert p.do(ids, 6, "b", prompt_cache="read") == cold[0] and p.reqs["b"].reused == len(ids) - 1
+
+
 def test_fp16_entry_stays_quantized_entry_moves(dense, small, monkeypatch, caplog):
     """kv_start 40: the fp16 entry of a short first turn is copied by the
     next (longer, quantized) turn -- it stays in the cache while that row
@@ -207,7 +226,9 @@ def test_dflash_quantized_equals_plain(dense, monkeypatch, start):
     assert run(sched, [request(p, 30, "a")])["a"] == plain
     assert len(d.accept_lens) > 3
     if 25 < start:                                      # the start falls inside the decode
-        assert min(d.sizes) < 4 or start - 25 <= 1
+        # cut there: a shorter block, or (one fp16 position left) a plain step
+        # that records a round without a draft_block call
+        assert min(d.sizes) < 4 or len(d.accept_lens) > len(d.sizes) or start - 25 <= 1
     assert len(got["a"]) == len(ref["a"])
     for (k, v, q), (k0, v0, q0) in zip(got["a"], ref["a"]):
         # (a "length" row of the plain loop fed its last token too: one more)

@@ -1,0 +1,120 @@
+### --k0 0 --backoff 0 --nmax 8
+
+== plain: est. speed-up vs plain alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   4.29( 97%)  4.33( 96%)  4.18( 94%)  3.92( 92%)
+rewrite_b   4.14( 96%)  4.18( 94%)  4.00( 93%)  3.92( 92%)
+reemit      2.61( 85%)  2.73( 83%)  2.69( 80%)  2.69( 79%)
+code        0.96( 16%)  0.97( 10%)  0.99(  3%)  0.99(  1%)
+code2k      1.17( 45%)  1.23( 36%)  1.23( 30%)  1.22( 26%)
+en2k        1.00(  1%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        0.98(  3%)  1.00(  2%)  1.00(  1%)  1.00(  0%)
+
+== dflash: est. speed-up vs dflash alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   2.76( 96%)  2.79( 95%)  2.89( 94%)  2.65( 92%)
+rewrite_b   2.78( 95%)  2.80( 94%)  2.81( 93%)  2.73( 92%)
+reemit      1.31( 83%)  1.36( 80%)  1.44( 79%)  1.44( 79%)
+code        0.86( 10%)  0.92(  6%)  0.95(  2%)  0.95(  1%)
+code2k      0.96( 39%)  1.03( 35%)  1.13( 27%)  1.12( 25%)
+en2k        0.99(  1%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        0.99(  4%)  0.99(  2%)  1.00(  1%)  0.99(  1%)
+
+exact lookup acceptance (m3, k15): per workload accepted drafts / round
+rewrite_a  rounds   27  tokens/round 13.78  share  97%  answer 384
+rewrite_b  rounds   26  tokens/round 14.08  share  96%  answer 384
+reemit     rounds   23  tokens/round  9.96  share  85%  answer 269
+code       rounds   27  tokens/round  2.26  share  16%  answer 384
+code2k     rounds   40  tokens/round  4.28  share  45%  answer 384
+en2k       rounds    1  tokens/round  2.00  share   1%  answer 384
+ru2k       rounds    7  tokens/round  1.71  share   3%  answer 384
+### --k0 3 --backoff 1 --nmax 32
+
+== plain: est. speed-up vs plain alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   4.03( 95%)  3.95( 94%)  3.71( 92%)  3.38( 88%)
+rewrite_b   4.34( 96%)  3.99( 95%)  3.75( 92%)  3.78( 91%)
+reemit      2.73( 80%)  2.70( 79%)  2.72( 79%)  2.72( 79%)
+code        1.00(  3%)  1.00(  2%)  1.01(  2%)  1.00(  0%)
+code2k      1.24( 29%)  1.21( 23%)  1.22( 25%)  1.21( 23%)
+en2k        1.00(  1%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        1.00(  1%)  1.00(  1%)  1.00(  1%)  1.00(  0%)
+
+== dflash: est. speed-up vs dflash alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   2.57( 95%)  2.74( 94%)  2.71( 92%)  2.45( 88%)
+rewrite_b   2.70( 95%)  2.66( 94%)  2.68( 92%)  2.48( 87%)
+reemit      1.44( 79%)  1.44( 79%)  1.49( 79%)  1.49( 79%)
+code        0.98(  2%)  0.98(  2%)  0.99(  0%)  0.99(  0%)
+code2k      1.12( 31%)  1.13( 25%)  1.13( 22%)  1.13( 22%)
+en2k        0.99(  0%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        1.00(  1%)  0.99(  1%)  1.00(  1%)  1.00(  1%)
+
+exact lookup acceptance (m3, k15): per workload accepted drafts / round
+rewrite_a  rounds   25  tokens/round 14.60  share  95%  answer 384
+rewrite_b  rounds   24  tokens/round 15.12  share  95%  answer 384
+reemit     rounds   15  tokens/round 14.27  share  80%  answer 269
+code       rounds    2  tokens/round  2.50  share   1%  answer 384
+code2k     rounds    8  tokens/round 12.00  share  25%  answer 384
+en2k       rounds    1  tokens/round  2.00  share   1%  answer 384
+ru2k       rounds    2  tokens/round  2.00  share   1%  answer 384
+### --k0 7 --backoff 1 --nmax 32
+
+== plain: est. speed-up vs plain alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   4.32( 96%)  4.14( 94%)  4.00( 92%)  3.62( 90%)
+rewrite_b   3.74( 92%)  3.85( 93%)  3.80( 91%)  3.87( 91%)
+reemit      2.78( 80%)  2.90( 82%)  2.80( 80%)  2.75( 79%)
+code        1.00(  1%)  1.01(  2%)  1.00(  1%)  1.00(  0%)
+code2k      1.24( 25%)  1.20( 23%)  1.24( 25%)  1.21( 22%)
+en2k        1.00(  1%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        1.00(  1%)  1.00(  1%)  1.00(  1%)  1.00(  0%)
+
+== dflash: est. speed-up vs dflash alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   2.84( 95%)  2.89( 94%)  2.67( 90%)  2.60( 89%)
+rewrite_b   2.71( 94%)  2.71( 94%)  2.85( 93%)  2.71( 91%)
+reemit      1.48( 79%)  1.48( 79%)  1.48( 79%)  1.48( 79%)
+code        0.98(  3%)  0.98(  2%)  0.99(  0%)  0.99(  0%)
+code2k      1.13( 26%)  1.15( 25%)  1.16( 23%)  1.16( 23%)
+en2k        0.99(  0%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        1.00(  1%)  0.99(  1%)  1.00(  1%)  1.00(  1%)
+
+exact lookup acceptance (m3, k15): per workload accepted drafts / round
+rewrite_a  rounds   25  tokens/round 14.60  share  95%  answer 384
+rewrite_b  rounds   24  tokens/round 15.12  share  95%  answer 384
+reemit     rounds   15  tokens/round 14.27  share  80%  answer 269
+code       rounds    2  tokens/round  2.50  share   1%  answer 384
+code2k     rounds    8  tokens/round 12.00  share  25%  answer 384
+en2k       rounds    1  tokens/round  2.00  share   1%  answer 384
+ru2k       rounds    2  tokens/round  2.00  share   1%  answer 384
+### --k0 7 --backoff 0 --nmax 32
+
+== plain: est. speed-up vs plain alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   4.15( 97%)  4.27( 95%)  3.96( 93%)  3.81( 92%)
+rewrite_b   4.28( 96%)  4.09( 94%)  4.05( 93%)  3.87( 91%)
+reemit      2.79( 85%)  2.82( 83%)  2.78( 80%)  2.75( 79%)
+code        1.02( 16%)  1.01( 10%)  1.00(  3%)  1.00(  1%)
+code2k      1.29( 45%)  1.31( 36%)  1.27( 30%)  1.24( 26%)
+en2k        1.00(  1%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        1.00(  3%)  1.00(  2%)  1.00(  1%)  1.00(  0%)
+
+== dflash: est. speed-up vs dflash alone (lookup tokens share) ==
+workload       m3/k15     m4/k15     m6/k15     m8/k15
+rewrite_a   2.73( 96%)  2.90( 95%)  2.80( 93%)  2.67( 90%)
+rewrite_b   2.78( 95%)  2.71( 94%)  2.85( 93%)  2.71( 91%)
+reemit      1.37( 83%)  1.40( 80%)  1.48( 79%)  1.48( 79%)
+code        0.93( 10%)  0.96(  6%)  0.97(  2%)  0.97(  1%)
+code2k      1.09( 39%)  1.13( 35%)  1.16( 27%)  1.15( 25%)
+en2k        0.99(  1%)  1.00(  0%)  1.00(  0%)  1.00(  0%)
+ru2k        1.00(  4%)  1.00(  2%)  1.00(  1%)  1.00(  1%)
+
+exact lookup acceptance (m3, k15): per workload accepted drafts / round
+rewrite_a  rounds   27  tokens/round 13.78  share  97%  answer 384
+rewrite_b  rounds   26  tokens/round 14.08  share  96%  answer 384
+reemit     rounds   23  tokens/round  9.96  share  85%  answer 269
+code       rounds   27  tokens/round  2.26  share  16%  answer 384
+code2k     rounds   38  tokens/round  4.50  share  45%  answer 384
+en2k       rounds    1  tokens/round  2.00  share   1%  answer 384
+ru2k       rounds    7  tokens/round  1.71  share   3%  answer 384

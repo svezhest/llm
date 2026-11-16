@@ -7,7 +7,7 @@ import weakref
 import mlx.core as mx
 
 from . import config as cfg
-from .config import (CLEAR_CACHE, DRAFT_SAMPLING, GIB, log, PREFILL_LANE, PREFILL_STEP,
+from .config import (CLEAR_CACHE, DRAFT_SAMPLING, GIB, log, LOOKUP, PREFILL_LANE, PREFILL_STEP,
                      PROMPT_CACHE, PROMPT_CACHE_KEEP_TOKENS, PROMPT_CACHE_KEEP_WAIT_S,
                      RESERVE_TOKENS)
 from .sampler import _Penalties, make_sampler
@@ -402,7 +402,11 @@ class _AdmitMixin:
     def _spec_ok(self, row):
         req = row.req
         greedy = req.sampling["temperature"] <= 0 and not row.pen.active
-        if (self.eng.draft is None or cfg.BATCH_INVARIANT or req.images
+        # QWEN_LOOKUP without a drafter: lookup rounds + plain steps (_spec);
+        # fp16 KV only (a round's rollback trims the cache), no thinking budget
+        look = (self.eng.draft is None and LOOKUP == "1" and self.kv["kv_bits"] is None
+                and req.thinking is None)
+        if ((self.eng.draft is None and not look) or cfg.BATCH_INVARIANT or req.images
                 or req.golden is not None or not (greedy or DRAFT_SAMPLING)):
             return False
         if row.lpk is not None or _wants(req, "prompt_logprobs"):

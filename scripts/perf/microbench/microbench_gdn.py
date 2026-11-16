@@ -64,6 +64,21 @@ def impls():
         out["lm"] = lambda q, k, v, g, be, s: lg.gated_delta_kernel(q, k, v, g, be, s)
     except ImportError:
         pass
+    if getattr(vg, "_gated_delta_with_states_kernel", None) is not None:
+        # the DFlash verify's recurrence: also writes the state after every
+        # token (B, T, Hv, Dv, Dk) fp32 (mlx-vlm 0.7 gated_delta_update_with_states)
+        def states(q, k, v, g, be, s):
+            B, T, Hk, Dk = k.shape
+            Hv, Dv = v.shape[2:]
+            y, so, st = vg._gated_delta_with_states_kernel(
+                inputs=[q, k, v, g, be, s, T],
+                template=[("InT", q.dtype), ("StT", s.dtype), ("Dk", Dk), ("Dv", Dv),
+                          ("Hk", Hk), ("Hv", Hv), ("StateT", T)],
+                grid=(32, Dv, B * Hv), threadgroup=(32, 4, 1),
+                output_shapes=[(B, T, Hv, Dv), s.shape, (B, T, Hv, Dv, Dk)],
+                output_dtypes=[q.dtype, s.dtype, s.dtype])
+            return y, so, st
+        out["states"] = states
     if hasattr(mx.fast, "gated_delta_update"):
         out["fast"] = lambda q, k, v, g, be, s: mx.fast.gated_delta_update(
             q, k, v, g, be, initial_state=s)
@@ -93,6 +108,9 @@ def main():
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=20)
     ap.add_argument("--json")
+    ap.add_argument("--calls", type=int, default=1,
+                    help="calls per eval on distinct inputs (e.g. the model's GDN layer count: "
+                         "one eval per 'step', so the per-call sync overhead is amortized)")
     a = ap.parse_args()
     tc = cfg(a.config)
     hk, hv = tc["linear_num_key_heads"], tc["linear_num_value_heads"]
@@ -111,23 +129,25 @@ def main():
     mx.random.seed(0)
     for case in a.cases.split(","):
         B, T = (int(x) for x in case.split("x"))
-        x = inputs(B, T, hk, hv, dk, dv, dtype)
+        xs = [inputs(B, T, hk, hv, dk, dv, dtype) for _ in range(a.calls)]
+        x = xs[0]
         ref = fns["vlm"](*x)
         mx.eval(ref)
         for name, fn in fns.items():
             try:
                 out = fn(*x)
                 mx.eval(out)
-                t = bench(lambda: fn(*x), a.warmup, a.iters)
+                t = bench(lambda: [fn(*xi) for xi in xs], a.warmup, a.iters) / a.calls
             except Exception as e:  # noqa: BLE001
                 print(f"| {a.label} | {B} | {T} | {name} | | | | error: {type(e).__name__}: {str(e)[:80]} | |")
                 continue
             dy = mx.abs(out[0].astype(mx.float32) - ref[0].astype(mx.float32)).max().item()
             ds = mx.abs(out[1] - ref[1]).max().item()
+            nbytes = sum(o.nbytes for o in out) + sum(t.nbytes for t in x)
             print(f"| {a.label} | {B} | {T} | {name} | {t*1e3:.3f} | {t*1e3*n_gdn:.1f} | "
                   f"{B*T/(t*n_gdn):.0f} | {dy:.2e} | {ds:.2e} |")
             raw.append(dict(label=a.label, versions=vers, B=B, T=T, impl=name, sec=t,
-                            dy=dy, dstate=ds))
+                            dy=dy, dstate=ds, bytes=nbytes, n_layers=n_gdn))
         mx.clear_cache()
     if a.json:
         with open(a.json, "w") as f:
