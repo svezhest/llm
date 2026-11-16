@@ -13,6 +13,7 @@ Variants (comma separated):
   <v>+k<N>      the adaptive draft count's ceiling N (QWEN_MTP_KMAX)
   <v>+q4        +q on the 4-bit modules only (the 5 / 6 / 8-bit ones on their old path)
   <v>+x        verify blocks through mlx-vlm's exact multi-row qmv (QWEN_VERIFY_MRQMM off)
+  <v>+h        the MTP head of --alt-head instead of the loaded one (two heads, one target, one process)
   <v>+q        verify blocks of 2..N tokens through mrqmv (load with QWEN_VERIFY_QMV=N; without
                +q the variant runs with it off)
   K = 0: the adaptive draft count (QWEN_MTP_K=0)
@@ -58,6 +59,7 @@ ap.add_argument("--sampling", action="store_true")
 ap.add_argument("--ident", default="", help="variants checked against plain greedy (wtest TASKS)")
 ap.add_argument("--ident-tasks", type=int, default=16)
 ap.add_argument("--skip-speed", action="store_true")
+ap.add_argument("--alt-head", default="", help="a second MTP drafter dir, taken by the +h variants")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
 
@@ -68,6 +70,10 @@ t_load = time.time()
 eng = W.Engine(os.environ["QWEN_MODEL"])
 eng.load()
 D, M = eng.draft, eng.mtp
+ALT = None
+if a.alt_head:
+    from qwen_worker.mtp import load_mtp
+    ALT = load_mtp(a.alt_head, eng.model.language_model, W.FP16)
 tok = getattr(eng.processor, "tokenizer", eng.processor)
 print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() / 1e9:.2f} GB; "
       f"dflash {type(D).__name__ if D else None} mtp {type(M).__name__ if M else None}; "
@@ -112,7 +118,9 @@ def set_variant(v):
     elif v == "dflash":
         eng.draft, eng.mtp = D, None
     elif v.startswith("mtp"):
-        eng.draft, eng.mtp = None, M
+        eng.draft, eng.mtp = None, (ALT if "h" in flags else M)
+        if eng.mtp is None:
+            raise SystemExit(f"{v}: no MTP head (QWEN_DRAFT / QWEN_DRAFT_MTP, --alt-head for +h)")
         W.MTP_K = int(v[3:].rstrip("r"))
         W.MTP_REFEED = v.endswith("r")
     elif v.startswith("hyb"):
@@ -181,7 +189,7 @@ def stats(dr):
 
 
 def run(key, rid, v, seed=0):
-    for dr in (D, M):
+    for dr in (D, M, ALT):
         if dr is not None:
             dr.accept_lens, dr.draft_lens = [], []
     r = request(key, rid, seed)
@@ -200,7 +208,7 @@ def run(key, rid, v, seed=0):
                tps=(n - 1) / dt if dt else 0.0, finish=[str(x) for x in ev[1:2]])
     if v != "plain":
         sd = stats(D) if D is not None and eng.draft is not None else {}
-        sm = stats(M) if M is not None and eng.mtp is not None else {}
+        sm = stats(eng.mtp) if eng.mtp is not None else {}
         rounds = sd.get("rounds", 0) + sm.get("rounds", 0)
         out["plain_steps"] = r.steps - 1 - rounds if "+p" in v else 0
         out.update(dflash=sd, mtp=sm, rounds=rounds, round_ms=1000.0 * dt / rounds if rounds else None,
@@ -215,6 +223,10 @@ def med(xs):
 
 res = {"args": vars(a), "model": os.environ["QWEN_MODEL"], "draft": os.environ.get("QWEN_DRAFT"),
        "draft_mtp": os.environ.get("QWEN_DRAFT_MTP"), "speed": [], "ident": []}
+if a.json:                              # the result file names weights dirs, not where they are
+    name = lambda p: os.path.basename(os.path.normpath(p)) if p else p  # noqa: E731
+    res.update(model=name(res["model"]), draft=name(res["draft"]), draft_mtp=name(res["draft_mtp"]),
+               args=dict(vars(a), alt_head=name(a.alt_head), json=os.path.basename(a.json)))
 VS = a.variants.split(",")
 
 
