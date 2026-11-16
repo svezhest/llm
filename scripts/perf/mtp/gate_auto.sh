@@ -10,8 +10,8 @@
 #   floor    the chooser's plain arm alone (pplain) vs the plain loop -> floor_auto.json
 #   dump     both drafters' drafts at every position of each cell's answer (plain steps forced) ->
 #            dump_auto.json, then the chooser's replay on the CPU (chooser_sim.py)
-#   q8       QWEN_KV_BITS=8, 8K context (code-8k-0, ru-8k-0, greedy + sampling), the same four variants ->
-#            gate_auto_q8.json + tables
+#   q8       QWEN_KV_BITS=8, 8K context (ru-8k-0 greedy; Q8_PROMPTS=code-8k-0,ru-8k-0 GATE_MODES=sampling,greedy
+#            for more cells: ~75 s of prefill per request), the same four variants -> gate_auto_q8.json + tables
 # The drafters are found by QWEN_DRAFT=auto next to the model dir (the load log says which);
 # QWEN_DRAFT_DFLASH / QWEN_DRAFT_MTP name them explicitly.
 setopt NO_BG_NICE
@@ -47,7 +47,7 @@ case $run in
   q8)
     export QWEN_KV_BITS=8
     json=$out/gate_auto_q8.json
-    $ab --modes sampling,greedy --prompts code-8k-0,ru-8k-0 --variants plain,dflash,mtp0+q,auto \
+    $ab --modes ${GATE_MODES:-greedy} --prompts ${Q8_PROMPTS:-ru-8k-0} --variants plain,dflash,mtp0+q,auto \
       --rounds 2 --warm-tokens 64 --json $json 2>${json:r}.log | tee ${json:r}.txt
     python3 ../../scripts/perf/mtp/gate_table.py $json | tee -a ${json:r}.txt ;;
   *) echo "unknown run $run"; exit 2 ;;

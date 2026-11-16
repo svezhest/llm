@@ -235,7 +235,7 @@ loop's (up to lone one-level flips of q8 elements); drafter discovery.
     WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh floor   # ~8 min
     WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh dump    # ~8 min + CPU replay
     WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh gate    # ~45 min (GATE_MODES=sampling | greedy: half)
-    WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh q8      # ~20 min, QWEN_KV_BITS=8, 8K context
+    WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh q8      # ~20 min, QWEN_KV_BITS=8, ru-8k-0 greedy
 
 Pass: `auto` ≥ 0.97 × the best of {plain, dflash, mtp0+q} in every cell (`gate_table.py`).
 Cells: greedy / sampling (T 0.6, top_p 0.95, top_k 20) × code-2k-0, en-2k-0, ru-2k-0,
@@ -253,10 +253,7 @@ short-en, short-ru (`prompts2k.SHORT`); 256 tokens, thinking off, 2 rounds.
 | ru-2k-0 | | | | | | | |
 | short-en | | | | | | | |
 | short-ru | | | | | | | |
-| code-8k-0 q8 | | | | | | | |
-| ru-8k-0 q8 | | | | | | | |
-| code-8k-0@s q8 | | | | | | | |
-| ru-8k-0@s q8 | | | | | | | |
+| ru-8k-0, `QWEN_KV_BITS=8` | | | | | | | |
 
 The arms `auto` took (share of rounds / of tokens; shadow drafts and switches per request):
 
