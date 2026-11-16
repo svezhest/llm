@@ -279,9 +279,10 @@ def test_dflash_quantized_demoted(dense, monkeypatch):
     assert 0 < len(sched.eng.draft.accept_lens) < 10
 
 
-def spec_arms(sched, plain, ids, arms, wrong=True):
+def spec_arms(sched, plain, ids, arms, wrong=True, script=None):
     """The drafters of `arms` on `sched` (both propose the known answer `plain`
-    after the tokens emitted so far, the last draft wrong every other round)."""
+    after the tokens emitted so far, the last draft wrong every other round;
+    the head's gate: `script`, see test_mtp.Oracle)."""
     from test_mtp import Oracle, head
     emitted = []
     stop = sched.eng.stopping
@@ -298,7 +299,7 @@ def spec_arms(sched, plain, ids, arms, wrong=True):
     if "dflash" in arms:
         d = sched.eng.draft = Rec(plain)
     if "mtp" in arms:
-        mt = sched.eng.mtp = Oracle(head(sched.lm), sched.lm, ids + plain, wrong=wrong)
+        mt = sched.eng.mtp = Oracle(head(sched.lm), sched.lm, ids + plain, wrong=wrong, script=script)
     return d, mt
 
 
@@ -324,7 +325,8 @@ def test_mtp_quantized_equals_plain(dense, monkeypatch, start, k):
     """The MTP head's rounds over a q8 cache (QWEN_DRAFT=auto on the stand's
     QWEN_KV_BITS=8): the plain answer and the plain loop's KV, as DFlash's -
     quantized at the same point, no block crossing the start while the cache
-    is fp16 (the drafts already made for a longer block are dropped)."""
+    is fp16 (the gate drafts no further than the start). k = 0: the gate,
+    draft counts 0..4 in turn (plain bursts among the rounds)."""
     no_metal_verify(monkeypatch)
     monkeypatch.setattr(worker, "MTP_K", k)
     monkeypatch.setattr(worker, "CLOCK", worker.Clock())
@@ -333,7 +335,7 @@ def test_mtp_quantized_equals_plain(dense, monkeypatch, start, k):
     ref = final_kv(sp, "a")
     plain = run(sp, [request(p, 30, "a")])["a"]
     sched = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
-    _, mt = spec_arms(sched, plain[0], p, ("mtp",))
+    _, mt = spec_arms(sched, plain[0], p, ("mtp",), script=(4, 0, 2, 0, 3, 1))
     got = final_kv(sched, "a")
     assert run(sched, [request(p, 30, "a")])["a"] == plain
     assert len(mt.accept_lens) > 3 and sum(mt.accept_lens) > 3
@@ -343,33 +345,24 @@ def test_mtp_quantized_equals_plain(dense, monkeypatch, start, k):
 @pytest.mark.parametrize("order", ["dmp", "pmd", "mdp", "chooser"])
 @pytest.mark.parametrize("start", [0, 12, 26, 27, 29, 33, 40])
 def test_hybrid_quantized_equals_plain(dense, monkeypatch, start, order):
-    """Both drafters + the plain arm (QWEN_DRAFT=auto) over a q8 cache: every
-    arm after every other across the quantization start, shadow drafts of the
-    arms not taken every round - the plain answer and the plain loop's KV."""
+    """Both drafters (QWEN_DRAFT=auto) over a q8 cache: every arm after every
+    other across the quantization start ("p": the head's round with no draft,
+    a plain burst), DFlash's shadow drafts every round it is not taken - the
+    plain answer and the plain loop's KV."""
+    from test_mtp import forced
     no_metal_verify(monkeypatch)
-    monkeypatch.setattr(worker, "MTP_K", 2)
-    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "CLOCK", worker.Clock())
-    monkeypatch.setattr(worker.Chooser, "BURST", 2)
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", (2,))
     took = []
     if order != "chooser":
-        seq = {"d": "dflash", "m": "mtp", "p": "plain"}
-
-        def pick(self, force=None, now=None):
-            self.rounds += 1
-            self.cur = seq[order[len(took) % 3]]
-            self.r = {}
-            took.append(self.cur)
-            return self.cur
-        monkeypatch.setattr(worker.Chooser, "pick", pick)
-        monkeypatch.setattr(worker.Chooser, "shadows",
-                            lambda self: [x for x in ("dflash", "mtp") if x != self.cur])
+        forced(monkeypatch, order, took)
     p = prompts([25], 30)[0]
     sp = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
     ref = final_kv(sp, "a")
     plain = run(sp, [request(p, 30, "a")])["a"]
     sched = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
-    d, mt = spec_arms(sched, plain[0], p, ("dflash", "mtp"))
+    d, mt = spec_arms(sched, plain[0], p, ("dflash", "mtp"), script=(2,))
     got = final_kv(sched, "a")
     x = request(p, 30, "a")
     assert run(sched, [x])["a"] == plain

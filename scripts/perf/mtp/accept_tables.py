@@ -10,8 +10,9 @@ Per head and class (texts pooled by counts):
              the greedy positions, and along the sampled trajectories (there
              an unbiased estimate of the sampling run's conditional acceptance)
   oracle     the same with the target's real hidden state at every depth
-  rounds     tokens per round at fixed k: chained entries kept (the default,
-             live simulation), recomputed (QWEN_MTP_REFEED=1: from the table)
+  rounds     tokens per round at fixed k: the probe's live simulation ("kept":
+             chained entries kept in files from before 2026-11-17, the worker's
+             recomputed cache since) and recomputed from the table
   speed      tokens per round / (verify price(k + 1) + draft cost / decode
              step) = the speed-up over plain decode, for two verify price lists
 """

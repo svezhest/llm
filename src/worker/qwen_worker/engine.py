@@ -266,10 +266,12 @@ class Engine:
             log.warning("QWEN_DRAFT_MTP ignored: it goes beside a DFlash QWEN_DRAFT (an MTP head "
                         "alone is QWEN_DRAFT itself)")
         if auto:
-            log.info("QWEN_DRAFT=auto: %s; lookup %s, sampling requests %s, plain arm %s",
+            log.info("QWEN_DRAFT=auto: %s; lookup %s, sampling requests %s, plain steps %s",
                      " + ".join(x for x, on in (("DFlash", self.draft is not None),
                                                 ("MTP head", self.mtp is not None)) if on) or "no drafter (plain decode)",
-                     LOOKUP, "speculative" if cfg.DRAFT_SAMPLING else "plain", "on" if cfg.SPEC_PLAIN else "off")
+                     LOOKUP, "speculative" if cfg.DRAFT_SAMPLING else "plain",
+                     "by the head's gate" if self.mtp is not None and cfg.MTP_K <= 0 else
+                     "as an arm" if cfg.SPEC_PLAIN and self.draft is not None and self.mtp is None else "off")
         _tok = getattr(self.processor, "tokenizer", self.processor)
         # mlx-vlm стопит только на верхнем eos_token_id; у qwen их два
         # (<|im_end|> и <|endoftext|>), стоп на всех — как в HF/vLLM

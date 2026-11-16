@@ -15,14 +15,18 @@ target's hidden at the drafted position.
 
 The head keeps one entry (K/V) per target position. Entries are made from
 pairs (h_t, x_{t+1}): `push` hands it hidden states of positions that just
-entered the target cache (prefill slabs, a verify block's kept part, the
-plain steps of a thinking-budget close), `emit` the tokens in emission order
-(each is the successor of the oldest position without one); `flush` runs the
-head over every complete pair at once (lazy, no host sync). The chained
-drafts add approximate entries (the head's hidden for the target's); after
-the verify `round_end(accepted, h)` trims the rejected ones and, as mlx-vlm
-does, keeps those of accepted positions (QWEN_MTP_REFEED=1: recompute every
-accepted position from the target's real hidden states instead).
+entered the target cache (prefill slabs, plain steps, a verify block's kept
+part), `emit` the tokens in emission order (each is the successor of the
+oldest position without one); `flush` runs the head over every complete
+pair at once (lazy, no host sync). The chained drafts add approximate
+entries (the head's hidden for the target's); a verify of the head's own
+round drops them and runs the head over the block's rows with the target's
+real hidden states and tokens (`verify`, lazy, evaluated with the verify),
+and after the walk `settle` keeps the rows of the kept positions: every
+entry is a real one and the next round's seed is ready (2026-11-17; mlx-vlm
+keeps the chained entries of accepted drafts: on the 27B fewer drafts
+accepted in 8 of 10 probed cells, more in 1, and its seed needs a flush
+after the round).
 
 The target verifies every draft (the same verify forward as DFlash), so the
 drafts only move acceptance; greedy output == the DFlash path's.
@@ -111,16 +115,38 @@ class Avg:
 
 class MTPDraft:
     """A loaded MTP head (`model`: mlx-vlm's Qwen3_5MTPDraftModel) bound to
-    the target language model `lm`; per-request state in start()."""
+    the target language model `lm`; per-request state in start().
+
+    The draft count of a round (QWEN_MTP_K=0: round()) follows the head's own
+    confidence, the top-1 probability of each draft: the seed's is evaluated
+    with the previous round (verify(): the head runs over the verify block's
+    rows on the target's tokens, so after the walk the seed and its
+    confidence are read at no extra sync), and the round takes no draft
+    (a plain burst) when (1 + c1) / T(1) <= 1 / T(0); else drafts are added
+    while the expected tokens per ms rise, E / T(k) with E = 1 + sum of the
+    products of the drafts' confidences, a draft not read yet predicted by
+    the last one read. A draft's confidence is read only once the next draft
+    is queued (one sync per draft, the GPU never idle), so the verify is
+    built while the last draft computes, and no draft is computed and then
+    dropped. T(k): the measured wall time of a k-draft round (Clock, per
+    class of requests), T(0) a plain step's; unmeasured ones scaled from the
+    nearest measured by the prior 1 + R * k. Consecutive low seeds lengthen
+    the plain bursts (BURSTS: 1, 2, 4, 8 steps with step-ahead), a confident
+    one resets them; the head catches up after a burst in one flush queued
+    with its last step."""
 
     kind = "mtp"
+    R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
+    BURSTS = (1, 2, 4, 8)               # plain steps of the n-th k = 0 round in a row
+    CHUNK = 512                         # head rows per forward (flush)
 
     def __init__(self, model, lm, k=None):
         self.model, self.lm = model, lm
         self.k = k                      # drafts per round; None: cfg.MTP_K
         self.hidden_size = int(lm.args.hidden_size)
-        self.accept_lens, self.draft_lens = [], []
         self.cache = None
+        self.clock = None
+        self.fresh()
 
     # ---- per request ----
 
@@ -140,89 +166,62 @@ class MTPDraft:
         self.pos = at                   # position of the next head entry
         self.pend = []                  # hidden chunks of positions with no successor yet
         self.npend = 0
-        self.succ = []                  # successors not paired yet
-        self.skip = 0                   # successors already covered by kept draft entries
-        self.appended = 0               # approximate entries of the current round
-        self.seed = None                # (token (1, 1), hidden (1, 1, H)) or None
+        self.succ = []                  # successors not paired yet (ints, or lazy (1,) arrays)
+        self.skip = 0                   # emitted successors already paired (verify / burst)
+        self.appended = 0               # chained entries of the current round
+        self.seed = None                # (token (1, 1), hidden (1, 1, H), confidence (1, 1)) or None
+        self.block = None               # verify(): the head over the block's rows
         self.fresh()
 
     def fresh(self):
-        """A new request's acceptance statistics (no head state: tools too)."""
+        """A new request's statistics (no head state: tools too)."""
         self.accept_lens, self.draft_lens = [], []
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
-        self.seen = [0] * self.KMAX     # drafts of depth i scored (rounds + shadow drafts)
-        self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
-        # the same over the last TAU ms (the Chooser's comparison: expect)
-        self.st = [Avg(self.P0, self.PRIOR) for _ in range(self.KMAX)]
-        self.now = 0.0                  # ms, the Chooser's time (no Chooser: plain means)
-        self.clock = None               # the request's Clock (None: CLOCK)
-        self.scored = 0                 # rounds + shadow drafts scored
+        self.low = 0                    # k = 0 rounds in a row
+        self.ks = [0] * (max(self.KMAX, cfg.MTP_K) + 1)     # rounds by draft count (0: bursts)
+        self.burst_tokens = 0           # tokens of the k = 0 rounds' plain steps
+        self.dropped = 0                # drafts computed and not verified
 
-    # QWEN_MTP_K=0: the draft count per round from the request's own acceptance
-    # and the process's measured round times per k (CLOCK: shared by requests,
-    # a property of the model and machine; the verify cost is not linear in T:
-    # 2 tokens exact qmv, 3..16 mrqmm's flat MMA cost on the 27B)
-    KMAX, P0, ALPHA, EXPLORE = 4, 0.5, 0.25, 8
-    TAU, PRIOR = 2500.0, 2
-    CHUNK = 512                         # head rows per forward (flush)
+    def stats(self):
+        """The request's gate statistics (spec_stats["mtp"])."""
+        acc = [0] * (max(self.draft_lens, default=0) + 1)
+        for a in self.accept_lens:
+            acc[a] += 1
+        return dict(k=list(self.ks), accepted=acc, burst_tokens=self.burst_tokens,
+                    dropped=self.dropped)
 
     def _clock(self):
         return self.clock if self.clock is not None else CLOCK
 
+    @staticmethod
+    def kind_of(k):
+        """The Clock kind of a k-draft round (0: a plain step)."""
+        return "plain" if k == 0 else ("mtp", k)
+
     def _ms(self, k):
-        """Expected wall time of a k-draft round: measured, else scaled from
-        the nearest measured k by the linear prior (1 + QWEN_MTP_COST * k)."""
+        """Expected wall time of a k-draft round (k = 0: one plain step):
+        measured, else scaled from the nearest measured k by the prior
+        1 + R * k (none measured: the prior itself, in plain steps)."""
         ck = self._clock()
-        ms = ck.ms(("mtp", k))
+        ms = ck.ms(self.kind_of(k))
         if ms is not None:
             return ms
-        c = cfg.MTP_COST
-        ks = [j[1] for j in ck.c if isinstance(j, tuple) and j[0] == "mtp"]
-        if ks:
-            k0 = min(ks, key=lambda j: abs(j - k))
-            return ck.ms(("mtp", k0)) * (1.0 + c * k) / (1.0 + c * k0)
-        return 1.0 + c * k
+        known = [(j, ck.ms(self.kind_of(j))) for j in range(max(self.KMAX, cfg.MTP_K) + 1)]
+        known = [(j, m) for j, m in known if m is not None]
+        if known:
+            j, m = min(known, key=lambda x: abs(x[0] - k))
+            return m * (1.0 + self.R * k) / (1.0 + self.R * j)
+        return 1.0 + self.R * k
 
-    def _best(self, p):
-        """(k, tokens, ms): the k in 1..KMAX with the most expected tokens
-        per ms, (1 + sum_i prod_{j<=i} p_j) / ms(k), by the per-depth
-        acceptance averages `p` and the measured round times."""
-        best, out, e, q, pk = -1.0, (1, 1.0, 1.0), 1.0, 1.0, self.P0
-        for k in range(1, max(self.KMAX, cfg.MTP_K) + 1):
-            # a depth this request has not drafted yet takes the shallower
-            # one's estimate (else a request that started at k = 1 stays
-            # there: its deeper averages never move from the prior)
-            pk = p[k - 1] if k <= self.KMAX and self.seen[k - 1] else pk
-            q *= pk
-            e += q
-            ms = self._ms(k)
-            if cfg.MTP_K == k or (cfg.MTP_K <= 0 and e / ms > best):
-                best, out = e / ms, (k, e, ms)
-        return out
-
-    def next_k(self):
-        """Drafts for the next round: QWEN_MTP_K, or (0) the k of _best by the
-        fast averages; every EXPLORE-th round one more or (alternately) one
-        fewer (the averages of the neighbours would go stale)."""
-        if cfg.MTP_K > 0:
-            return cfg.MTP_K
-        bk = self._best(self.p)[0]
-        r = self.scored
-        if r % self.EXPLORE == self.EXPLORE - 1:
-            bk = min(self.KMAX, bk + 1) if (r // self.EXPLORE) % 2 == 0 else max(1, bk - 1)
-        return bk
-
-    def expect(self):
-        """(tokens, ms) of a round at the best draft count by the averages
-        over the last TAU ms (mtp.Chooser's comparison with the other arms);
-        ms None: no MTP round timed in this class of requests yet."""
-        _, e, ms = self._best([x.mean for x in self.st])
-        timed = any(isinstance(j, tuple) and j[0] == "mtp" for j in self._clock().c)
-        return e, (ms if timed else None)
-
-    def evidence(self):
-        """The weight of the first draft's samples (Avg.e) now."""
-        return self.st[0].age(self.now, self.TAU)
+    @staticmethod
+    def gain(confs, k, last):
+        """Expected tokens of a k-draft round: 1 + sum_i prod_{j<=i} c_j, the
+        confidences `confs` known, `last` for the drafts past them."""
+        e, p = 1.0, 1.0
+        for i in range(k):
+            p *= confs[i] if i < len(confs) else last
+            e += p
+        return e
 
     def push(self, h):
         """Hidden states (1, n, H, the target's post-norm) of the next n
@@ -230,6 +229,7 @@ class MTPDraft:
         if h is not None and h.shape[1]:
             self.pend.append(h)
             self.npend += h.shape[1]
+            self.seed = None
 
     def emit(self, tok):
         """The next token in emission order (= the successor of the oldest
@@ -243,6 +243,12 @@ class MTPDraft:
         for t in ids:
             self.emit(t)
 
+    def emit_lazy(self, y):
+        """The successor of the last pushed position as a lazy (1,) token not
+        read yet (a burst's last step): paired at once, its emit() skipped."""
+        self.succ.append(y)
+        self.skip += 1
+
     def flush(self):
         """Run the head over every (hidden, successor) pair queued; the seed
         is the head's output at the last one when nothing is left pending."""
@@ -250,7 +256,12 @@ class MTPDraft:
         if r == 0:
             return
         h = self.pend[0] if len(self.pend) == 1 else mx.concatenate(self.pend, axis=1)
-        toks = mx.array([self.succ[:r]], dtype=mx.int32)
+        s = self.succ[:r]
+        if all(isinstance(t, int) for t in s):
+            toks = mx.array([s], dtype=mx.int32)
+        else:
+            toks = mx.concatenate([mx.array([t], dtype=mx.int32) if isinstance(t, int)
+                                   else t.reshape(1).astype(mx.int32) for t in s])[None]
         # (a prefill slab at a long context: CHUNK rows at a time, the head's
         # attention scores are rows x keys x heads)
         for lo in range(0, r, self.CHUNK):
@@ -258,8 +269,16 @@ class MTPDraft:
         rest = h[:, r:]
         self.pend, self.npend = ([rest] if rest.shape[1] else []), rest.shape[1]
         self.succ = self.succ[r:]
-        last = out[:, -1:, :]
-        self.seed = (self._argmax(last), last) if not self.npend else None
+        self.seed = None
+        if not self.npend:
+            last = out[:, -1:, :]
+            tok, conf = self._head(last)
+            self.seed = (tok, last, conf)
+
+    def prime(self):
+        """Queue the seed and its confidence (after a flush)."""
+        if self.seed is not None:
+            mx.async_eval(self.seed[0], self.seed[2])
 
     def state(self):
         """Arrays to evaluate with a step (the head's cache and seed)."""
@@ -270,71 +289,116 @@ class MTPDraft:
 
     # ---- a round ----
 
-    def draft(self, n):
-        """(1, n) draft tokens (lazy): the seed, then n - 1 chained steps
-        (approximate entries, settled by round_end)."""
+    def round(self, room):
+        """The drafts (1, k) of the next round, lazy, k in 1..min(room, KMAX)
+        (QWEN_MTP_K > 0: that many, no gate), or an int: the round takes no
+        draft, that many plain steps (the n-th low seed in a row: BURSTS)."""
+        k0 = self.k if self.k is not None else cfg.MTP_K
+        if k0 > 0:
+            k = min(k0, room)
+            self.ks[k] += 1
+            return self.draft(k)
         self.flush()
         if self.seed is None:
             raise RuntimeError("mtp: no seed (a pushed position without its successor)")
-        tok, h = self.seed
+        tok, h, conf = self.seed
+        known = [conf.item()]           # (evaluated with the last round: verify / prime)
+        T = [self._ms(k) for k in range(self.KMAX + 1)]
+        if not self.want(known, 0, T):
+            self.low += 1
+            self.ks[0] += 1
+            return self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
+        self.low = 0
+        toks, confs, k = [tok], [], 1
+        self.appended = 0
+        while k < min(self.KMAX, room) and self.want(known, k, T):
+            h = self._forward(tok, h)
+            self.appended += 1
+            tok, c = self._head(h)
+            toks.append(tok)
+            confs.append(c)
+            mx.async_eval(tok, c)
+            k += 1
+            if len(known) < k - 1:      # draft k - 1's confidence: draft k is queued
+                known.append(confs[len(known) - 1].item())
+        self.seed = None
+        self.ks[k] += 1
+        return mx.concatenate(toks, axis=1) if len(toks) > 1 else toks[0]
+
+    def want(self, known, k, T):
+        """Draft k + 1 after k (0: the seed)? While it raises the expected
+        tokens per ms: gain(k + 1) / T(k + 1) > gain(k) / T(k), the drafts'
+        confidences `known` (read so far), the last one for the rest."""
+        return self.gain(known, k + 1, known[-1]) / T[k + 1] > self.gain(known, k, known[-1]) / T[k]
+
+    def draft(self, n):
+        """(1, n) draft tokens (lazy): the seed, then n - 1 chained steps
+        (entries settled by verify / settle or round_end)."""
+        self.flush()
+        if self.seed is None:
+            raise RuntimeError("mtp: no seed (a pushed position without its successor)")
+        tok, h, _ = self.seed
         toks = [tok]
         self.appended = 0
         for _ in range(n - 1):
             h = self._forward(tok, h)
             self.appended += 1
-            tok = self._argmax(h)
+            tok = self._head(h)[0]
             toks.append(tok)
         self.seed = None
         return mx.concatenate(toks, axis=1) if len(toks) > 1 else toks[0]
 
+    def verify(self, h, targets):
+        """The verify forward of the head's own round, lazy: `h` (1, T, H)
+        the target's hidden states of the block's positions (the anchor and
+        the drafts), `targets` (1, T) the target's tokens at them = each
+        position's successor wherever the walk keeps it. The chained entries
+        leave the head's cache and the head runs over the T rows (the next
+        seed is the row of the last kept position): -> the arrays to evaluate
+        with the verify."""
+        self._trim(self.appended)
+        out = self._forward(targets.reshape(1, -1).astype(mx.int32), h)
+        tok, conf = self._head(out)
+        self.block = (out, tok, conf, out.shape[1])
+        return [tok, conf]
+
+    def settle(self, kept, h):
+        """After the walk of a verify(): the first `kept` rows had their real
+        successor (the rest leave the head's cache); `h` (1, n, H): the
+        positions the commit kept, those past `kept` pushed (a thinking
+        budget's cut: the last one, its successor forced after it)."""
+        out, tok, conf, t = self.block
+        self.block = None
+        self._trim(t - kept)
+        self.skip += kept               # their successors: the first tokens emitted
+        self.seed = ((tok[:, kept - 1:kept], out[:, kept - 1:kept], conf[:, kept - 1:kept])
+                     if kept else None)
+        self.push(h[:, kept:])
+
     def round_end(self, accepted, h=None):
-        """After a verify that kept `accepted` drafts: the approximate entries
-        past the kept ones leave the head's cache; `h` (1, >= accepted + 1, H):
-        the target's hidden states of the positions the commit kept (the
-        anchor + the accepted drafts), pushed but for those the kept entries
-        already cover (their successors - the first emitted tokens - skipped).
-        A round the head did not draft (hybrid: DFlash's) has none."""
-        keep = 0 if cfg.MTP_REFEED else min(int(accepted), self.appended)
-        trim = self.appended - keep
-        if trim:
-            for c in self.cache:
-                c.trim(trim)
-        self.pos -= trim
-        self.appended = 0
+        """After a verify the head did not settle (another drafter's round, a
+        lookup, tools): its chained entries leave its cache, `h` (1, >=
+        accepted + 1, H): the positions the commit kept (the anchor + the
+        accepted drafts), pushed (their successors: the tokens emitted)."""
+        self._trim(self.appended)
         self.seed = None
         if h is not None:
-            self.push(h[:, keep:accepted + 1])
-        self.skip += keep
-
-    def cancel(self):
-        """The chained entries of the last draft() leave the head's cache: a
-        shadow draft (mtp.Chooser: scored against the emitted tokens, not
-        verified; the round's positions are then pushed whole by round_end)."""
-        if self.appended:
-            for c in self.cache:
-                c.trim(self.appended)
-            self.pos -= self.appended
-            self.appended = 0
-        self.seed = None
-
-    def learn(self, accepted, drafted):
-        """A draft of `drafted` tokens whose first `accepted` were right (a
-        verified round or a scored shadow draft) -> the per-depth averages."""
-        self.scored += 1
-        for i in range(min(int(accepted) + 1, int(drafted), self.KMAX)):
-            hit = 1.0 if i < accepted else 0.0
-            self.p[i] += self.ALPHA * (hit - self.p[i])
-            self.st[i].add(hit, self.now, self.TAU)
-            self.seen[i] += 1
+            self.push(h[:, :int(accepted) + 1])
 
     def record(self, accepted, drafted):
         """After a round's tokens were read: its acceptance (the round's wall
-        time goes to CLOCK from _spec)."""
+        time goes to the Clock from _spec)."""
         self.accept_lens.append(int(accepted))
         self.draft_lens.append(int(drafted))
-        self.learn(accepted, drafted)
 
     # ---- the head ----
+
+    def _trim(self, n):
+        if n:
+            for c in self.cache:
+                c.trim(n)
+            self.pos -= n
+        self.appended = 0
 
     def _forward(self, toks, h):
         """Head entries for the pairs (h[:, i], toks[:, i]) at positions
@@ -346,40 +410,47 @@ class MTPDraft:
         self.pos += n
         return out
 
-    def _argmax(self, h):
-        return mx.argmax(self.lm.lm_head(h), axis=-1).astype(mx.int32)
+    def _head(self, h):
+        """-> (argmax (1, n) int32, top-1 probability (1, n) fp32) of the
+        lm_head over h (1, n, H)."""
+        logits = self.lm.lm_head(h).astype(mx.float32)
+        m = mx.max(logits, axis=-1)
+        return (mx.argmax(logits, axis=-1).astype(mx.int32),
+                mx.exp(m - mx.logsumexp(logits, axis=-1)))
 
 
 class Chooser:
     """Which arm a round takes (QWEN_DRAFT=auto; QWEN_DRAFT_HYBRID /
-    QWEN_SPEC_PLAIN): "dflash", "mtp" (a drafter's round) or "plain" (a burst
-    of plain steps) - the one with the most expected tokens per ms.
+    QWEN_SPEC_PLAIN): "dflash", "mtp" (the head's gated rounds, its plain
+    bursts included) or "plain" (a burst of plain steps; only without the
+    head, whose gate takes plain steps itself) - the one with the most
+    expected tokens per ms.
 
-    Wall time per round: the request class's Clock (process-wide, steady
-    rounds only: _spec leaves out a round after a switch, whose drafter
-    catches up on the positions it missed, and rounds with shadow drafts).
-    Tokens per round (1 + accepted drafts): means over the last TAU ms (Avg) -
-    DFlash's over its blocks, the MTP head's per draft depth at its best draft
-    count (MTPDraft.expect), plain exactly 1.
+    The head's arm is measured as it runs: tokens over wall time of its
+    steady rounds, decayed over TAU ms, scaled by the Clock's drift since
+    its last sample when it is not the current arm. It is the start and the
+    default arm: it needs no evidence to be taken back, is never probed and
+    never shadow-drafted (its gate already reads the head's confidence every
+    round). The others: wall time per round from the request class's Clock
+    (process-wide, steady rounds only: _spec leaves out a round after a
+    switch, whose drafter catches up on the positions it missed, and rounds
+    with shadow drafts); tokens per round (1 + accepted drafts) as means over
+    the last TAU ms (Avg), plain exactly 1.
 
-    An arm that is not taken is still sampled: shadows() names the drafters to
-    draft this round WITHOUT verifying; their drafts are scored against the
-    tokens the request emits from the same anchor (Shadows) - what a verify
-    would have kept, at the cost of the draft alone (27B: an MTP draft step
-    ~3.5 ms, a DFlash block ~17 ms, against a 110-180 ms round). So no arm's
-    estimate goes stale at the value it had when it lost (the per-round
-    comparison of a noisy average with frozen ones kept the arm without
-    noise: plain took 91 / 179 of 256 tokens on prose where both drafters
-    beat it). A drafter is drafted every round until it has WARM drafts and
-    while it looks better than the current arm without the samples to say so
-    (below NEED: a trial); else as often as its drafts cost NEAR of the time
-    (an arm within CLOSE of the current one's rate) or FAR.
+    A drafter that is not taken is still sampled: shadows() names the ones
+    to draft this round WITHOUT verifying; their drafts are scored against
+    the tokens the request emits from the same anchor (Shadows) - what a
+    verify would have kept, at the cost of the draft alone (27B: a DFlash
+    block ~17 ms against a 110-180 ms round). A drafter is drafted every
+    round until it has WARM drafts and while it looks better than the
+    current arm without the samples to say so (below NEED: a trial); else as
+    often as its drafts cost NEAR of the time (an arm within CLOSE of the
+    current one's rate) or FAR.
 
-    The request starts on the first arm of START it has (the MTP head: the
-    smallest loss when it is the wrong one). The current arm is left only for
-    one whose rate is MARGIN higher and, a drafter, known from >= NEED recent
-    samples. An arm never timed in this class of requests is taken PROBE
-    rounds first."""
+    The request starts on the first arm of START it has. The current arm is
+    left only for one whose rate is MARGIN higher and, a drafter other than
+    the head, known from >= NEED recent samples. An arm other than the head
+    never timed in this class of requests is taken PROBE rounds first."""
 
     TAU = 2500.0
     PRIOR = 2
@@ -388,16 +459,18 @@ class Chooser:
     MARGIN = 0.02                               # (the gate allows 3 % below the best arm)
     WARM, NEED = 3, 2.5
     NEAR, FAR, CLOSE = 0.01, 0.004, 0.8
-    COST = {"dflash": 0.10, "mtp": 0.06}        # a shadow draft, of the arm's round time
+    COST = {"dflash": 0.10}                     # a shadow draft, of the arm's round time
     PROBE = 3
     BURST, SHORT = 8, 2
 
     def __init__(self, kinds, mtp=None, clock=None, priors=None):
         self.kinds = list(kinds)
-        self.mtp = mtp                          # MTPDraft: the "mtp" arm's estimate
+        self.mtp = mtp                          # MTPDraft (the "mtp" arm: the gated head)
+        self.head = mtp is not None and "mtp" in self.kinds
         self.clock = clock if clock is not None else CLOCK
         pri = dict(self.PRIORS, **(priors or {}))
         self.tok = {k: Avg(pri.get(k, 2.0), self.PRIOR) for k in kinds}
+        self.m = [0.0, 0.0, 0.0, 0.0, 1.0]      # the head's arm: decayed tokens, ms, rounds; t; Clock g
         self.n = {k: 0 for k in kinds}          # rounds taken
         self.got = {k: 0 for k in kinds}        # tokens of those rounds
         self.shadowed = {k: 0 for k in kinds}   # shadow drafts
@@ -407,20 +480,31 @@ class Chooser:
         self.t, self.hot, self.probe = 0.0, False, False
         self.switches = 0
 
+    def timed(self, k, tokens, ms):
+        """A steady round (or burst) of the head's arm: `tokens` in `ms`."""
+        if not (self.head and k == "mtp") or ms <= 0.0:
+            return
+        m = self.m
+        d = math.exp(-max(0.0, self.t - m[3]) / self.TAU)
+        m[0], m[1], m[2] = m[0] * d + tokens, m[1] * d + ms, m[2] * d + 1.0
+        m[3], m[4] = max(m[3], self.t), self.clock.g
+
     def expect(self, k):
         """(tokens per round, ms per round or None: never timed) of arm k."""
         if k == "plain":
             return 1.0, self.clock.ms(k)
-        if k == "mtp" and self.mtp is not None:
-            return self.mtp.expect()
+        if k == "mtp" and self.head:
+            m = self.m
+            if m[2] <= 0.0:
+                return 1.0, None
+            return m[0] / m[2], m[1] / m[2] * self.clock.g / m[4]
         return self.tok[k].mean, self.clock.ms(k)
 
     def evidence(self, k):
-        """The weight of arm k's recent samples (a plain step needs none)."""
-        if k == "plain":
+        """The weight of arm k's recent samples (a plain step and the head's
+        arm need none)."""
+        if k == "plain" or (k == "mtp" and self.head):
             return float("inf")
-        if k == "mtp" and self.mtp is not None:
-            return self.mtp.evidence()
         return self.tok[k].age(self.t, self.TAU)
 
     def pick(self, force=None, now=None):
@@ -431,8 +515,6 @@ class Chooser:
         self.probe = False
         if now is not None:
             self.t = max(self.t, now)
-        if self.mtp is not None:
-            self.mtp.now = self.t
         was = self.cur
         if force in self.kinds:
             k = force
@@ -440,9 +522,11 @@ class Chooser:
             k, self.left, self.probe = self.cur, self.left - 1, True    # the running probe
         else:
             ex = {k: self.expect(k) for k in self.kinds}
-            new = [k for k in self.kinds if ex[k][1] is None]
+            new = [k for k in self.kinds if ex[k][1] is None and not (k == "mtp" and self.head)]
             if new:
                 k, self.left, self.probe = new[0], self.PROBE - 1, True
+            elif ex.get("mtp", (0, 0))[1] is None:
+                k = "mtp"                       # the head's arm until it is measured
             else:
                 r = self.r = {k: t / ms for k, (t, ms) in ex.items()}
                 k = self.cur
@@ -459,14 +543,14 @@ class Chooser:
         return k
 
     def shadows(self):
-        """The drafters (not the arm just picked) to draft this round without
-        verifying."""
+        """The drafters (not the arm just picked, nor the head) to draft this
+        round without verifying."""
         self.hot = False
         if self.r is None:                      # a forced arm, a probe
             return []
         out, r = [], self.r
         for k in self.kinds:
-            if k in ("plain", self.cur):
+            if k in ("plain", "mtp", self.cur):
                 continue
             if self.n[k] + self.shadowed[k] < self.WARM:
                 hot = True
@@ -490,9 +574,7 @@ class Chooser:
         self._add(k, accepted, drafted, full)
 
     def _add(self, k, accepted, drafted, full=True):
-        if k == "mtp" and self.mtp is not None:
-            self.mtp.learn(accepted, drafted)
-        elif k != "plain" and full:
+        if k not in ("plain", "mtp") and full:
             self.tok[k].add(1.0 + accepted, self.t, self.TAU)
 
     def steps(self):
@@ -503,12 +585,12 @@ class Chooser:
     def done(self, accepted, drafted=0, full=True, shadows=(), steps=1):
         """The round of the last pick() kept `accepted` of its `drafted`
         drafts (`full`: a block of the usual size); `shadows`: the arms
-        drafted beside it; `steps`: a plain round's steps."""
+        drafted beside it; `steps`: the tokens of a plain burst (the plain
+        arm's, or the head's k = 0 round)."""
         k = self.cur
-        if k != "mtp" or self.mtp is None:      # (the head's rounds: MTPDraft.record)
-            self._add(k, accepted, drafted, full)
+        self._add(k, accepted, drafted, full)
         self.n[k] += 1
-        self.got[k] += steps if k == "plain" else 1 + accepted
+        self.got[k] += steps if k == "plain" or (k == "mtp" and not drafted) else 1 + accepted
         self.last[k] = self.t
         for x in shadows:
             self.shadowed[x] += 1
@@ -581,9 +663,9 @@ def load_mtp(path, lm, fp16):
         model.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
     mx.eval(model.parameters())
     d = MTPDraft(model, lm)
-    log.info("mtp drafter loaded: %s (%d layer(s), %.0f MiB, %d drafts per round%s)", path,
-             len(model.layers), sum(v.nbytes for _, v in _flat(model)) / 2**20, cfg.MTP_K,
-             ", refeed" if cfg.MTP_REFEED else "")
+    log.info("mtp drafter loaded: %s (%d layer(s), %.0f MiB, %s)", path,
+             len(model.layers), sum(v.nbytes for _, v in _flat(model)) / 2**20,
+             f"{cfg.MTP_K} drafts per round" if cfg.MTP_K > 0 else f"gated 0..{cfg.MTP_KMAX} drafts per round")
     return d
 
 

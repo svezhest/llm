@@ -13,8 +13,8 @@ Per head and trajectory:
   table   at EVERY generated position p the chain of --kmax drafts from a head
           cache whose entries all come from the target's real hidden states
           (after each probe the chained entries are trimmed and the position
-          is fed its real hidden state: QWEN_MTP_REFEED=1's cache at any round
-          start). Per draft: token, the head's own top-1 probability, the
+          is fed its real hidden state: the worker's cache at any round start,
+          MTPDraft.verify / settle). Per draft: token, the head's own top-1 probability, the
           sampler's filtered probability of the token (the expected
           acceptance of a sample-match verify; exact while the earlier drafts
           are the trajectory's tokens), cosine of the head's output hidden
@@ -22,11 +22,13 @@ Per head and trajectory:
   oracle  the depth-i draft the head would give with the target's real hidden
           state at every depth = the table's depth-1 draft i - 1 positions
           later (no extra forward): the upper bound of any stand-in.
-  sim k   the rounds as _spec runs them at a fixed k (MTPDraft.draft /
-          round_end / push / emit along the trajectory): the chained entries
-          of accepted drafts kept (the default) or recomputed (--refeed-sim);
-          per round its start, the drafts accepted (= the trajectory's) and
-          the filtered probability of the first one that is not.
+  sim k   the rounds at a fixed k (MTPDraft.draft / round_end / push / emit
+          along the trajectory: the chained entries recomputed from the real
+          hidden states, as the worker's verify / settle); per round its start,
+          the drafts accepted (= the trajectory's) and the filtered
+          probability of the first one that is not. (--refeed-sim: the same
+          rounds again under "refeed", the key older tables read; the
+          keep-chained mode was removed 2026-11-17.)
   wide    (--wide) the table again with fp32 activations (weights as loaded,
           scales / norms / inputs fp32): an fp16 overflow shows as a
           different chain; + a finite check of every head output.
@@ -67,7 +69,7 @@ class Probe(MTPDraft):
     its output hidden state (`tr`); `wide`: fp32 activations."""
 
     wide = False
-    trace = True                        # False: MTPDraft's own _argmax (the cost stages)
+    trace = True                        # False: MTPDraft's own _head (the cost stages)
 
     def start(self, at):
         super().start(at)
@@ -84,15 +86,15 @@ class Probe(MTPDraft):
         self.pos += n
         return out
 
-    def _argmax(self, h):
+    def _head(self, h):
         if not self.trace:
-            return super()._argmax(h)
+            return super()._head(h)
         lg = self.lm.lm_head(h.astype(mx.float16) if self.wide else h)
         l32 = lg.astype(mx.float32)
-        conf = mx.exp(mx.max(l32, axis=-1) - mx.logsumexp(l32, axis=-1)).reshape(-1)[-1:]
-        self.tr.append((conf, h[0, -1]))
+        conf = mx.exp(mx.max(l32, axis=-1) - mx.logsumexp(l32, axis=-1))
+        self.tr.append((conf.reshape(-1)[-1:], h[0, -1]))
         self.bad = self.bad + (~mx.isfinite(h)).sum()
-        return mx.argmax(lg, axis=-1).astype(mx.int32)
+        return mx.argmax(lg, axis=-1).astype(mx.int32), conf
 
 
 def head_start(mt, seq, n0, H, slab=2048):
@@ -142,7 +144,7 @@ def table(mt, seq, n0, H, kmax):
 
 def sim(mt, seq, n0, H, k, qf=None):
     """Rounds of k drafts along the trajectory, the head driven as _spec
-    drives it (W.MTP_REFEED as set) -> [[p, accepted, q], ...]; q = qf(position,
+    drives it -> [[p, accepted, q], ...]; q = qf(position,
     token) of the first draft that is not the trajectory's token (its filtered
     probability; None when all k are)."""
     head_start(mt, seq, n0, H)
@@ -162,7 +164,7 @@ def sim(mt, seq, n0, H, k, qf=None):
 
 
 def sim_table(chains, seq, n0, k, last):
-    """sim() with a cache of real entries only (QWEN_MTP_REFEED=1), from the
+    """sim() with a cache of real entries only (the worker's), from the
     table's chains: no forward."""
     p, out = n0, []
     while p + k <= last:
@@ -289,10 +291,10 @@ def costs(lm, heads, seq, n0, H, iters, kmax, nmax=5):
                 tm(f"{name} flush n={n}", lambda: flush(mt))
             feed(mt, 1)
             mx.eval(flush(mt))
-            tok, h = mt.seed
+            tok, h, _ = mt.seed
             tm(f"{name} forward 1 row", lambda: (mt._forward(tok, h), [c.state for c in mt.cache]))
             mt.appended = 1
-            tm(f"{name} lm_head", lambda: mt._argmax(h))
+            tm(f"{name} lm_head", lambda: mt._head(h))
     for mt in heads.values():
         mt.trace = True
     del cache
@@ -321,17 +323,14 @@ def probe_row(heads, key, cls, mode, tr, kmax, sims, refeeds, wide=None):
                q_gen=[round(filtered_prob(tr, n0 - 1 + j, t), 4) for j, t in enumerate(seq[n0:])], heads={})
     for name, mt in heads.items():
         t = time.time()
-        W.MTP_REFEED = False
         tb = table(mt, seq, n0, H, kmax)
         o = dict(chain=tb["chain"], conf=r4(tb["conf"]), cos=r4(tb["cos"]), nonfinite=tb["nonfinite"],
                  q=r4([[filtered_prob(tr, n0 + i + j, d) for j, d in enumerate(c)]
                        for i, c in enumerate(tb["chain"])]), sims={}, refeed={})
         for k in sims:
             o["sims"][str(k)] = sim(mt, seq, n0, H, k, qf)
-        W.MTP_REFEED = True
         for k in refeeds:
-            o["refeed"][str(k)] = sim(mt, seq, n0, H, k, qf)
-        W.MTP_REFEED = False
+            o["refeed"][str(k)] = o["sims"].get(str(k)) or sim(mt, seq, n0, H, k, qf)
         if wide is not None:
             wt = table(wide[name], seq, n0, H, kmax)
             o["wide"] = dict(chain=wt["chain"], nonfinite=wt["nonfinite"])
@@ -353,7 +352,7 @@ def main():
     ap.add_argument("--gen", type=int, default=320, help="generated tokens per trajectory")
     ap.add_argument("--kmax", type=int, default=4)
     ap.add_argument("--sims", default="2,3,4", help="k of the round simulations (chained entries kept)")
-    ap.add_argument("--refeed-sim", default="4", help="k of the live QWEN_MTP_REFEED=1 simulations")
+    ap.add_argument("--refeed-sim", default="4", help="k of the simulations also kept under \"refeed\" (the same rounds)")
     ap.add_argument("--modes", default="greedy,sampled", help="trajectories: the target's greedy and / or sampled")
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--wide", default="", help="prompt ids whose greedy table is repeated in fp32")

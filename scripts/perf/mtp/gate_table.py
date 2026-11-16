@@ -6,7 +6,9 @@ ran back to back) of tok/s over plain's. The gate: `--auto` (default "auto") >=
 `--pass` (0.97) x the best of the other variants, plain included, by those
 ratios. Then, per cell, the arms the chooser took: share of the rounds and of
 the tokens (spec_stats["arms"]: dflash / mtp / plain / lookup), shadow drafts
-and switches per request.
+and switches per request. Then, per cell and variant with the head's gate
+(spec_stats["mtp"]): its rounds by draft count k (0 = a plain burst) and by
+accepted drafts, the bursts' share of the tokens, dropped drafts.
 
   python3 scripts/perf/mtp/gate_table.py $PERF_OUT/mtp/gate_*.json
 """
@@ -81,3 +83,25 @@ for c in cells:
     print(f"| {c} | {len(rs)} | {share(rd)} | {share(tk)} | "
           f"{med([s.get('dflash', 0) for s in sh]):.0f} / {med([s.get('mtp', 0) for s in sh]):.0f} | "
           f"{med([o.get('switches', 0) for o in rs]):.0f} |")
+
+gated = [v for v in variants if any(o.get("gate") for o in rows if o["variant"] == v)]
+if gated:
+    print("\n| cell | variant | requests | rounds by k (0 = burst) | rounds by accepted drafts | "
+          "burst tokens | dropped |")
+    print("|---|---|---|---|---|---|---|")
+for c in cells:
+    for v in gated:
+        gs = [(o["gate"], o["n"] - 1) for o in rows if o["key"] == c and o["variant"] == v and o.get("gate")]
+        if not gs:
+            continue
+
+        def add(xs):
+            out = []
+            for x in xs:
+                out += [0] * (len(x) - len(out))
+                for i, y in enumerate(x):
+                    out[i] += y
+            return out
+        bt, tot = sum(g["burst_tokens"] for g, _ in gs), sum(n for _, n in gs) or 1
+        print(f"| {c} | {v} | {len(gs)} | {add([g['k'] for g, _ in gs])} | {add([g['accepted'] for g, _ in gs])} | "
+              f"{100.0 * bt / tot:.0f} % | {sum(g['dropped'] for g, _ in gs)} |")

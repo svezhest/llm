@@ -1,11 +1,13 @@
 """The MTP head as a speculative drafter (qwen_worker/mtp.py) on the tiny random
 model (CPU): a real mlx-vlm Qwen3_5MTPDraftModel (random weights) bound to the
-tiny target. Greedy output == the plain loop's for every draft count, with
-the head's own drafts (random: nearly all rejected) and with an oracle that
-proposes the known answer (accepted prefixes, rejections, the chained
-entries kept or recomputed); the head's KV cache after a request == the head
-run once over every (target hidden, next token) pair; hybrid with a DFlash
-stand-in; the thinking budget; the prompt cache's drafter context."""
+tiny target. Greedy output == the plain loop's for every draft count and for
+the confidence gate (k = 0 rounds: plain bursts), with the head's own drafts
+(random: nearly all rejected) and with an oracle that proposes the known
+answer (accepted prefixes, rejections); the head's KV cache after a request
+== the head run once over every (target hidden, next token) pair (no chained
+or rejected entry survives, a burst's one catch-up flush == a flush per
+step); hybrid with a DFlash stand-in and the Chooser (QWEN_DRAFT=auto); the
+thinking budget; the prompt cache's drafter context."""
 import mlx.core as mx
 import math
 
@@ -27,16 +29,28 @@ def head(lm):
 
 
 class Oracle(worker.MTPDraft):
-    """The real head (its cache, chained entries) but the drafts are the
-    known answer `full` (prompt + plain answer), the last one wrong every
-    other round."""
+    """The real head (its cache, chained entries, the gate's confidence
+    reads) but the drafts are the known answer `full` (prompt + plain
+    answer), the last one wrong every other round. `script`: the gate's draft
+    counts in turn (0: a round with no draft); `zero` (forced arms): the next
+    rounds take none."""
 
-    def __init__(self, model, lm, full, wrong=True):
+    def __init__(self, model, lm, full, wrong=True, script=None):
         super().__init__(model, lm)
-        self.full, self.wrong = full, wrong
+        self.full, self.wrong, self.script, self.zero = full, wrong, script, False
 
-    def draft(self, n):
-        super().draft(n)
+    def want(self, known, k, T):
+        if self.zero:
+            return False
+        if self.script is None:
+            return super().want(known, k, T)
+        return k < self.script[sum(self.ks) % len(self.script)]
+
+    def round(self, room):
+        d = super().round(room)
+        if isinstance(d, int):
+            return d
+        n = d.shape[1]
         at = self.pos - self.appended + 1       # the position the seed predicts
         d = (self.full[at:at + n] + [0] * n)[:n]
         if self.wrong and len(self.accept_lens) % 2:
@@ -67,42 +81,54 @@ def with_mtp(lm, ids, n, mt, draft=None, **kw):
     return run(sched, [request(ids, n, "a", **kw)])["a"]
 
 
-@pytest.mark.parametrize("k", [1, 2, 3, 4])
+def real_entries(dense, mt, full, least, exact=False):
+    """The head's cache == the head run once over the real pairs (target
+    hidden at t, token t + 1) of `full`: no chained / rejected entry left."""
+    n = mt.cache[0].offset
+    assert n == mt.pos and n >= least
+    h = dense.model(mx.array([full[:n]]), cache=dense.make_cache())   # post-norm
+    from mlx_vlm.models.cache import KVCache
+    c = [KVCache()]
+    mt.model._forward_hidden(dense.model.embed_tokens(mx.array([full[1:n + 1]])), h, c,
+                             mx.arange(n)[None])
+    for a, b in ((c[0].keys, mt.cache[0].keys), (c[0].values, mt.cache[0].values)):
+        assert mx.allclose(a[..., :n, :], b[..., :n, :], atol=1e-4).item()
+    return n
+
+
+@pytest.mark.parametrize("k", [0, 1, 2, 3, 4])
 def test_own_drafts_exact(dense, spec, monkeypatch, k):
+    """The head's own drafts (random weights), k per round or (0) gated by
+    their confidence: plain greedy's answer."""
     monkeypatch.setattr(worker, "MTP_K", k)
     for ids in prompts([25, 3, 40], 30):
         ref = plain(dense, ids, 24)
         mt = worker.MTPDraft(head(dense), dense)
         assert with_mtp(dense, ids, 24, mt) == ref
-        assert mt.accept_lens and max(mt.draft_lens) == k   # (the last round: cut to max_tokens)
+        if k:
+            assert mt.accept_lens and max(mt.draft_lens) == k   # (the last round: cut to max_tokens)
+        else:                                            # random confidences: mostly plain bursts
+            assert mt.burst_tokens > 0 and mt.dropped == 0
 
 
-@pytest.mark.parametrize("refeed", [False, True])
-@pytest.mark.parametrize("k", [1, 2, 3, 4])
-def test_oracle_exact_and_the_heads_cache(dense, spec, monkeypatch, k, refeed):
-    """Accepted prefixes and rejections: the answer is plain greedy's; with
-    QWEN_MTP_REFEED every head entry is the head over the target's real
-    hidden state and the next token, as one forward over the whole sequence
-    gives (the chained entries never survive)."""
-    monkeypatch.setattr(worker, "MTP_K", k)
-    monkeypatch.setattr(worker, "MTP_REFEED", refeed)
+@pytest.mark.parametrize("how", ["k1", "k2", "k3", "k4", "gate"])
+def test_oracle_exact_and_the_heads_cache(dense, spec, monkeypatch, how):
+    """Accepted prefixes and rejections: the answer is plain greedy's; every
+    head entry is the head over the target's real hidden state and the next
+    token, as one forward over the whole sequence gives (the chained entries
+    and the rejected drafts never survive: verify / settle). "gate": draft
+    counts 0..4 in turn (0: plain bursts and their catch-up flush)."""
+    k = int(how[1:]) if how != "gate" else 4
+    monkeypatch.setattr(worker, "MTP_K", k if how != "gate" else 0)
     monkeypatch.setattr(worker.MTPDraft, "CHUNK", 7 if k % 2 else 512)   # the prefill slab in pieces
     ids = prompts([25], 31)[0]
     ref = plain(dense, ids, 30)
-    mt = Oracle(head(dense), dense, ids + ref[0])
+    mt = Oracle(head(dense), dense, ids + ref[0], script=(3, 0, 4, 1, 0, 0, 2))
     assert with_mtp(dense, ids, 30, mt) == ref
-    assert max(mt.accept_lens) == k and min(mt.accept_lens) < k   # (k = 1: wrong every other)
-    full = ids + ref[0]
-    n = mt.cache[0].offset
-    assert n >= len(full) - 2 * (k + 1)
-    if refeed:
-        h = dense.model(mx.array([full[:n]]), cache=dense.make_cache())   # post-norm
-        from mlx_vlm.models.cache import KVCache
-        c = [KVCache()]
-        mt.model._forward_hidden(dense.model.embed_tokens(mx.array([full[1:n + 1]])), h, c,
-                                 mx.arange(n)[None])
-        assert mx.allclose(c[0].keys[..., :n, :], mt.cache[0].keys[..., :n, :], atol=1e-4).item()
-        assert mx.allclose(c[0].values[..., :n, :], mt.cache[0].values[..., :n, :], atol=1e-4).item()
+    assert max(mt.accept_lens) >= min(k, 3) and min(mt.accept_lens) < k   # (k = 1: wrong every other)
+    if how == "gate":
+        assert mt.ks[0] >= 2 and mt.burst_tokens >= 2 and all(mt.ks[1:])
+    real_entries(dense, mt, ids + ref[0], len(ids + ref[0]) - 2 * (k + 1))
 
 
 def test_hybrid_exact_takes_both(dense, spec, monkeypatch):
@@ -138,22 +164,6 @@ def test_hybrid_exact_takes_both(dense, spec, monkeypatch):
         d = Rec(ref[0])
         assert with_mtp(dense, ids, 60, mt, draft=d) == ref
         assert bool(mt.accept_lens) == (force == "mtp") and bool(d.accept_lens) == (force == "dflash")
-
-
-class Head:
-    """MTPDraft's side of the chooser: expect() / learn() / evidence()."""
-
-    def __init__(self, tok, ms, e=10.0):
-        self.tok, self.ms, self.e, self.learned, self.now = tok, ms, e, [], 0.0
-
-    def expect(self):
-        return self.tok, self.ms
-
-    def evidence(self):
-        return self.e
-
-    def learn(self, accepted, drafted):
-        self.learned.append((accepted, drafted))
 
 
 def test_clock_follows_the_drift(clock):
@@ -200,88 +210,79 @@ def test_avg_weights_samples_by_age():
     assert a.mean == pytest.approx(1.0, abs=0.1) and a.e == pytest.approx(1.0, abs=0.05)
 
 
-def test_chooser_rate_margin_and_probe(clock):
-    """An arm never timed is taken PROBE rounds; a request starts on the head;
-    it is left only for an arm MARGIN better that is known from recent samples
-    (a plain step needs none)."""
-    c = worker.Chooser(("dflash", "mtp", "plain"), Head(1.8, None))
+def test_chooser_head_is_the_default_arm(clock):
+    """With the gated head: DFlash never timed is probed PROBE rounds (the
+    head never is), the head is taken until it is measured, DFlash wins only
+    by a MARGIN known from recent samples, and the head is taken back on the
+    margin alone; its rate (tokens / ms of its rounds) follows the drift
+    while it is not taken; nothing else is a plain arm."""
+    assert worker.Chooser(("dflash", "plain")).pick() == "dflash"     # (without the head: a plain arm)
+    c = worker.Chooser(("dflash", "mtp"), mtp=object())
     P = c.PROBE
     got = []
-    for _ in range(P):                                   # nothing timed: dflash first
+    for _ in range(P):                                   # nothing timed: DFlash probed
         got.append(c.pick())
-        assert c.shadows() == [] and c.steps() == c.SHORT
+        assert c.shadows() == []
         c.done(3, 7)
     clock.add("dflash", 180.0)
-    for _ in range(P):
-        got.append(c.pick())
-        c.done(1, 1)
-    c.mtp.ms = 115.0
-    for _ in range(P):
-        got.append(c.pick())
-        c.done(0)
-    clock.add("plain", 80.0)
-    assert got == ["dflash"] * P + ["mtp"] * P + ["plain"] * P
+    got += [c.pick(), c.pick()]                          # the head, not measured yet: no shadows
+    assert got == ["dflash"] * P + ["mtp"] * 2 and c.shadows() == []
+    c.timed("mtp", 2.0, 115.0)                           # 17.4 tok/s
+    c.timed("plain", 1.0, 10.0)                          # (only the head's arm is measured here)
+    assert c.expect("mtp") == (pytest.approx(2.0), pytest.approx(115.0))
+    r = 2.0 / 115.0 * 180.0                              # DFlash's tokens per round at the head's rate
 
     def dflash(tok, e=10.0):
         c.tok["dflash"].h, c.tok["dflash"].w, c.tok["dflash"].e = tok * 10.0, 10.0, e
 
-    c = worker.Chooser(("dflash", "mtp", "plain"), Head(1.8, 115.0))
-    dflash(4.8)                                          # 26.7 vs 15.7 vs 12.5 tok/s
-    assert c.pick() == "mtp"                             # the start, whatever the estimates
-    assert c.pick() == "dflash"
-    dflash(1.9)                                          # 10.6: the head
+    dflash(1.9)
     assert c.pick() == "mtp"
-    dflash(1.8 * 180 / 115 * (1 + c.MARGIN - 0.01))      # a little better: not worth a switch
+    dflash(r * (1 + c.MARGIN - 0.01))                    # a little better: not worth a switch
     assert c.pick() == "mtp"
-    dflash(1.8 * 180 / 115 * (1 + c.MARGIN + 0.01), e=1.0)       # better, from one sample: not yet
+    dflash(r * (1 + c.MARGIN + 0.01), e=1.0)             # better, from one sample: not yet
     assert c.pick() == "mtp" and c.shadows() == ["dflash"]       # (a trial: drafted every round)
-    dflash(1.8 * 180 / 115 * (1 + c.MARGIN + 0.01))
-    assert c.pick() == "dflash"
-    dflash(1.0)
-    c.mtp.tok = 1.0                                      # both below a plain step
-    assert c.pick() == "plain"
-    assert c.shadows() == ["dflash", "mtp"] and c.steps() == c.SHORT     # not drafted yet
-    c.shadowed.update(dflash=c.WARM, mtp=c.WARM)
-    assert c.pick() == "plain" and c.shadows() == [] and c.steps() == c.BURST
-    assert c.pick(force="mtp") == "mtp" and c.shadows() == []
-    assert c.switches == 5
-    assert worker.Chooser(("dflash", "plain")).pick() == "dflash"
+    dflash(r * (1 + c.MARGIN + 0.01))
+    assert c.pick() == "dflash" and c.shadows() == []    # (the head is never shadow-drafted)
+    dflash(r * 0.95)                                     # the head back: no evidence needed
+    assert c.pick() == "mtp"
+    clock.add("dflash", 180.0)
+    for _ in range(20):
+        clock.add("dflash", 234.0)                       # the machine 30 % slower
+    assert c.expect("mtp")[1] == pytest.approx(115.0 * clock.g, rel=1e-6) and clock.g > 1.2
+    assert c.pick(force="dflash") == "dflash" and c.switches == 4
 
 
 def test_chooser_shadows_cadence(clock):
-    """Shadow drafts of the arm not taken: every round until it has WARM
-    drafts, then as often as their cost is NEAR (an arm close to the current
-    one) or FAR of the time."""
+    """Shadow drafts of DFlash while the head is taken: every round until it
+    has WARM drafts, then as often as their cost is NEAR (an arm close to the
+    current one) or FAR of the time."""
     clock.add("dflash", 180.0)
-    c = worker.Chooser(("dflash", "mtp"), Head(1.8, 115.0))
-    t, rounds = 0.0, []
+    c = worker.Chooser(("dflash", "mtp"), mtp=object())
+    c.timed("mtp", 2.9, 115.0)                           # 25.2 tok/s
+    t = 0.0
 
-    def go(n):
+    def go(n, tok):
         nonlocal t
         out = []
         for _ in range(n):
-            assert c.pick(force=None, now=t) in ("mtp", "dflash")
-            c.cur = "dflash"                             # (the test's arm)
+            assert c.pick(force=None, now=t) == "mtp"
             sh = c.shadows()
             out.append(bool(sh))
-            c.done(4, 7, shadows=sh)
+            c.done(1, 1, shadows=sh)
             for x in sh:
-                c.sample(x, 1, 2)
-            c.tok["dflash"].h = 4.8 * c.tok["dflash"].w
-            t += 180.0
+                c.sample(x, 1, 7)
+            c.tok["dflash"].h = tok * c.tok["dflash"].w
+            t += 115.0
         return out
 
-    c.pick(now=0.0)
-    c.cur = "dflash"
-    got = go(200)
-    assert got[:c.WARM] == [True] * c.WARM               # 15.7 < 0.8 * 26.7 tok/s: far
-    far = math.ceil(c.COST["mtp"] * 115.0 / c.FAR / 180.0)       # rounds between two drafts
+    got = go(200, 1.9)                                   # 10.6 < 0.8 * 25.2 tok/s: far
+    assert got[:c.WARM] == [True] * c.WARM
+    far = math.ceil(c.COST["dflash"] * 180.0 / c.FAR / 115.0)   # rounds between two drafts
     assert sum(got[c.WARM:]) == pytest.approx((200 - c.WARM) / far, abs=2)
-    c.mtp.tok = 2.9                                      # 25.2: close
-    got = go(200)
-    near = math.ceil(c.COST["mtp"] * 115.0 / c.NEAR / 180.0)
+    got = go(200, 4.2)                                   # 23.3: close
+    near = math.ceil(c.COST["dflash"] * 180.0 / c.NEAR / 115.0)
     assert sum(got) == pytest.approx(200 / near, abs=2) and near < far
-    assert c.n["mtp"] == 0 and c.pend["mtp"] == 0 and len(c.mtp.learned) == c.shadowed["mtp"]
+    assert c.n["dflash"] == 0 and c.pend["dflash"] == 0 and c.shadowed["mtp"] == 0
 
 
 def test_chooser_noisy_drafter_keeps_its_rounds(clock):
@@ -316,11 +317,11 @@ def test_chooser_noisy_drafter_keeps_its_rounds(clock):
 
 
 def test_chooser_switches_on_shadow_samples(clock):
-    """The arm not taken wins by its shadow drafts alone (no round spent on
-    it), and loses again when the text changes; a single good draft of it
-    starts a trial (drafted every round), not a switch."""
+    """DFlash wins by its shadow drafts alone (no round spent on it), and
+    loses again to the head when the text changes; a single good draft of
+    it starts a trial (drafted every round), not a switch."""
     clock.add("dflash", 180.0)
-    c = worker.Chooser(("dflash", "mtp"), Head(1.85, 115.0))     # the head: 16.1 tok/s
+    c = worker.Chooser(("dflash", "mtp"), mtp=object())
     t, took, drafted = 0.0, [], []
 
     def go(n, dflash_accepts):
@@ -332,12 +333,13 @@ def test_chooser_switches_on_shadow_samples(clock):
             drafted.append(bool(sh))
             c.done(dflash_accepts if k == "dflash" else 1, 7 if k == "dflash" else 1, shadows=sh)
             for x in sh:
-                if x == "dflash":
-                    c.sample(x, dflash_accepts, 7)
+                c.sample(x, dflash_accepts, 7)
             t += 180.0 if k == "dflash" else 115.0
+            if k == "mtp":
+                c.timed("mtp", 1.85, 115.0)              # the head: 16.1 tok/s
 
     go(40, 1)                                            # 2 tok / 180 ms = 11.1
-    assert set(took) == {"mtp"} and drafted[:c.WARM] == [True] * c.WARM
+    assert set(took) == {"mtp"} and drafted[1:1 + c.WARM] == [True] * c.WARM
     assert sum(drafted) <= c.WARM + 2                    # far behind: a draft now and then
     i = len(took)
     go(200, 5)                                           # 6 tok / 180 ms = 33.3 by shadows alone
@@ -376,25 +378,14 @@ def test_shadows_score_against_the_emitted_tokens():
     assert s.settle() == [("dflash", 1, 2)] and len(s.toks) < 400
 
 
-@pytest.mark.parametrize("mode", ["chooser", "all", "refeed"])
-def test_hybrid_shadow_drafts_exact(dense, spec, monkeypatch, clock, mode):
-    """Shadow drafts (the arm not taken drafts without a verify) leave the
-    answer plain greedy's and every drafter's state as its own rounds would:
-    the head's cache == the head over the real (hidden, next token) pairs
-    (its shadow entries are trimmed), DFlash's context takes every position
-    once. "all" (QWEN_SPEC_SHADOW=all + plain forced): both drafters' drafts
-    at every position of the answer, in the trace."""
-    monkeypatch.setattr(worker, "MTP_K", 2)
+def test_hybrid_shadow_drafts_exact(dense, spec, monkeypatch, clock):
+    """DFlash's shadow drafts beside the head's gated rounds (its plain
+    bursts included) leave the answer plain greedy's, DFlash's context takes
+    every position once (the ones since its last draft) and the head's cache
+    holds real entries only."""
+    monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_TRACE", True)
-    monkeypatch.setattr(worker, "MTP_REFEED", mode != "chooser")
-    if mode == "chooser":                                # (the request's first arm: the head)
-        monkeypatch.setattr(worker.Chooser, "START", ("dflash", "mtp", "plain"))
-    if mode == "all":
-        monkeypatch.setattr(worker, "SPEC_PLAIN", True)
-        monkeypatch.setattr(worker, "DRAFT_HYBRID", "plain")
-        monkeypatch.setattr(worker, "SPEC_SHADOW", "all")
-    for k, ms in (("dflash", 180.0), (("mtp", 2), 60.0 if mode == "refeed" else 200.0), ("plain", 80.0)):
-        clock.add(k, ms)                                 # every arm timed: no probe rounds
+    clock.add("dflash", 180.0)                           # timed: no probe rounds
     ids = prompts([25], 32)[0]
     ref = plain(dense, ids, 60)
     full = ids + ref[0]
@@ -406,7 +397,7 @@ def test_hybrid_shadow_drafts_exact(dense, spec, monkeypatch, clock, mode):
             return mx.array([(ref[0][len(emitted):] + [0] * bs)[:bs - 1]], dtype=dtype)
 
     emitted = []
-    mt = Oracle(head(dense), dense, full, wrong=False)
+    mt = Oracle(head(dense), dense, full, wrong=False, script=(2, 0, 3))
     d = Rec(ref[0])
     sched = scheduler(dense, max_batch=1)
     sched.eng.mtp, sched.eng.draft = mt, d
@@ -415,45 +406,27 @@ def test_hybrid_shadow_drafts_exact(dense, spec, monkeypatch, clock, mode):
     x = request(ids, 60, "a")
     assert run(sched, [x])["a"] == ref
     tr = x.spec_stats["trace"]
-    shadows = [(t[0], s[0], s[1], t[7]) for t in tr for s in t[6]]
-    assert shadows
-    win = d.config.sliding_window - 1
-    if mode == "all":
-        assert [t[0] for t in tr] == ["plain"] * (len(ref[0]) - 1)
-        assert fed == [win] + [1] * (len(fed) - 1) and len(fed) >= len(tr) - 4   # every position once
-        for i, t in enumerate(tr[:-4]):                  # both drafters drafted after every token
-            assert dict((a, s) for a, s in t[6]) == {"dflash": ref[0][i + 1:i + 4], "mtp": ref[0][i + 1:i + 5]}
-    else:
-        took = {t[0] for t in tr}
-        assert took == ({"mtp"} if mode == "refeed" else {"dflash"})     # the other arm: shadows only
-        if mode == "chooser":                            # the context: the positions each round kept
-            assert fed == [win] + [t[2] + 1 for t in tr[:-1]]
-        else:                                            # ... since the last shadow draft
-            at = [i for i, t in enumerate(tr) if t[6]]
-            assert fed == [win] + [sum(t[2] + 1 for t in tr[a:b]) for a, b in zip(at, at[1:])]
-        assert {s[1] for s in shadows} == {"dflash", "mtp"} - took
-        assert bool(d.accept_lens) == (mode == "chooser") and bool(mt.accept_lens) == (mode == "refeed")
-    if mode != "chooser":                                # real entries only: the head over the pairs
-        n = mt.cache[0].offset
-        assert n >= len(full) - 6
-        h = dense.model(mx.array([full[:n]]), cache=dense.make_cache())
-        from mlx_vlm.models.cache import KVCache
-        c = [KVCache()]
-        mt.model._forward_hidden(dense.model.embed_tokens(mx.array([full[1:n + 1]])), h, c,
-                                 mx.arange(n)[None])
-        assert mx.allclose(c[0].keys[..., :n, :], mt.cache[0].keys[..., :n, :], atol=1e-4).item()
-        assert mx.allclose(c[0].values[..., :n, :], mt.cache[0].values[..., :n, :], atol=1e-4).item()
+    assert {t[0] for t in tr} == {"mtp"} and not d.accept_lens       # DFlash: shadows only
+    at = [i for i, t in enumerate(tr) if t[6]]
+    assert len(at) >= 3 and {s[0] for t in tr for s in t[6]} == {"dflash"}
+    assert any(t[1] == 1 for t in tr[at[0]:])            # bursts among the rounds sampled
+    # the context of a shadow draft: every position since the last one
+    assert fed[1:] == [sum(len(t[7]) for t in tr[a:b]) for a, b in zip(at, at[1:])]
+    assert x.spec_stats["mtp"]["burst_tokens"] > 0 and x.spec_stats["shadows"] == {"dflash": len(at), "mtp": 0}
+    real_entries(dense, mt, full, len(full) - 6)
 
 
 @pytest.mark.parametrize("arms", ["mtp", "dflash", "both"])
 def test_plain_arm_exact(dense, spec, monkeypatch, arms):
-    """QWEN_SPEC_PLAIN: plain steps mixed into the rounds (each arm is taken
-    at least once: fresh estimates first); the answer is plain greedy's."""
+    """QWEN_SPEC_PLAIN: with DFlash alone plain steps are an arm (mixed into
+    its rounds, each arm taken at least once: fresh estimates first); with
+    the head there is no plain arm (its gate takes plain steps); the answer
+    is plain greedy's."""
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
-    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "MTP_K", 0)
     ids = prompts([25], 36)[0]
     ref = plain(dense, ids, 40)
-    mt = Oracle(head(dense), dense, ids + ref[0]) if arms != "dflash" else None
+    mt = Oracle(head(dense), dense, ids + ref[0], script=(2, 0)) if arms != "dflash" else None
     emitted = []
 
     class Rec(FakeDraft):
@@ -469,23 +442,29 @@ def test_plain_arm_exact(dense, spec, monkeypatch, arms):
     stop = sched.eng.stopping
     sched.eng.stopping = lambda t: emitted.append(t) or stop(t)     # every emitted token
     assert run(sched, [request(ids, 40, "a")])["a"] == ref
-    assert "plain" in taken and len(set(taken)) == (3 if arms == "both" else 2)
+    assert set(taken) == {"dflash": {"dflash", "plain"}, "mtp": set(), "both": {"dflash", "mtp"}}[arms]
+    assert mt is None or mt.burst_tokens > 0
 
 
 def forced(monkeypatch, order, took):
     """The chooser takes the arms of `order` ("d" / "m" / "p") in turn, with
-    shadow drafts of both drafters every round."""
+    shadow drafts of DFlash every round it is not taken; "p" with the head
+    loaded = its round with no draft (the gate's plain burst)."""
     seq = {"d": "dflash", "m": "mtp", "p": "plain"}
 
     def pick(self, force=None, now=None):
         self.rounds += 1
-        self.cur = seq[order[len(took) % len(order)]]
+        x = seq[order[len(took) % len(order)]]
+        took.append(x)
+        if self.head:
+            self.mtp.zero = x == "plain"
+            x = "mtp" if x == "plain" else x
+        self.cur = x
         self.r = {}
-        took.append(self.cur)
         return self.cur
     monkeypatch.setattr(worker.Chooser, "pick", pick)
     monkeypatch.setattr(worker.Chooser, "shadows",
-                        lambda self: [x for x in ("dflash", "mtp") if x != self.cur])
+                        lambda self: ["dflash"] if self.cur != "dflash" and "dflash" in self.kinds else [])
 
 
 @pytest.mark.parametrize("order", ["p", "pmd", "dpm", "ppd"])
@@ -496,10 +475,11 @@ def test_plain_bursts_penalties_exact(dense, spec, monkeypatch, order, burst):
     the step that feeds it, or at its emission when the burst ends on it) -
     the plain loop's tokens, greedy with a presence + repetition penalty."""
     from test_kvq8 import spec_arms
-    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
     monkeypatch.setattr(worker.Chooser, "BURST", burst)
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", (burst,))
     took = []
     forced(monkeypatch, order, took)
     ids = prompts([25], 33)[0]
@@ -507,7 +487,7 @@ def test_plain_bursts_penalties_exact(dense, spec, monkeypatch, order, burst):
     ref = plain(dense, ids, 40, **kw)
     assert ref != plain(dense, ids, 40)                  # the penalties move the answer
     sched = scheduler(dense, max_batch=1)
-    d, mt = spec_arms(sched, ref[0], ids, ("dflash", "mtp"))
+    d, mt = spec_arms(sched, ref[0], ids, ("dflash", "mtp"), script=(2,))
     x = request(ids, 40, "a", **kw)
     assert run(sched, [x])["a"] == ref
     assert x.spec_stats["plain_steps"] >= (39 if order == "p" else 4)
@@ -519,10 +499,10 @@ def test_sampling_takes_every_arm(dense, spec, monkeypatch):
     requests are speculative): it runs to its length; the same seed gives the
     same tokens again (the draws: the request's key, split per call)."""
     from test_kvq8 import spec_arms
-    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
-    monkeypatch.setattr(worker.Chooser, "BURST", 3)
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", (3,))
     ids = prompts([25], 34)[0]
     kw = dict(temperature=0.8, top_p=0.95, top_k=20, seed=11)
     ref = plain(dense, ids, 40, temperature=0.0)
@@ -531,7 +511,7 @@ def test_sampling_takes_every_arm(dense, spec, monkeypatch):
         took = []
         forced(monkeypatch, "dmp", took)
         sched = scheduler(dense, max_batch=1)
-        spec_arms(sched, ref[0], ids, ("dflash", "mtp"))
+        spec_arms(sched, ref[0], ids, ("dflash", "mtp"), script=(2,))
         x = request(ids, 40, "a", **kw)
         outs.append(run(sched, [x])["a"])
         assert len(outs[-1][0]) == 40 and {"dflash", "mtp", "plain"} <= set(took)
@@ -590,30 +570,34 @@ def test_auto_setting(dense, spec, monkeypatch):
     assert config._auto("QWEN_NO_SUCH_KNOB", "a", "d") == "x"
     from test_kvq8 import spec_arms
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker, "MTP_K", 0)
     took = []
     forced(monkeypatch, "dmp", took)
     ids = prompts([25], 35)[0]
     ref = plain(dense, ids, 40)
     sched = scheduler(dense, max_batch=1)
-    spec_arms(sched, ref[0], ids, ("dflash", "mtp"))
+    spec_arms(sched, ref[0], ids, ("dflash", "mtp"), script=(2,))
     x = request(ids, 40, "a")
     assert run(sched, [x])["a"] == ref
     arms = x.spec_stats["arms"]
-    assert set(arms) == {"dflash", "mtp", "plain"}
+    assert set(arms) == {"dflash", "mtp"}                # the head's plain bursts: its arm's
     # every token but the first, once (+ the stop token, read but not emitted)
     assert sum(v[1] for v in arms.values()) == len(ref[0]) - 1 + ("stop" in ref[2])
     assert sum(v[0] for v in arms.values()) == len(took)
-    assert set(x.spec_stats["shadows"]) == {"dflash", "mtp", "plain"}
+    assert set(x.spec_stats["shadows"]) == {"dflash", "mtp"}
+    st = x.spec_stats["mtp"]
+    assert st["k"][0] == took.count("plain") and st["k"][2] >= 1 and st["burst_tokens"] >= st["k"][0]
+    assert sum(st["accepted"]) == sum(st["k"][1:]) and st["dropped"] == 0
 
 
-@pytest.mark.parametrize("plain_arm", [False, True])
-def test_thinking_budget(dense, spec, monkeypatch, plain_arm):
-    """A thinking budget inside MTP rounds: the same tokens as the plain loop
-    with that budget (the forced tokens go through plain steps; the head's
-    pending position takes the forced token as its successor)."""
+@pytest.mark.parametrize("gate", [False, True])
+def test_thinking_budget(dense, spec, monkeypatch, gate):
+    """A thinking budget inside MTP rounds (3 drafts, or gated: 0..3 with
+    plain bursts): the same tokens as the plain loop with that budget (the
+    forced tokens go through plain steps; the head's pending position takes
+    the forced token as its successor)."""
     from mlx_vlm.utils import ThinkingBudgetCriteria
-    monkeypatch.setattr(worker, "MTP_K", 3)
-    monkeypatch.setattr(worker, "SPEC_PLAIN", plain_arm)
+    monkeypatch.setattr(worker, "MTP_K", 0 if gate else 3)
     NL, CLOSE, OPEN = 11, 12, 13
     tok = FakeTok({"</think>": [CLOSE], "<think>": [OPEN], "\n": [NL]})
     p = prompts([25], 30)[0] + [OPEN]
@@ -628,7 +612,7 @@ def test_thinking_budget(dense, spec, monkeypatch, plain_arm):
     for budget, n in [(0, 24), (1, 24), (2, 24), (3, 24), (5, 24), (9, 24), (3, 5), (40, 24)]:
         ref = plain(dense, p, n, thinking=crit(budget))
         for full in (free[0], ref[0]):
-            mt = Oracle(head(dense), dense, p + full, wrong=False)
+            mt = Oracle(head(dense), dense, p + full, wrong=False, script=(3, 0, 1, 0, 2))
             assert with_mtp(dense, p, n, mt, thinking=crit(budget)) == ref, (budget, n)
             rounds += len(mt.accept_lens)
     assert rounds > 20
@@ -643,9 +627,10 @@ def test_plain_bursts_thinking_budget(dense, spec, monkeypatch, order, burst):
     tokens with that budget."""
     from mlx_vlm.utils import ThinkingBudgetCriteria
     from test_kvq8 import spec_arms
-    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker.Chooser, "BURST", burst)
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", (burst,))
     NL, CLOSE, OPEN = 11, 12, 13
     tok = FakeTok({"</think>": [CLOSE], "<think>": [OPEN], "\n": [NL]})
     p = prompts([25], 30)[0] + [OPEN]
@@ -661,7 +646,7 @@ def test_plain_bursts_thinking_budget(dense, spec, monkeypatch, order, burst):
         took = []
         forced(monkeypatch, order, took)
         sched = scheduler(dense, max_batch=1)
-        spec_arms(sched, ref[0], p, ("dflash", "mtp"))
+        spec_arms(sched, ref[0], p, ("dflash", "mtp"), script=(2,))
         x = request(p, n, "a", thinking=crit(budget))
         assert run(sched, [x])["a"] == ref, (budget, n)
         steps += x.spec_stats["plain_steps"]
@@ -713,50 +698,147 @@ def test_prompt_cache_context(dense, spec, monkeypatch):
     assert x.reused == len(ids) - 1 and starts == [len(ids) - 1 - 16]
 
 
-def test_adaptive_k(dense, spec, monkeypatch):
-    """QWEN_MTP_K=0: high acceptance -> the deepest block, none -> one draft
-    (+ one every EXPLORE-th round); the answer stays plain greedy's."""
+def test_gate_draft_count(dense, monkeypatch, clock):
+    """The gate (MTPDraft.round / want): no draft while (1 + c1) / T(1) <=
+    1 / T(0); drafts added while E / T(k) rises, a draft's confidence read
+    once the next one is queued (the last one read predicts the rest); k = 0
+    rounds in a row lengthen the plain bursts (BURSTS), a drafted round
+    resets them; an unmeasured T scaled by 1 + R * k from the nearest
+    measured k; QWEN_MTP_KMAX the ceiling."""
     monkeypatch.setattr(worker, "MTP_K", 0)
+    T = [100.0, 137.0, 176.0, 193.0, 210.0]              # the 27B: verify 1.29 / 1.6 / 1.7 / 1.8 + ~7 ms a draft
+    for k, ms in enumerate(T):
+        clock.add(worker.MTPDraft.kind_of(k), ms)
     mt = worker.MTPDraft(head(dense), dense)
+    assert [mt._ms(k) for k in range(5)] == T
+    assert not mt.want([0.35], 0, T) and mt.want([0.4], 0, T)        # 1.37 / 137 vs 1 / 100
+    assert mt.want([0.9], 1, T) and not mt.want([0.6], 1, T)        # 2.71 / 176 > 1.9 / 137
+    confs = []
+    real = worker.MTPDraft._head
+
+    def scripted(self, h):                               # the head's tokens, scripted confidences
+        return real(self, h)[0], mx.array([[confs.pop(0)]] * h.shape[1], dtype=mx.float32).reshape(1, -1)
+    monkeypatch.setattr(worker.MTPDraft, "_head", scripted)
+    H = COMMON["hidden_size"]
     mt.start(0)
-    for _ in range(20):
-        mt.record(4, 4)
-    assert mt.next_k() == 4
-    mt.start(0)
-    for _ in range(19):
-        mt.record(0, mt.next_k())
-    assert mt.next_k() == 1
-    for _ in range(4):
-        mt.record(0, 1)
-    assert mt.next_k() == 2                              # the 24th round explores
-    # measured round times (the 27B's: 2-token verify on exact qmv, 3.. on mrqmm)
-    T4 = {("mtp", 1): 66.0, ("mtp", 2): 88.0, ("mtp", 3): 92.0, ("mtp", 4): 97.0}
-    monkeypatch.setattr(worker, "CLOCK", worker.Clock(T4))
-    mt.start(0)
-    mt.p, mt.seen = [0.46] * 4, [1] * 4
-    assert mt.next_k() == 1                              # 1.46 / 66 > 1.77 / 92
-    mt.p = [0.85] * 4
-    assert mt.next_k() == 4                              # 3.70 / 97 > 1.85 / 66
-    mt.p, mt.seen = [0.9, 0.5, 0.5, 0.5], [9, 0, 0, 0]                  # only k = 1 drafted so far:
-    assert mt.next_k() == 4                              # deeper depths inherit 0.9, not the prior
-    for x in mt.st:                                      # the means over TAU: the chooser's side
-        x.h, x.w = 0.9, 1.0
-    assert mt.expect() == (pytest.approx(1 + 0.9 + 0.81 + 0.729 + 0.6561), pytest.approx(97.0))
-    monkeypatch.setattr(worker, "CLOCK", worker.Clock({("mtp", 1): 66.0}))
-    assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * worker.MTP_COST) / (1 + worker.MTP_COST))
-    ids = prompts([25], 35)[0]
-    ref = plain(dense, ids, 40)
-    mt = Oracle(head(dense), dense, ids + ref[0], wrong=False)
-    assert with_mtp(dense, ids, 40, mt) == ref
-    assert max(mt.draft_lens) == 4
-    # QWEN_MTP_KMAX: the ceiling of the adaptive count
+    at = [0]
+
+    def seed(c, n=1):                                    # one more position and its successor
+        mt.round_end(0, None)                            # (the last round's chained entries go)
+        confs[:] = [c] + confs
+        mt.push(mx.random.normal((1, n, H)))
+        mt.emit_ids(range(at[0] + 1, at[0] + n + 1))
+        at[0] += n
+
+    seed(0.95, 4)
+    confs += [0.95] * 3
+    d = mt.round(9)
+    assert d.shape == (1, 4) and mt.appended == 3 and not confs     # KMAX
+    seed(0.9)
+    confs += [0.1, 0.5]                                  # draft 2's confidence read with draft 3 queued
+    assert mt.round(9).shape == (1, 3) and confs == []
+    seed(0.95)
+    confs += [0.95] * 3
+    assert mt.round(1).shape == (1, 1)                   # room
+    seed(0.1)
+    assert [mt.round(9) for _ in range(6)] == [1, 2, 4, 8, 8, 8]   # one seed, low: longer bursts
+    seed(0.95)
+    confs += [0.95] * 3
+    assert mt.round(9).shape == (1, 4)
+    seed(0.2)
+    assert mt.round(9) == 1                              # reset by the drafted round
+    assert mt.ks == [7, 1, 0, 1, 2] and mt.stats()["k"] == mt.ks
+    mt.clock = worker.Clock({("mtp", 1): 66.0})
+    assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * mt.R) / (1 + mt.R))
+    assert mt._ms(0) == pytest.approx(66.0 / (1 + mt.R))
+    mt.clock = worker.Clock()
+    assert mt._ms(2) == 1 + 2 * mt.R
     monkeypatch.setattr(worker, "MTP_KMAX", 7)
-    monkeypatch.setattr(worker, "CLOCK", worker.Clock())
-    mt = worker.MTPDraft(head(dense), dense)
-    mt.start(0)
-    for _ in range(20):
-        mt.record(7, 7)
-    assert mt.KMAX == 7 and len(mt.p) == 7 and mt.next_k() == 7
+    mt.fresh()
+    mt.clock = worker.Clock({worker.MTPDraft.kind_of(k): 100.0 for k in range(8)})
+    seed(0.5)
+    confs += [0.5] * 6
+    assert mt.KMAX == 7 and mt.round(9).shape == (1, 7)
+
+
+@pytest.mark.parametrize("bursts", [(1,), (1, 2, 4, 8)])
+@pytest.mark.parametrize("kw", ["greedy", "penalties", "sampling"])
+def test_gate_plain_rounds_are_the_plain_loop(dense, spec, monkeypatch, kw, bursts):
+    """Rounds with no draft (k = 0) are the plain loop's steps: every round
+    a plain burst gives the plain loop's tokens - greedy, with penalties, and
+    a seeded sampling request (one draw per step from the request's key)."""
+    monkeypatch.setattr(worker, "MTP_K", 0)
+    monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", bursts)
+    kw = {"greedy": {}, "penalties": dict(presence_penalty=1.5, repetition_penalty=1.3),
+          "sampling": dict(temperature=0.8, top_p=0.95, top_k=20, seed=11)}[kw]
+    ids = prompts([25], 38)[0]
+    ref = plain(dense, ids, 30, **kw)
+    mt = Oracle(head(dense), dense, ids + ref[0], script=(0,))
+    assert with_mtp(dense, ids, 30, mt, **kw) == ref
+    assert not mt.accept_lens and mt.burst_tokens >= len(ref[0]) - 1
+    assert mt.ks[0] == (len(ref[0]) - 1 if bursts == (1,) else 6)  # 1 + 2 + 4 + 8 + 8 + 6 (cut)
+
+
+def test_gate_burst_catch_up_equals_per_step(dense, spec, monkeypatch):
+    """A burst's single catch-up flush, queued with its last step on that
+    step's token not read yet (emit_lazy), leaves the head's cache bitwise
+    equal to the same flush after the token was read (a sync per step); and
+    as a flush after every step (one-step bursts) up to the rounding of an
+    n-row against a 1-row forward (CPU fp32: ~1e-6, not bitwise); the same
+    answer each time."""
+    monkeypatch.setattr(worker, "MTP_K", 0)
+    ids = prompts([25], 39)[0]
+    ref = plain(dense, ids, 40)
+    lazy = worker.MTPDraft.emit_lazy
+
+    def synced(self, y):                                 # the token read on the host first
+        self.succ.append(int(y.item()))
+        self.skip += 1
+    got = []
+    for bursts, emit in [((3, 8, 5), lazy), ((3, 8, 5), synced), ((1,), lazy)]:
+        monkeypatch.setattr(worker.MTPDraft, "BURSTS", bursts)
+        monkeypatch.setattr(worker.MTPDraft, "emit_lazy", emit)
+        mt = Oracle(head(dense), dense, ids + ref[0], script=(0,))
+        assert with_mtp(dense, ids, 40, mt) == ref
+        n = mt.cache[0].offset
+        got.append((n, mt.cache[0].keys[..., :n, :], mt.cache[0].values[..., :n, :]))
+    (n0, k0, v0), (n1, k1, v1), (n2, k2, v2) = got
+    assert n0 == n1 == n2 >= len(ids) + 38
+    assert mx.array_equal(k0, k1).item() and mx.array_equal(v0, v1).item()
+    for a, b in ((k0, k2), (v0, v2)):
+        assert mx.abs(a - b).max().item() < 1e-5
+
+
+def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
+    """QWEN_DRAFT=auto's setup - DFlash + the gated head, the Chooser with
+    its probes and DFlash's shadow drafts - == the head alone == plain
+    greedy, the head's own confidences deciding (the random head's are
+    0.006..0.014: the Clock's times set, and kept, so that about half of its
+    seeds take a draft and some a second one)."""
+    monkeypatch.setattr(worker, "MTP_K", 0)
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker.Clock, "add", lambda self, kind, ms: None)
+    rounds = [0, 0, 0]
+    for ids in prompts([25, 40, 7], 37):
+        ref = plain(dense, ids, 40)
+        for both in (False, True):
+            ck = worker.Clock({worker.MTPDraft.kind_of(k): (100.0, 100.9, 100.905, 101.0, 102.0)[k]
+                               for k in range(5)})
+            monkeypatch.setattr(worker, "CLOCK", ck)
+            mt = Oracle(head(dense), dense, ids + ref[0])
+            d = FakeDraft(ref[0]) if both else None
+            sched = scheduler(dense, max_batch=1)
+            sched.eng.mtp, sched.eng.draft = mt, d
+            x = request(ids, 40, "a")
+            assert run(sched, [x])["a"] == ref, (ids, both)
+            assert set(x.spec_stats["arms"]) <= {"dflash", "mtp"}
+            rounds[0] += mt.ks[0]
+            rounds[1] += mt.ks[1]
+            rounds[2] += sum(mt.ks[2:])
+            if both:
+                assert d.accept_lens                     # the probe
+    assert all(rounds)                                   # bursts and drafted rounds
 
 
 def test_token_bytes(dense):

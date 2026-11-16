@@ -298,7 +298,7 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # the model dir, by their config.json; QWEN_DRAFT_DFLASH / QWEN_DRAFT_MTP name
 # one explicitly, "none" = not that one; the load log says what was found),
 # and per request and round takes the arm with the most tokens per second
-# (mtp.Chooser: DFlash / the MTP head / plain steps, + prompt lookup rounds),
+# (mtp.Chooser: DFlash / the MTP head's gated rounds, + prompt lookup rounds),
 # sampling and penalty requests included. It sets the defaults of the knobs
 # below it stands for - QWEN_DRAFT_SAMPLING=1, QWEN_SPEC_PLAIN=1,
 # QWEN_LOOKUP=draft, QWEN_VERIFY_QMV=3 - each still overridable (the A/B
@@ -424,43 +424,34 @@ LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 # MTP head split into a drafter dir (scripts/perf/mtp/split_mtp.py; the kind is
 # detected from its config), and QWEN_DRAFT_MTP loads one beside a DFlash
 # QWEN_DRAFT. QWEN_MTP_K: drafts per MTP round (chained: k head steps + k
-# lm_heads, then a (k + 1)-token verify). QWEN_MTP_REFEED=1: every accepted
-# position's head entry is recomputed from the target's hidden state (default:
-# the chained steps' entries are kept, as mlx-vlm does). QWEN_DRAFT_HYBRID with
-# both drafters: "1" = per round the one with the larger expected tokens per
-# second (mtp.Chooser: the arm not taken drafts now and then without a verify,
-# scored against the emitted tokens), "dflash" / "mtp" / "plain" = always that
-# arm (tools).
+# lm_heads, then a (k + 1)-token verify); 0 (default) = gated by the head's
+# confidence per round, 0..QWEN_MTP_KMAX drafts (mtp.MTPDraft.round; 0 = plain
+# steps). QWEN_DRAFT_HYBRID with both drafters: "1" = per round the arm with
+# the larger expected tokens per second (mtp.Chooser: DFlash drafts now and
+# then without a verify, scored against the emitted tokens), "dflash" / "mtp"
+# / "plain" = always that arm (tools).
 DRAFT_MTP = os.environ.get("QWEN_DRAFT_MTP", "")
 MTP_K = int(os.environ.get("QWEN_MTP_K") or "0")
-# QWEN_MTP_K=0: adaptive (mtp.MTPDraft.next_k), QWEN_MTP_COST = one draft's cost
-# as a fraction of a round's verify
-MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
-# QWEN_MTP_KMAX: the adaptive draft count's ceiling (a verify block of KMAX + 1
+# QWEN_MTP_KMAX: the gated draft count's ceiling (a verify block of KMAX + 1
 # rows; mrqmm's cost is flat over 3..8 rows on the 27B)
 MTP_KMAX = max(1, min(15, int(os.environ.get("QWEN_MTP_KMAX") or "4")))
-MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
 DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
-# QWEN_SPEC_PLAIN=1 (the default under QWEN_DRAFT=auto): plain steps are an arm
-# of the per-round choice (mtp.Chooser) beside the loaded drafter(s): a request
+# QWEN_SPEC_PLAIN=1 (the default under QWEN_DRAFT=auto): with DFlash and no MTP
+# head, plain steps are an arm of the per-round choice (mtp.Chooser): a request
 # whose drafts are rarely accepted (short Russian prose on the 27B: DFlash
 # below plain) decodes in bursts of plain steps with the plain loop's
-# step-ahead, the drafters still drafting now and then beside them (shadow
-# drafts: no verify, scored against the emitted tokens).
+# step-ahead, DFlash still drafting now and then beside them (shadow drafts:
+# no verify, scored against the emitted tokens). With the head its gate takes
+# the plain steps (a round with no draft) and there is no plain arm.
 SPEC_PLAIN = _auto("QWEN_SPEC_PLAIN", "1", "0") == "1"
 # QWEN_SPEC_TRACE=1 (tools): _spec keeps one tuple per round in
 # req.spec_stats["trace"]: (arm, block tokens, drafts accepted, start s, wall ms,
 # positions DFlash's drafter was fed, [(arm, shadow drafts)], the round's tokens),
 # times on the scheduler's clock.
 SPEC_TRACE = os.environ.get("QWEN_SPEC_TRACE", "0") == "1"
-# QWEN_SPEC_SHADOW=all (tools): with mtp.Chooser every round also drafts every
-# other drafter without verifying (the head: QWEN_MTP_KMAX drafts); with
-# QWEN_SPEC_PLAIN=1 QWEN_DRAFT_HYBRID=plain and the trace: both drafters' drafts
-# at every position of the plain answer (scripts/perf/mtp/chooser_sim.py).
-SPEC_SHADOW = os.environ.get("QWEN_SPEC_SHADOW", "")
-# QWEN_VERIFY_QMV=N (2..3; 0 = off): verify blocks of 2..N tokens (MTP rounds:
-# QWEN_MTP_K + 1) on 4 / 5 / 6 / 8-bit g64 modules through mrqmv.py, a multi-row qmv whose
-# every row is MLX's solo qmv bit for bit (self-tested per shape at load):
+# QWEN_VERIFY_QMV=N (2..3; 0 = off): verify blocks of 2..N tokens (MTP rounds of
+# 1..2 drafts) on 4 / 5 / 6 / 8-bit g64 modules through mrqmv.py, a multi-row qmv
+# whose every row is MLX's solo qmv bit for bit (self-tested per shape at load):
 # the weights read once for the T rows, instead of mrqmm's MMA (rows padded
 # to 8, a flat ~x1.6 of a solo row) or mlx-vlm's exact kernels (T unpacks).
 VERIFY_QMV = int(_auto("QWEN_VERIFY_QMV", "3", "0"))     # QWEN_DRAFT=auto: 3
