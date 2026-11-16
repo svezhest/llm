@@ -28,6 +28,8 @@ The target verifies every draft (the same verify forward as DFlash), so the
 drafts only move acceptance; greedy output == the DFlash path's.
 """
 
+import math
+
 import mlx.core as mx
 
 from . import config as cfg
@@ -47,6 +49,22 @@ class Clock:
 
     def __init__(self, ms=None):
         self.g, self.c = 1.0, dict(ms or {})
+        self.sub = {}
+
+    def at(self, tag):
+        """The clock of one class of requests, `tag` = (the context's size
+        class, sampling, ...): the kinds' times differ between classes (a
+        plain step grows faster with the context than a verify block; the
+        sampler runs per verified row). A new class starts from the times of
+        the same context class when there is one (`tag[0]`), else from this
+        clock's own (none, but for tools that preset them): its arms are
+        probed (Chooser.PROBE)."""
+        c = self.sub.get(tag)
+        if c is None:
+            near = next((x for t, x in self.sub.items() if t[0] == tag[0]), self)
+            c = self.sub[tag] = Clock()
+            c.g, c.c = near.g, dict(near.c)
+        return c
 
     def ms(self, kind):
         c = self.c.get(kind)
@@ -64,6 +82,31 @@ class Clock:
 
 
 CLOCK = Clock()
+
+
+class Avg:
+    """The mean of samples weighted exp(-age / tau) (age in ms) with a prior
+    worth `n` samples, which ages like one. `e`: the real samples' weight
+    (how much the mean knows about now)."""
+
+    __slots__ = ("h", "w", "e", "t")
+
+    def __init__(self, prior, n):
+        self.h, self.w, self.e, self.t = prior * float(n), float(n), 0.0, 0.0
+
+    def age(self, t, tau):
+        if t > self.t:
+            d = max(1e-6, math.exp(-(t - self.t) / tau))
+            self.h, self.w, self.e, self.t = self.h * d, self.w * d, self.e * d, t
+        return self.e
+
+    def add(self, x, t, tau):
+        self.age(t, tau)
+        self.h, self.w, self.e = self.h + x, self.w + 1.0, self.e + 1.0
+
+    @property
+    def mean(self):
+        return self.h / self.w
 
 
 class MTPDraft:
@@ -109,7 +152,10 @@ class MTPDraft:
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
         self.seen = [0] * self.KMAX     # drafts of depth i scored (rounds + shadow drafts)
         self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
-        self.ps = [self.P0] * self.KMAX  # the same, slow (the hybrid's comparison: expect)
+        # the same over the last TAU ms (the Chooser's comparison: expect)
+        self.st = [Avg(self.P0, self.PRIOR) for _ in range(self.KMAX)]
+        self.now = 0.0                  # ms, the Chooser's time (no Chooser: plain means)
+        self.clock = None               # the request's Clock (None: CLOCK)
         self.scored = 0                 # rounds + shadow drafts scored
 
     # QWEN_MTP_K=0: the draft count per round from the request's own acceptance
@@ -117,19 +163,23 @@ class MTPDraft:
     # a property of the model and machine; the verify cost is not linear in T:
     # 2 tokens exact qmv, 3..16 mrqmm's flat MMA cost on the 27B)
     KMAX, P0, ALPHA, EXPLORE = 4, 0.5, 0.25, 8
-    SLOW, PRIOR = 1.0 / 16, 2
+    TAU, PRIOR = 2500.0, 2
+
+    def _clock(self):
+        return self.clock if self.clock is not None else CLOCK
 
     def _ms(self, k):
         """Expected wall time of a k-draft round: measured, else scaled from
         the nearest measured k by the linear prior (1 + QWEN_MTP_COST * k)."""
-        ms = CLOCK.ms(("mtp", k))
+        ck = self._clock()
+        ms = ck.ms(("mtp", k))
         if ms is not None:
             return ms
         c = cfg.MTP_COST
-        ks = [j[1] for j in CLOCK.c if isinstance(j, tuple) and j[0] == "mtp"]
+        ks = [j[1] for j in ck.c if isinstance(j, tuple) and j[0] == "mtp"]
         if ks:
             k0 = min(ks, key=lambda j: abs(j - k))
-            return CLOCK.ms(("mtp", k0)) * (1.0 + c * k) / (1.0 + c * k0)
+            return ck.ms(("mtp", k0)) * (1.0 + c * k) / (1.0 + c * k0)
         return 1.0 + c * k
 
     def _best(self, p):
@@ -162,12 +212,16 @@ class MTPDraft:
         return bk
 
     def expect(self):
-        """(tokens, ms) of a round at the best draft count by the slow
-        averages (mtp.Chooser's comparison with the other arms); ms None:
-        no MTP round timed in this process yet."""
-        _, e, ms = self._best(self.ps)
-        timed = any(isinstance(j, tuple) and j[0] == "mtp" for j in CLOCK.c)
+        """(tokens, ms) of a round at the best draft count by the averages
+        over the last TAU ms (mtp.Chooser's comparison with the other arms);
+        ms None: no MTP round timed in this class of requests yet."""
+        _, e, ms = self._best([x.mean for x in self.st])
+        timed = any(isinstance(j, tuple) and j[0] == "mtp" for j in self._clock().c)
         return e, (ms if timed else None)
+
+    def evidence(self):
+        """The weight of the first draft's samples (Avg.e) now."""
+        return self.st[0].age(self.now, self.TAU)
 
     def push(self, h):
         """Hidden states (1, n, H, the target's post-norm) of the next n
@@ -266,7 +320,7 @@ class MTPDraft:
         for i in range(min(int(accepted) + 1, int(drafted), self.KMAX)):
             hit = 1.0 if i < accepted else 0.0
             self.p[i] += self.ALPHA * (hit - self.p[i])
-            self.ps[i] += max(self.SLOW, 1.0 / (self.seen[i] + 1 + self.PRIOR)) * (hit - self.ps[i])
+            self.st[i].add(hit, self.now, self.TAU)
             self.seen[i] += 1
 
     def record(self, accepted, drafted):
@@ -293,17 +347,16 @@ class MTPDraft:
 
 
 class Chooser:
-    """Which arm a round takes (QWEN_DRAFT_HYBRID / QWEN_SPEC_PLAIN): "dflash",
-    "mtp" (a drafter's round) or "plain" (one plain step) - the one with the
-    most expected tokens per ms.
+    """Which arm a round takes (QWEN_DRAFT=auto; QWEN_DRAFT_HYBRID /
+    QWEN_SPEC_PLAIN): "dflash", "mtp" (a drafter's round) or "plain" (a burst
+    of plain steps) - the one with the most expected tokens per ms.
 
-    Wall time per round: CLOCK (process-wide, steady rounds only: _spec leaves
-    out a round after a switch, whose drafter catches up on the positions it
-    missed, and rounds with shadow drafts). Tokens per round (1 + accepted
-    drafts): DFlash an average over its samples (the mean of the first ones
-    with a prior worth PRIOR samples, then exponential, weight ALPHA), the MTP
-    head its own per-depth averages at its best draft count (MTPDraft.expect),
-    plain exactly 1.
+    Wall time per round: the request class's Clock (process-wide, steady
+    rounds only: _spec leaves out a round after a switch, whose drafter
+    catches up on the positions it missed, and rounds with shadow drafts).
+    Tokens per round (1 + accepted drafts): means over the last TAU ms (Avg) -
+    DFlash's over its blocks, the MTP head's per draft depth at its best draft
+    count (MTPDraft.expect), plain exactly 1.
 
     An arm that is not taken is still sampled: shadows() names the drafters to
     draft this round WITHOUT verifying; their drafts are scored against the
@@ -313,101 +366,150 @@ class Chooser:
     estimate goes stale at the value it had when it lost (the per-round
     comparison of a noisy average with frozen ones kept the arm without
     noise: plain took 91 / 179 of 256 tokens on prose where both drafters
-    beat it). Every round of the first WARM, then after NEAR rounds without a
-    sample for an arm within CLOSE of the current one's rate, FAR for one
-    further behind. The current arm is left only for one whose rate is MARGIN higher.
-    An arm never timed in this process is taken PROBE rounds first."""
+    beat it). A drafter is drafted every round until it has WARM drafts and
+    while it looks better than the current arm without the samples to say so
+    (below NEED: a trial); else as often as its drafts cost NEAR of the time
+    (an arm within CLOSE of the current one's rate) or FAR.
 
-    ALPHA = 1.0 / 16
+    The request starts on the first arm of START it has (the MTP head: the
+    smallest loss when it is the wrong one). The current arm is left only for
+    one whose rate is MARGIN higher and, a drafter, known from >= NEED recent
+    samples. An arm never timed in this class of requests is taken PROBE
+    rounds first."""
+
+    TAU = 2500.0
     PRIOR = 2
     PRIORS = {"dflash": 3.0}
+    START = ("mtp", "dflash", "plain")
     MARGIN = 0.05
-    WARM, NEAR, FAR, CLOSE = 8, 8, 32, 0.8
+    WARM, NEED = 3, 2.5
+    NEAR, FAR, CLOSE = 0.01, 0.004, 0.8
+    COST = {"dflash": 0.10, "mtp": 0.06}        # a shadow draft, of the arm's round time
     PROBE = 3
-    BURST = 8
+    BURST, SHORT = 8, 2
 
-    def __init__(self, kinds, mtp=None):
+    def __init__(self, kinds, mtp=None, clock=None, priors=None):
         self.kinds = list(kinds)
         self.mtp = mtp                          # MTPDraft: the "mtp" arm's estimate
-        self.tok = {k: self.PRIORS.get(k, 2.0) for k in kinds}
-        self.seen = {k: 0 for k in kinds}       # acceptance samples (rounds + shadows)
+        self.clock = clock if clock is not None else CLOCK
+        pri = dict(self.PRIORS, **(priors or {}))
+        self.tok = {k: Avg(pri.get(k, 2.0), self.PRIOR) for k in kinds}
         self.n = {k: 0 for k in kinds}          # rounds taken
+        self.got = {k: 0 for k in kinds}        # tokens of those rounds
         self.shadowed = {k: 0 for k in kinds}   # shadow drafts
-        self.since = {k: 0 for k in kinds}      # rounds since the arm's last sample
+        self.pend = {k: 0 for k in kinds}       # shadow drafts not scored yet
+        self.last = {k: 0.0 for k in kinds}     # ms: the arm's last draft
         self.cur, self.left, self.rounds, self.r = None, 0, 0, None
+        self.t, self.hot, self.probe = 0.0, False, False
+        self.switches = 0
 
     def expect(self, k):
         """(tokens per round, ms per round or None: never timed) of arm k."""
         if k == "plain":
-            return 1.0, CLOCK.ms(k)
+            return 1.0, self.clock.ms(k)
         if k == "mtp" and self.mtp is not None:
             return self.mtp.expect()
-        return self.tok[k], CLOCK.ms(k)
+        return self.tok[k].mean, self.clock.ms(k)
 
-    def pick(self, force=None):
+    def evidence(self, k):
+        """The weight of arm k's recent samples (a plain step needs none)."""
+        if k == "plain":
+            return float("inf")
+        if k == "mtp" and self.mtp is not None:
+            return self.mtp.evidence()
+        return self.tok[k].age(self.t, self.TAU)
+
+    def pick(self, force=None, now=None):
+        """The arm of the next round. `now`: ms, any origin (the samples'
+        ages; None: the time stands still)."""
         self.rounds += 1
         self.r = None
+        self.probe = False
+        if now is not None:
+            self.t = max(self.t, now)
+        if self.mtp is not None:
+            self.mtp.now = self.t
+        was = self.cur
         if force in self.kinds:
             k = force
         elif self.left > 0:
-            k, self.left = self.cur, self.left - 1      # finish the running probe
+            k, self.left, self.probe = self.cur, self.left - 1, True    # the running probe
         else:
             ex = {k: self.expect(k) for k in self.kinds}
             new = [k for k in self.kinds if ex[k][1] is None]
             if new:
-                k, self.left = new[0], self.PROBE - 1
+                k, self.left, self.probe = new[0], self.PROBE - 1, True
             else:
                 r = self.r = {k: t / ms for k, (t, ms) in ex.items()}
-                best = max(self.kinds, key=r.get)
                 k = self.cur
-                if k is None or (best != k and r[best] > r[k] * (1.0 + self.MARGIN)):
-                    k = best
+                if k is None:
+                    k = next((x for x in self.START if x in self.kinds), self.kinds[0])
+                else:
+                    ok = [x for x in self.kinds if x != k and r[x] > r[k] * (1.0 + self.MARGIN)
+                          and self.evidence(x) >= self.NEED]
+                    if ok:
+                        k = max(ok, key=r.get)
+        if was is not None and k != was:
+            self.switches += 1
         self.cur = k
         return k
 
     def shadows(self):
         """The drafters (not the arm just picked) to draft this round without
         verifying."""
+        self.hot = False
         if self.r is None:                      # a forced arm, a probe
             return []
-        out = []
+        out, r = [], self.r
         for k in self.kinds:
             if k in ("plain", self.cur):
                 continue
-            gap = (0 if self.rounds <= self.WARM
-                   else self.NEAR if self.r[k] >= self.CLOSE * self.r[self.cur] else self.FAR)
-            if self.since[k] >= gap:
+            if self.n[k] + self.shadowed[k] < self.WARM:
+                hot = True
+            else:
+                hot = (r[k] > r[self.cur] * (1.0 + self.MARGIN)
+                       and self.evidence(k) + self.pend[k] < self.NEED)
+            if hot:
+                self.hot = True
+                out.append(k)
+                continue
+            ms = self.expect(k)[1]
+            share = self.NEAR if r[k] >= self.CLOSE * r[self.cur] else self.FAR
+            if (self.t - self.last[k]) * share >= self.COST.get(k, 0.1) * ms:
                 out.append(k)
         return out
 
     def sample(self, k, accepted, drafted, full=True):
-        """A draft of arm k (`drafted` tokens) whose first `accepted` were
-        right: a shadow draft scored; `full`: a block of the usual size."""
+        """A shadow draft of arm k (`drafted` tokens) scored: its first
+        `accepted` were right."""
+        self.pend[k] = max(0, self.pend[k] - 1)
+        self._add(k, accepted, drafted, full)
+
+    def _add(self, k, accepted, drafted, full=True):
         if k == "mtp" and self.mtp is not None:
             self.mtp.learn(accepted, drafted)
         elif k != "plain" and full:
-            a = max(self.ALPHA, 1.0 / (self.seen[k] + 1 + self.PRIOR))
-            self.tok[k] += a * (1.0 + accepted - self.tok[k])
-        self.seen[k] += 1
+            self.tok[k].add(1.0 + accepted, self.t, self.TAU)
 
     def steps(self):
-        """Plain steps of a plain round (one burst with step-ahead)."""
-        return self.BURST
+        """Plain steps of a plain round (one burst with step-ahead; short
+        while a drafter is on trial or the plain step is being timed)."""
+        return self.SHORT if self.hot or self.probe else self.BURST
 
     def done(self, accepted, drafted=0, full=True, shadows=(), steps=1):
         """The round of the last pick() kept `accepted` of its `drafted`
-        drafts; `shadows`: the arms drafted beside it; `steps`: a plain
-        round's steps."""
+        drafts (`full`: a block of the usual size); `shadows`: the arms
+        drafted beside it; `steps`: a plain round's steps."""
         k = self.cur
         if k != "mtp" or self.mtp is None:      # (the head's rounds: MTPDraft.record)
-            self.sample(k, accepted, drafted, full)
-        else:
-            self.seen[k] += 1
+            self._add(k, accepted, drafted, full)
         self.n[k] += 1
-        for x in self.kinds:
-            self.since[x] = 0 if x == k or x in shadows else self.since[x] + 1
+        self.got[k] += steps if k == "plain" else 1 + accepted
+        self.last[k] = self.t
         for x in shadows:
             self.shadowed[x] += 1
+            self.pend[x] += 1
+            self.last[x] = self.t
 
     def summary(self):
         out = []
@@ -415,7 +517,7 @@ class Chooser:
             t, ms = self.expect(k)
             out.append(f"{k} {self.n[k]} rounds" + (f" + {self.shadowed[k]} shadows" if self.shadowed[k] else "")
                        + (f" ({t:.2f} tok / {ms:.0f} ms)" if ms else ""))
-        return ", ".join(out)
+        return ", ".join(out) + f", {self.switches} switches"
 
 
 class Shadows:

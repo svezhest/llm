@@ -7,6 +7,8 @@ entries kept or recomputed); the head's KV cache after a request == the head
 run once over every (target hidden, next token) pair; hybrid with a DFlash
 stand-in; the thinking budget; the prompt cache's drafter context."""
 import mlx.core as mx
+import math
+
 import pytest
 
 import worker
@@ -138,13 +140,16 @@ def test_hybrid_exact_takes_both(dense, spec, monkeypatch):
 
 
 class Head:
-    """MTPDraft's side of the chooser: expect() / learn()."""
+    """MTPDraft's side of the chooser: expect() / learn() / evidence()."""
 
-    def __init__(self, tok, ms):
-        self.tok, self.ms, self.learned = tok, ms, []
+    def __init__(self, tok, ms, e=10.0):
+        self.tok, self.ms, self.e, self.learned, self.now = tok, ms, e, [], 0.0
 
     def expect(self):
         return self.tok, self.ms
+
+    def evidence(self):
+        return self.e
 
     def learn(self, accepted, drafted):
         self.learned.append((accepted, drafted))
@@ -165,15 +170,45 @@ def test_clock_follows_the_drift(clock):
     assert clock.ms("plain") < before * 2 ** 0.26
 
 
+def test_clock_per_request_class(clock):
+    """Round times per class of requests (context size, sampling, budget): a
+    new class takes the times of one with the same context size, else none."""
+    a = clock.at((0, False, False))
+    assert a is clock.at((0, False, False)) and a is not clock and a.ms("plain") is None
+    a.add("plain", 80.0)
+    a.add("dflash", 180.0)
+    b = clock.at((0, True, False))                       # sampling, the same context class
+    assert b is not a and b.ms("plain") == 80.0 and b.ms("dflash") == 180.0
+    b.add("plain", 160.0)
+    assert a.ms("plain") == 80.0 and b.ms("plain") > 80.0
+    c = clock.at((2, False, False))                      # a long context: its own probes
+    assert c.ms("plain") is None and c.ms("dflash") is None
+
+
+def test_avg_weights_samples_by_age():
+    """The mean with a prior; old samples count less, `e` = what it knows of now."""
+    a = worker.Avg(3.0, 2)
+    assert a.mean == 3.0 and a.e == 0.0
+    a.add(6.0, 0.0, 1000.0)
+    assert a.mean == pytest.approx(4.0) and a.e == 1.0
+    a.add(6.0, 0.0, 1000.0)
+    assert a.mean == pytest.approx(4.5) and a.e == 2.0
+    assert a.age(1000.0, 1000.0) == pytest.approx(2.0 / 2.718281828)
+    assert a.mean == pytest.approx(4.5)                  # ageing alone moves nothing
+    a.add(1.0, 5000.0, 1000.0)                           # the old ones are almost gone
+    assert a.mean == pytest.approx(1.0, abs=0.1) and a.e == pytest.approx(1.0, abs=0.05)
+
+
 def test_chooser_rate_margin_and_probe(clock):
-    """An arm never timed is taken PROBE rounds; then the arm with the most
-    expected tokens per ms, left only for one MARGIN better."""
+    """An arm never timed is taken PROBE rounds; a request starts on the head;
+    it is left only for an arm MARGIN better that is known from recent samples
+    (a plain step needs none)."""
     c = worker.Chooser(("dflash", "mtp", "plain"), Head(1.8, None))
     P = c.PROBE
     got = []
     for _ in range(P):                                   # nothing timed: dflash first
         got.append(c.pick())
-        assert c.shadows() == []
+        assert c.shadows() == [] and c.steps() == c.SHORT
         c.done(3, 7)
     clock.add("dflash", 180.0)
     for _ in range(P):
@@ -185,52 +220,74 @@ def test_chooser_rate_margin_and_probe(clock):
         c.done(0)
     clock.add("plain", 80.0)
     assert got == ["dflash"] * P + ["mtp"] * P + ["plain"] * P
-    c.tok["dflash"] = 4.8                                # 26.7 vs 15.7 vs 12.5 tok/s
+
+    def dflash(tok, e=10.0):
+        c.tok["dflash"].h, c.tok["dflash"].w, c.tok["dflash"].e = tok * 10.0, 10.0, e
+
+    c = worker.Chooser(("dflash", "mtp", "plain"), Head(1.8, 115.0))
+    dflash(4.8)                                          # 26.7 vs 15.7 vs 12.5 tok/s
+    assert c.pick() == "mtp"                             # the start, whatever the estimates
     assert c.pick() == "dflash"
-    c.tok["dflash"] = 1.9                                # 10.6: the head
+    dflash(1.9)                                          # 10.6: the head
     assert c.pick() == "mtp"
-    c.tok["dflash"] = 1.8 * 180 / 115 * 1.04             # 4 % better: not worth a switch
+    dflash(1.8 * 180 / 115 * 1.04)                       # 4 % better: not worth a switch
     assert c.pick() == "mtp"
-    c.tok["dflash"] = 1.8 * 180 / 115 * 1.06
+    dflash(1.8 * 180 / 115 * 1.06, e=1.0)                # better, from one sample: not yet
+    assert c.pick() == "mtp" and c.shadows() == ["dflash"]       # (a trial: drafted every round)
+    dflash(1.8 * 180 / 115 * 1.06)
     assert c.pick() == "dflash"
-    c.tok["dflash"], c.mtp.tok = 1.0, 1.0                # both below a plain step
+    dflash(1.0)
+    c.mtp.tok = 1.0                                      # both below a plain step
     assert c.pick() == "plain"
+    assert c.shadows() == ["dflash", "mtp"] and c.steps() == c.SHORT     # not drafted yet
+    c.shadowed.update(dflash=c.WARM, mtp=c.WARM)
+    assert c.pick() == "plain" and c.shadows() == [] and c.steps() == c.BURST
     assert c.pick(force="mtp") == "mtp" and c.shadows() == []
+    assert c.switches == 5
+    assert worker.Chooser(("dflash", "plain")).pick() == "dflash"
 
 
 def test_chooser_shadows_cadence(clock):
-    """Shadow drafts of the arms not taken: every round of the first WARM,
-    then every NEAR-th (an arm close to the current one) or FAR-th round."""
+    """Shadow drafts of the arm not taken: every round until it has WARM
+    drafts, then as often as their cost is NEAR (an arm close to the current
+    one) or FAR of the time."""
     clock.add("dflash", 180.0)
     c = worker.Chooser(("dflash", "mtp"), Head(1.8, 115.0))
-    c.tok["dflash"] = 4.8
-    rounds = []
-    for i in range(c.WARM + 2 * c.FAR + 4):
-        assert c.pick() == "dflash"
-        sh = c.shadows()
-        if sh:
-            rounds.append(i)
-        c.done(4, 7, shadows=sh)
-        c.tok["dflash"] = 4.8
-    assert rounds[:c.WARM] == list(range(c.WARM))        # 15.7 < 0.8 * 26.7: far
-    assert [b - a for a, b in zip(rounds[c.WARM - 1:], rounds[c.WARM:])] == [c.FAR + 1] * 2
+    t, rounds = 0.0, []
+
+    def go(n):
+        nonlocal t
+        out = []
+        for _ in range(n):
+            assert c.pick(force=None, now=t) in ("mtp", "dflash")
+            c.cur = "dflash"                             # (the test's arm)
+            sh = c.shadows()
+            out.append(bool(sh))
+            c.done(4, 7, shadows=sh)
+            for x in sh:
+                c.sample(x, 1, 2)
+            c.tok["dflash"].h = 4.8 * c.tok["dflash"].w
+            t += 180.0
+        return out
+
+    c.pick(now=0.0)
+    c.cur = "dflash"
+    got = go(200)
+    assert got[:c.WARM] == [True] * c.WARM               # 15.7 < 0.8 * 26.7 tok/s: far
+    far = math.ceil(c.COST["mtp"] * 115.0 / c.FAR / 180.0)       # rounds between two drafts
+    assert sum(got[c.WARM:]) == pytest.approx((200 - c.WARM) / far, abs=2)
     c.mtp.tok = 2.9                                      # 25.2: close
-    rounds = []
-    for i in range(4 * c.NEAR + 4):
-        c.pick()
-        sh = c.shadows()
-        rounds += [i] if sh else []
-        c.done(4, 7, shadows=sh)
-        c.tok["dflash"] = 4.8
-    assert all(b - a == c.NEAR + 1 for a, b in zip(rounds, rounds[1:])) and len(rounds) >= 3
-    assert c.shadowed["mtp"] == c.WARM + 2 + len(rounds) and c.n["mtp"] == 0
+    got = go(200)
+    near = math.ceil(c.COST["mtp"] * 115.0 / c.NEAR / 180.0)
+    assert sum(got) == pytest.approx(200 / near, abs=2) and near < far
+    assert c.n["mtp"] == 0 and c.pend["mtp"] == 0 and len(c.mtp.learned) == c.shadowed["mtp"]
 
 
 def test_chooser_noisy_drafter_keeps_its_rounds(clock):
     """The old chooser's failure: a drafter whose (noisy) tokens per round beat
     a plain step lost its rounds to plain whenever its average dipped, and the
     frozen estimate kept it out. Now the arm not taken is sampled by shadow
-    drafts, the averages are slow and a switch needs a margin."""
+    drafts, the means are slow and a switch needs a margin."""
     import random
     rng = random.Random(3)
     clock.add("dflash", 180.0)
@@ -243,40 +300,53 @@ def test_chooser_noisy_drafter_keeps_its_rounds(clock):
         return a
 
     c = worker.Chooser(("dflash", "plain"))
-    took = []
-    for _ in range(400):
-        k = c.pick()
-        took.append(k)
+    t, took = 0.0, {"dflash": 0.0, "plain": 0.0}
+    while t < 120e3:
+        k = c.pick(now=t)
         sh = c.shadows()
-        c.done(accepted() if k == "dflash" else 0, 7 if k == "dflash" else 0, shadows=sh)
+        n = c.steps() if k == "plain" else 1
+        c.done(accepted() if k == "dflash" else 0, 7 if k == "dflash" else 0, shadows=sh, steps=n)
         for x in sh:
             c.sample(x, accepted(), 7)
-    assert took.count("plain") < 0.1 * len(took)
+        dt = 180.0 if k == "dflash" else 80.0 * n
+        took[k] += dt
+        t += dt + 18.0 * len(sh)
+    assert took["plain"] < 0.1 * t
 
 
 def test_chooser_switches_on_shadow_samples(clock):
     """The arm not taken wins by its shadow drafts alone (no round spent on
-    it), and loses again when the text changes."""
+    it), and loses again when the text changes; a single good draft of it
+    starts a trial (drafted every round), not a switch."""
     clock.add("dflash", 180.0)
     c = worker.Chooser(("dflash", "mtp"), Head(1.85, 115.0))     # the head: 16.1 tok/s
-    took = []
+    t, took, drafted = 0.0, [], []
 
     def go(n, dflash_accepts):
+        nonlocal t
         for _ in range(n):
-            k = c.pick()
+            k = c.pick(now=t)
             took.append(k)
             sh = c.shadows()
+            drafted.append(bool(sh))
             c.done(dflash_accepts if k == "dflash" else 1, 7 if k == "dflash" else 1, shadows=sh)
             for x in sh:
                 if x == "dflash":
                     c.sample(x, dflash_accepts, 7)
+            t += 180.0 if k == "dflash" else 115.0
 
-    go(12, 1)                                            # 2 tok / 180 ms = 11.1: the prior, then the head
-    assert took[0] == "dflash" and took[-1] == "mtp" and took.index("mtp") <= 4
-    n0 = c.n["dflash"]
-    go(120, 5)                                           # 6 tok / 180 ms = 33.3 by shadows alone
-    assert took[-1] == "dflash" and c.shadowed["dflash"] >= 2
-    assert c.n["dflash"] - n0 < 120 and c.n["mtp"] >= 8
+    go(40, 1)                                            # 2 tok / 180 ms = 11.1
+    assert set(took) == {"mtp"} and drafted[:c.WARM] == [True] * c.WARM
+    assert sum(drafted) <= c.WARM + 2                    # far behind: a draft now and then
+    i = len(took)
+    go(200, 5)                                           # 6 tok / 180 ms = 33.3 by shadows alone
+    first = took.index("dflash")
+    assert took[-1] == "dflash" and first - i < 64       # (the next far draft, then the trial)
+    j = i + drafted[i:].index(True)
+    assert drafted[j:first] == [True] * (first - j) and 2 <= first - j <= 4
+    go(40, 0)                                            # 1 tok / 180 ms: the head again
+    assert took[-1] == "mtp" and took[-10:].count("dflash") == 0
+    assert c.switches == 2
 
 
 def test_shadows_score_against_the_emitted_tokens():
@@ -316,6 +386,8 @@ def test_hybrid_shadow_drafts_exact(dense, spec, monkeypatch, clock, mode):
     monkeypatch.setattr(worker, "MTP_K", 2)
     monkeypatch.setattr(worker, "SPEC_TRACE", True)
     monkeypatch.setattr(worker, "MTP_REFEED", mode != "chooser")
+    if mode == "chooser":                                # (the request's first arm: the head)
+        monkeypatch.setattr(worker.Chooser, "START", ("dflash", "mtp", "plain"))
     if mode == "all":
         monkeypatch.setattr(worker, "SPEC_PLAIN", True)
         monkeypatch.setattr(worker, "DRAFT_HYBRID", "plain")
@@ -389,7 +461,7 @@ def test_plain_arm_exact(dense, spec, monkeypatch, arms):
     d = Rec(ref[0]) if arms != "mtp" else None
     taken = []
     pick = worker.Chooser.pick
-    monkeypatch.setattr(worker.Chooser, "pick", lambda self, force=None: taken.append(pick(self, force))
+    monkeypatch.setattr(worker.Chooser, "pick", lambda self, force=None, now=None: taken.append(pick(self, force, now))
                         or taken[-1])
     sched = scheduler(dense, max_batch=1)
     sched.eng.mtp, sched.eng.draft = mt, d
@@ -397,6 +469,140 @@ def test_plain_arm_exact(dense, spec, monkeypatch, arms):
     sched.eng.stopping = lambda t: emitted.append(t) or stop(t)     # every emitted token
     assert run(sched, [request(ids, 40, "a")])["a"] == ref
     assert "plain" in taken and len(set(taken)) == (3 if arms == "both" else 2)
+
+
+def forced(monkeypatch, order, took):
+    """The chooser takes the arms of `order` ("d" / "m" / "p") in turn, with
+    shadow drafts of both drafters every round."""
+    seq = {"d": "dflash", "m": "mtp", "p": "plain"}
+
+    def pick(self, force=None, now=None):
+        self.rounds += 1
+        self.cur = seq[order[len(took) % len(order)]]
+        self.r = {}
+        took.append(self.cur)
+        return self.cur
+    monkeypatch.setattr(worker.Chooser, "pick", pick)
+    monkeypatch.setattr(worker.Chooser, "shadows",
+                        lambda self: [x for x in ("dflash", "mtp") if x != self.cur])
+
+
+@pytest.mark.parametrize("order", ["p", "pmd", "dpm", "ppd"])
+@pytest.mark.parametrize("burst", [1, 3, 8])
+def test_plain_bursts_penalties_exact(dense, spec, monkeypatch, order, burst):
+    """The plain arm's bursts (step-ahead: a token is fed before it is read)
+    between drafter rounds, with penalties (a fed token is counted once: by
+    the step that feeds it, or at its emission when the burst ends on it) -
+    the plain loop's tokens, greedy with a presence + repetition penalty."""
+    from test_kvq8 import spec_arms
+    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
+    monkeypatch.setattr(worker.Chooser, "BURST", burst)
+    took = []
+    forced(monkeypatch, order, took)
+    ids = prompts([25], 33)[0]
+    kw = dict(presence_penalty=1.5, repetition_penalty=1.3, frequency_penalty=0.2)
+    ref = plain(dense, ids, 40, **kw)
+    assert ref != plain(dense, ids, 40)                  # the penalties move the answer
+    sched = scheduler(dense, max_batch=1)
+    d, mt = spec_arms(sched, ref[0], ids, ("dflash", "mtp"))
+    x = request(ids, 40, "a", **kw)
+    assert run(sched, [x])["a"] == ref
+    assert x.spec_stats["plain_steps"] >= (39 if order == "p" else 4)
+    assert ("d" not in order or d.accept_lens) and ("m" not in order or mt.accept_lens)
+
+
+def test_sampling_takes_every_arm(dense, spec, monkeypatch):
+    """A sampling request through the three arms (QWEN_DRAFT=auto: sampling
+    requests are speculative): it runs to its length; the same seed gives the
+    same tokens again (the draws: the request's key, split per call)."""
+    from test_kvq8 import spec_arms
+    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
+    monkeypatch.setattr(worker.Chooser, "BURST", 3)
+    ids = prompts([25], 34)[0]
+    kw = dict(temperature=0.8, top_p=0.95, top_k=20, seed=11)
+    ref = plain(dense, ids, 40, temperature=0.0)
+    outs = []
+    for _ in range(2):
+        took = []
+        forced(monkeypatch, "dmp", took)
+        sched = scheduler(dense, max_batch=1)
+        spec_arms(sched, ref[0], ids, ("dflash", "mtp"))
+        x = request(ids, 40, "a", **kw)
+        outs.append(run(sched, [x])["a"])
+        assert len(outs[-1][0]) == 40 and {"dflash", "mtp", "plain"} <= set(took)
+        assert x.spec_stats["plain_steps"] >= 6
+    assert outs[0] == outs[1] and outs[0] != ref
+
+
+def test_auto_drafters(tmp_path):
+    """QWEN_DRAFT=auto: the drafter dirs next to the model dir, by their
+    config.json (target hidden size / layers / vocabulary); explicit dirs and
+    "none" win; a model with one drafter or none gets what there is."""
+    import json
+    from qwen_worker.engine import _auto_drafters
+
+    def put(name, cfg):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "config.json").write_text(json.dumps(cfg))
+        return str(d)
+
+    text = dict(hidden_size=5120, num_hidden_layers=64, vocab_size=248320)
+    model = dict(model_type="qwen3_5", text_config=text)
+    big = put("m27-mlx-4bit", model)
+    put("m27-mlx-5bit", model)                           # another build of the model: no drafter
+    d27 = put("m27-dflash2", dict(model_type="qwen3", hidden_size=5120, num_target_layers=64,
+                                  vocab_size=248320, dflash_config=dict(block_size=8)))
+    put("a-dflash", dict(model_type="qwen3", hidden_size=5120, num_target_layers=64,
+                         vocab_size=248320, dflash_config=dict(block_size=8)))
+    put("m9-dflash", dict(model_type="qwen3", hidden_size=4096, num_target_layers=32,
+                          vocab_size=248320, dflash_config=dict(block_size=16)))
+    h27 = put("m27-mtp", dict(model_type="qwen3_5_mtp", text_config=text))
+    put("m9-mtp", dict(model_type="qwen3_5_mtp", text_config=dict(text, hidden_size=4096, num_hidden_layers=32)))
+    (tmp_path / "notes").mkdir()                         # no config.json
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "config.json").write_text("{")
+    assert _auto_drafters(big, model) == (d27, h27)      # the longest common name prefix, not "a-dflash"
+    assert _auto_drafters(big + "/", model) == (d27, h27)
+    assert _auto_drafters(big, model, dflash="none") == ("", h27)
+    assert _auto_drafters(big, model, dflash="/x/d", mtp="none") == ("/x/d", "")
+    small = dict(hidden_size=4096, text_config=dict(text, hidden_size=4096, num_hidden_layers=32))
+    m9 = put("m9-mlx-8bit", small)
+    assert _auto_drafters(m9, small) == (str(tmp_path / "m9-dflash"), str(tmp_path / "m9-mtp"))
+    moe = dict(text_config=dict(text, hidden_size=2048, num_hidden_layers=40))
+    assert _auto_drafters(put("m35", moe), moe) == ("", "")
+    assert _auto_drafters(str(tmp_path / "nowhere" / "m"), model) == ("", "")
+
+
+def test_auto_setting(dense, spec, monkeypatch):
+    """QWEN_DRAFT=auto's defaults (config._auto) and what a request's
+    spec_stats say of its rounds."""
+    from qwen_worker import config
+    assert config._auto("QWEN_NO_SUCH_KNOB", "a", "d") == ("a" if config.DRAFT == "auto" else "d")
+    monkeypatch.setattr(config, "DRAFT", "auto")
+    assert config._auto("QWEN_NO_SUCH_KNOB", "a", "d") == "a"
+    monkeypatch.setenv("QWEN_NO_SUCH_KNOB", "x")
+    assert config._auto("QWEN_NO_SUCH_KNOB", "a", "d") == "x"
+    from test_kvq8 import spec_arms
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    took = []
+    forced(monkeypatch, "dmp", took)
+    ids = prompts([25], 35)[0]
+    ref = plain(dense, ids, 40)
+    sched = scheduler(dense, max_batch=1)
+    spec_arms(sched, ref[0], ids, ("dflash", "mtp"))
+    x = request(ids, 40, "a")
+    assert run(sched, [x])["a"] == ref
+    arms = x.spec_stats["arms"]
+    assert set(arms) == {"dflash", "mtp", "plain"}
+    # every token but the first, once (+ the stop token, read but not emitted)
+    assert sum(v[1] for v in arms.values()) == len(ref[0]) - 1 + ("stop" in ref[2])
+    assert sum(v[0] for v in arms.values()) == len(took)
+    assert set(x.spec_stats["shadows"]) == {"dflash", "mtp", "plain"}
 
 
 @pytest.mark.parametrize("plain_arm", [False, True])
@@ -425,6 +631,40 @@ def test_thinking_budget(dense, spec, monkeypatch, plain_arm):
             assert with_mtp(dense, p, n, mt, thinking=crit(budget)) == ref, (budget, n)
             rounds += len(mt.accept_lens)
     assert rounds > 20
+
+
+@pytest.mark.parametrize("order", ["p", "pm", "dpm"])
+@pytest.mark.parametrize("burst", [1, 2, 8])
+def test_plain_bursts_thinking_budget(dense, spec, monkeypatch, order, burst):
+    """A thinking budget inside the plain arm's bursts: the burst ends at the
+    token after which the budget forces one (the step queued ahead has fed
+    it: its own token is dropped), the forced tokens follow; the plain loop's
+    tokens with that budget."""
+    from mlx_vlm.utils import ThinkingBudgetCriteria
+    from test_kvq8 import spec_arms
+    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker.Chooser, "BURST", burst)
+    NL, CLOSE, OPEN = 11, 12, 13
+    tok = FakeTok({"</think>": [CLOSE], "<think>": [OPEN], "\n": [NL]})
+    p = prompts([25], 30)[0] + [OPEN]
+
+    def crit(budget):
+        return ThinkingBudgetCriteria(tokenizer=tok, thinking_budget=budget, thinking_end_token="</think>",
+                                      thinking_start_token="<think>", enable_thinking=True,
+                                      prompt_preopens_thinking=True)
+
+    steps = 0
+    for budget, n in [(0, 24), (1, 24), (2, 24), (3, 24), (4, 24), (5, 24), (9, 24), (3, 5), (40, 24)]:
+        ref = plain(dense, p, n, thinking=crit(budget))
+        took = []
+        forced(monkeypatch, order, took)
+        sched = scheduler(dense, max_batch=1)
+        spec_arms(sched, ref[0], p, ("dflash", "mtp"))
+        x = request(p, n, "a", thinking=crit(budget))
+        assert run(sched, [x])["a"] == ref, (budget, n)
+        steps += x.spec_stats["plain_steps"]
+    assert steps > 30
 
 
 def test_sampling_exact_distribution_path(dense, spec, monkeypatch):
@@ -498,7 +738,8 @@ def test_adaptive_k(dense, spec, monkeypatch):
     assert mt.next_k() == 4                              # 3.70 / 97 > 1.85 / 66
     mt.p, mt.seen = [0.9, 0.5, 0.5, 0.5], [9, 0, 0, 0]                  # only k = 1 drafted so far:
     assert mt.next_k() == 4                              # deeper depths inherit 0.9, not the prior
-    mt.ps = [0.9] * 4                                    # the slow averages: the chooser's side
+    for x in mt.st:                                      # the means over TAU: the chooser's side
+        x.h, x.w = 0.9, 1.0
     assert mt.expect() == (pytest.approx(1 + 0.9 + 0.81 + 0.729 + 0.6561), pytest.approx(97.0))
     monkeypatch.setattr(worker, "CLOCK", worker.Clock({("mtp", 1): 66.0}))
     assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * worker.MTP_COST) / (1 + worker.MTP_COST))

@@ -3,8 +3,12 @@ target's MTP head vs both (hybrid), the real Engine and _Scheduler (no gRPC), on
 process, variants interleaved per (round, prompt), medians over rounds
 (CLAUDE.md "Measuring performance"). Sibling of scripts/perf/dflash2/ab27.py.
 
-Load with both drafters: QWEN_DRAFT=<DFlash dir> QWEN_DRAFT_MTP=<MTP dir>.
+Load with both drafters: QWEN_DRAFT=auto (they are found next to the model dir), or
+QWEN_DRAFT=<DFlash dir> QWEN_DRAFT_MTP=<MTP dir>.
 Variants (comma separated):
+  auto         what QWEN_DRAFT=auto runs: both drafters + plain steps as arms (mtp.Chooser),
+               lookup rounds (QWEN_LOOKUP=draft), mrqmv verify, sampling requests speculative
+  pplain       the chooser's plain arm alone (plain steps inside _spec, step-ahead bursts)
   plain        eng.draft = eng.mtp = None
   dflash       DFlash alone (eng.mtp = None)
   mtpK         the MTP head alone, K drafts per round (QWEN_MTP_K); mtpKr = QWEN_MTP_REFEED=1
@@ -20,9 +24,10 @@ Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tok
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
 scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts),
 --set short (SHORT below: a ~300-word story asked in one line, ru / en / code; keys = --prompts).
---sampling: temperature 0.6 / top_p 0.95 / top_k 20 / seed per request (QWEN_DRAFT_SAMPLING
-for the speculative variants). Per request: decode tok/s = (n - 1) / (t_last - t_first),
-rounds, accepted drafts per round per drafter.
+--modes greedy,sampling: the cells are modes x prompts; sampling = temperature 0.6 / top_p 0.95 /
+top_k 20 / seed per request (QWEN_DRAFT_SAMPLING for the speculative variants). Per request:
+decode tok/s = (n - 1) / (t_last - t_first), rounds, accepted drafts per round per drafter,
+the rounds and tokens per arm (spec_stats["arms"]). The gate's table: gate_table.py.
 
   cd src/worker && QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1 \\
     QWEN_KV_BITS=0 QWEN_MAX_BATCH=1 QWEN_WIRED_LIMIT_GB=27 QWEN_PRESENCE_PENALTY=0 \\
@@ -80,7 +85,7 @@ tok = getattr(eng.processor, "tokenizer", eng.processor)
 print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() / 1e9:.2f} GB; "
       f"dflash {type(D).__name__ if D else None} mtp {type(M).__name__ if M else None}; "
       f"DRAFT_BLOCK {W.DRAFT_BLOCK} VERIFY_MR {W.VERIFY_MR}", flush=True)
-REFEED0, SAMPLING0, MR0 = W.MTP_REFEED, W.DRAFT_SAMPLING, (W.VERIFY_MR, W.VERIFY_MR_HEAD)
+REFEED0, MR0 = W.MTP_REFEED, (W.VERIFY_MR, W.VERIFY_MR_HEAD)
 KMAX0 = W.MTP_KMAX
 # +q4: mrqmv on the 4-bit modules only (the marks of the others hidden for that variant)
 import mrqmv as _MQ  # noqa: E402
@@ -104,10 +109,12 @@ QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
 
 def set_variant(v, sampling=False):
     """Flip what the scheduler reads (idle scheduler: between requests)."""
-    W.MTP_REFEED, W.DRAFT_HYBRID, W.SPEC_SHADOW = REFEED0, "1", ""
-    W.DRAFT_SAMPLING = sampling or SAMPLING0
+    W.MTP_REFEED, W.DRAFT_HYBRID, W.SPEC_SHADOW, W.LOOKUP = REFEED0, "1", "", "0"
+    W.DRAFT_SAMPLING = sampling
     flags = set(v.split("+")[1:])
     v = v.split("+")[0]
+    if v in ("auto", "pplain"):
+        flags |= {"p", "q"} if QMV0 else {"p"}
     W.SPEC_PLAIN = "p" in flags
     W.SPEC_TRACE = a.trace or v == "dump"
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
@@ -119,6 +126,12 @@ def set_variant(v, sampling=False):
     if v == "dump":
         eng.draft, eng.mtp = D, M
         W.MTP_K, W.SPEC_PLAIN, W.DRAFT_HYBRID, W.SPEC_SHADOW = 0, True, "plain", "all"
+    elif v == "auto":
+        eng.draft, eng.mtp = D, M
+        W.MTP_K, W.LOOKUP, W.DRAFT_SAMPLING = 0, "draft", True
+    elif v == "pplain":
+        eng.draft, eng.mtp = D, M
+        W.MTP_K, W.DRAFT_HYBRID, W.DRAFT_SAMPLING = 0, "plain", True
     elif v == "plain":
         eng.draft = eng.mtp = None
     elif v == "dflash":
@@ -231,7 +244,9 @@ def run(key, rid, v, seed=0, max_tokens=0):
         sd = stats(D) if D is not None and eng.draft is not None else {}
         sm = stats(M) if M is not None and eng.mtp is not None else {}
         rounds = sd.get("rounds", 0) + sm.get("rounds", 0)
-        out["plain_steps"] = r.steps - 1 - rounds if "+p" in v else 0
+        st = r.spec_stats or {}
+        out["plain_steps"] = st.get("plain_steps", 0)
+        out.update({k: st[k] for k in ("arms", "shadows", "switches") if k in st})
         out.update(dflash=sd, mtp=sm, rounds=rounds, round_ms=1000.0 * dt / rounds if rounds else None,
                    tok_per_round=(n - 1) / rounds if rounds else None)
     return out
@@ -253,7 +268,8 @@ def dump():
         return
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
     out = dict(res, speed=[{k: x for k, x in o.items() if k != "tokens"} for o in res["speed"]],
-               clock={"g": W.CLOCK.g, "ms": {str(k): W.CLOCK.ms(k) for k in W.CLOCK.c}})
+               clock={str(t): {"g": c.g, "ms": {str(k): c.ms(k) for k in c.c}}
+                      for t, c in W.CLOCK.sub.items()})
     json.dump(out, open(a.json + ".tmp", "w"), indent=1)
     os.replace(a.json + ".tmp", a.json)
 
@@ -261,10 +277,13 @@ def dump():
 if not a.skip_speed or a.dump:
     sv("plain", KEYS[0])
     run(KEYS[0], "warm", "plain", max_tokens=a.warm_tokens)
-    for v in VS:
-        sv(v, KEYS[0])
-        o = run(KEYS[0], f"warm-{v}", v, max_tokens=a.warm_tokens)
-        print(f"warm {v}: n={o['n']} tps={o['tps']:.2f}", flush=True)
+    # every variant once per mode (kernels compiled; the chooser's round times
+    # per class of requests: its probe rounds are not the gate's)
+    for key in [next(k for k in KEYS if k.endswith("@s") == m) for m in sorted({k.endswith("@s") for k in KEYS})]:
+        for v in VS:
+            sv(v, key)
+            o = run(key, f"warm-{v}", v, max_tokens=a.warm_tokens)
+            print(f"warm {key} {v}: n={o['n']} tps={o['tps']:.2f}", flush=True)
 if a.dump:
     for key in KEYS:
         sv("dump", key)
@@ -289,7 +308,8 @@ if not a.skip_speed:
                       f"tok/round={o.get('tok_per_round') or 0:4.2f} round_ms={o.get('round_ms') or 0:6.1f} "
                       f"dflash={sd.get('rounds', 0)}r/{sd.get('accept', 0):4.1f}% "
                       f"mtp={sm.get('rounds', 0)}r/{sm.get('accept', 0):4.1f}% {sm.get('hist', '')} "
-                      f"plain={o.get('plain_steps', 0)}",
+                      f"plain={o.get('plain_steps', 0)} arms={o.get('arms', '')} "
+                      f"shadows={o.get('shadows', '')} switches={o.get('switches', '')}",
                       flush=True)
                 dump()
     plain = {(o["round"], o["key"]): o["tokens"] for o in res["speed"] if o["variant"] == "plain"}

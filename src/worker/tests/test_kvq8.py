@@ -355,7 +355,7 @@ def test_hybrid_quantized_equals_plain(dense, monkeypatch, start, order):
     if order != "chooser":
         seq = {"d": "dflash", "m": "mtp", "p": "plain"}
 
-        def pick(self, force=None):
+        def pick(self, force=None, now=None):
             self.rounds += 1
             self.cur = seq[order[len(took) % 3]]
             self.r = {}

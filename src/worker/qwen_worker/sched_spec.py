@@ -351,11 +351,19 @@ class _SpecMixin:
         pick_kind = None                        # hybrid / plain arm: mtp.Chooser
 
         trace = [] if cfg.SPEC_TRACE else None  # QWEN_SPEC_TRACE: one tuple per round
+        used = {}                               # arm -> [rounds, tokens] (spec_stats["arms"])
+
+        def use(arm, tokens):
+            u = used.setdefault(arm, [0, 0])
+            u[0], u[1] = u[0] + 1, u[1] + tokens
 
         def stats():
             req.spec_stats = dict(dflash_rounds=drounds, dflash_drafted=drafted, dflash_accepted=acc,
                                   lookup_rounds=lstat[0], lookup_drafted=lstat[1],
-                                  lookup_accepted=lstat[2], plain_steps=lstat[3])
+                                  lookup_accepted=lstat[2], plain_steps=lstat[3],
+                                  arms={k: list(v) for k, v in used.items()})
+            if pick_kind is not None:
+                req.spec_stats.update(shadows=dict(pick_kind.shadowed), switches=pick_kind.switches)
             if trace is not None:
                 req.spec_stats["trace"] = trace
         fa = lm.model.fa_idx
@@ -423,8 +431,11 @@ class _SpecMixin:
             (emitted, not in the cache) with the plain loop's step-ahead - the
             next step is queued before a token is read, so the GPU never waits
             for the host inside the burst. `before()`: called once the first
-            step is queued (the shadow drafts are read there). -> (the last
-            emitted token, not in the cache; stopped; the steps' tokens)."""
+            step is queued (the shadow drafts are read there). A thinking
+            budget ends the burst at the token after which it forces one. ->
+            (the last emitted token; stopped; the steps' tokens; the token the
+            budget forces next or None; is the last token in the cache: only
+            with a forced one, when the step queued ahead already fed it)."""
             nonlocal n
             y, h = pstep(b)
             mx.async_eval(y, h)
@@ -444,10 +455,21 @@ class _SpecMixin:
                 seen(h)
                 dctx.add(dfl(h))
                 if not emit(tok, nxt is not None):
-                    return tok, True, toks
+                    return tok, True, toks, None, False
                 n += 1
-                if nxt is None:
-                    return tok, False, toks
+                f = budget(tok)
+                if f is not None and nxt is not None:
+                    # the step queued ahead fed tok (its position is in the
+                    # cache and the drafters' context); its own token is not read
+                    h = nxt[1]
+                    req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
+                    if mt is not None:
+                        mt.push(h[..., -H:])
+                    seen(h)
+                    dctx.add(dfl(h))
+                    return tok, False, toks, f, True
+                if nxt is None or f is not None:
+                    return tok, False, toks, f, False
                 y, h = nxt
 
         gate = _Gate(LOOKUP_K0, LOOKUP_K, LOOKUP_MIN, LOOKUP_NMAX, LOOKUP_BACKOFF)
@@ -487,7 +509,14 @@ class _SpecMixin:
             arms = [x for x, on in (("dflash", draft is not None), ("mtp", mt is not None),
                                     ("plain", cfg.SPEC_PLAIN and (draft is not None or mt is not None)))
                     if on]
-            pick_kind = Chooser(arms, mt) if len(arms) > 1 else None
+            # the request's class for the round times: the context's size, the
+            # sampler on the verified rows, a thinking budget (plain rounds are
+            # then single synchronous steps)
+            clock = CLOCK.at((sum(len(req.ids) >= x for x in (6144, 24576, 65536)),
+                              sampling["temperature"] > 0, think is not None))
+            if mt is not None:
+                mt.clock = clock
+            pick_kind = Chooser(arms, mt, clock) if len(arms) > 1 else None
             shadow = Shadows() if pick_kind is not None else None
             force = cfg.DRAFT_HYBRID if cfg.DRAFT_HYBRID in arms else None
             kind = arms[0] if arms else None
@@ -511,7 +540,7 @@ class _SpecMixin:
                     break
                 t_round, fed_ctx = time.perf_counter(), 0
                 if timed is not None:
-                    CLOCK.add(timed[0], 1000.0 * (t_round - timed[1]) / timed[2])
+                    clock.add(timed[0], 1000.0 * (t_round - timed[1]) / timed[2])
                     timed = None
                 row.pos = cache[fa].offset
                 self._regrow(row)
@@ -538,12 +567,12 @@ class _SpecMixin:
                     continue
                 also = ()                       # the arms drafted without a verify
                 if look is None and pick_kind is not None:
-                    kind = pick_kind.pick(force)
+                    kind = pick_kind.pick(force, 1000.0 * t_round)
                     also = pick_kind.shadows()
                     if cfg.SPEC_SHADOW == "all":
                         also = [x for x in arms if x not in ("plain", kind)]
                 if look is None and kind == "plain":
-                    bs, drafts = 1, None        # the plain arm: one target step (step1)
+                    bs, drafts = 1, None        # the plain arm (pburst, below)
                 elif look is None:
                     if kind == "mtp":
                         bs = min(mt.next_k() + 1, max_tokens - n + 1)
@@ -598,14 +627,15 @@ class _SpecMixin:
                         d = draft.draft_block(b, _wide(hctx), draft_cache, block_total, argmax, dtype)
                     mx.async_eval(d)
                     sdrafts.append((x, d))
-                if look is None and kind == "plain" and pick_kind is not None and think is None:
-                    # the plain arm: a burst of plain steps with step-ahead (a
-                    # thinking budget: one synchronous step per round, below)
+                if look is None and kind == "plain" and pick_kind is not None:
+                    # the plain arm: a burst of plain steps with step-ahead
                     def before():
                         for x, d in sdrafts:
                             shadow.add(x, d.reshape(-1).tolist())
-                    b, stopped, new = pburst(b, 1 if cfg.SPEC_SHADOW == "all" else pick_kind.steps(), before)
+                    b, stopped, new, f, cached = pburst(
+                        b, 1 if cfg.SPEC_SHADOW == "all" else pick_kind.steps(), before)
                     k = len(new)
+                    use("plain", k)
                     pick_kind.done(0, 0, True, [x for x, _ in sdrafts], steps=k)
                     for x, sa, sd in shadow.settle():
                         pick_kind.sample(x, sa, sd)
@@ -619,6 +649,14 @@ class _SpecMixin:
                     if stopped:
                         finish = "stop"
                         break
+                    if f is not None:
+                        timed = None
+                        b, ctx, why = close(b, cached, f)
+                        for h in ctx:
+                            dctx.add(dfl(h))
+                        if why:
+                            finish = why
+                            break
                     if n % 256 < k and CLEAR_CACHE:
                         mx.clear_cache()
                     continue
@@ -660,9 +698,7 @@ class _SpecMixin:
                         abort_speculative_round(txn)
                         raise
                     requant()                   # (outside the transaction: offset >= start)
-                if look is None and kind == "plain":
-                    lstat[3] += 1
-                elif look is None and bs > 1:
+                if look is None and bs > 1:
                     if kind == "mtp":
                         mt.record(hit, bs - 1)
                     else:
@@ -678,6 +714,7 @@ class _SpecMixin:
                     for x, d in sdrafts:
                         shadow.add(x, d)
                 arm = kind if look is None else None
+                use(arm or "lookup", len(new))
                 if arm is not None and arm == prev and not sdrafts and full and (bs > 1 or arm == "plain"):
                     timed = (("mtp", bs - 1) if arm == "mtp" else arm, t_round, 1)
                 prev = arm
