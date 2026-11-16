@@ -10,7 +10,7 @@ Real Engine + _Scheduler, greedy, the worker's env as given. Steps:
   3. --writer > 0: the conversation's next turn -- must hit its own entry;
   4. --ab N: N rounds of that next turn again (prompt_cache "": with MOVE the entry
      moves into the row and comes back), plain decode and DFlash, --max-ab-tokens
-     tokens, greedy: tok/s, DFlash rounds / accepted / ms per round, peaks; with
+     tokens (--ab-ignore-eos: all of them), greedy: tok/s, DFlash rounds / accepted / ms per round, peaks; with
      --ab-lib and quantized KV also with the library's quantized SDPA (QWEN_VATT_Q8
      off for that run) -- interleaved in this process, tokens compared with the
      first plain run. --probe: a short coding prompt (plain + DFlash) first, the
@@ -45,6 +45,7 @@ ap.add_argument("--max-tokens", type=int, default=64)
 ap.add_argument("--ab", type=int, default=0)
 ap.add_argument("--ab-lib", action="store_true")
 ap.add_argument("--max-ab-tokens", type=int, default=256)
+ap.add_argument("--ab-ignore-eos", action="store_true", help="A/B runs generate --max-ab-tokens (EOS skipped)")
 ap.add_argument("--probe", action="store_true")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
@@ -80,13 +81,13 @@ FDOC = doc(sorted(glob.glob(os.path.join(ROOT, "src/worker/qwen_worker/*.py"))),
 DRAFT = eng.draft
 
 
-def run(messages, rid, mode="", max_tokens=None, quiet=False):
+def run(messages, rid, mode="", max_tokens=None, quiet=False, ignore_eos=False):
     if DRAFT is not None:
         DRAFT.accept_lens, DRAFT.draft_lens = [], []
     req = pb.Request(id=rid, messages=[pb.Message(role=r, content=c) for r, c in messages],
                      params=pb.Params(temperature=0.0, presence_penalty=0.0,
                                       max_tokens=max_tokens or a.max_tokens,
-                                      prompt_cache=mode,
+                                      prompt_cache=mode, ignore_eos=ignore_eos,
                                       chat_template_kwargs_json=json.dumps({"enable_thinking": False})))
     formatted, _ = eng._render(req, [])
     pids = tok.encode(formatted)
@@ -161,7 +162,7 @@ if a.ab and a.writer and res[-1]["end"][0] == "done":
             eng.draft = DRAFT if name.startswith("dflash") else None
             lib = name.endswith("-lib")
             W._VATT_Q8, W._VATT_Q8_DEC = (False, False) if lib else q8
-            o = run(wmsgs, f"{name}{k + 1}", "", a.max_ab_tokens)
+            o = run(wmsgs, f"{name}{k + 1}", "", a.max_ab_tokens, ignore_eos=a.ab_ignore_eos)
             o["variant"] = name
             if name == "plain" and ref is None:
                 ref = o["tokens"]

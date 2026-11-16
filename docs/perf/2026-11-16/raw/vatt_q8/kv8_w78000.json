@@ -1,0 +1,392 @@
+{
+ "env": {
+  "QWEN_MODEL": "<repo>/weights/qwen38-27b-mlx-oq4e",
+  "QWEN_DRAFT": "<repo>/weights/qwen38-27b-dflash2",
+  "QWEN_MRQMM4": "1",
+  "QWEN_MRQMM5": "1",
+  "QWEN_MRQMM6": "1",
+  "QWEN_TEXT_ONLY": "1",
+  "QWEN_MAX_BATCH": "1",
+  "QWEN_PROMPT_CACHE": "1",
+  "QWEN_PROMPT_CACHE_MOVE": "1",
+  "QWEN_PROMPT_CACHE_GB": "6",
+  "QWEN_PROMPT_CACHE_CKPTS": "4",
+  "QWEN_PREFILL_RESERVE_GB": "2.5",
+  "QWEN_CACHE_LIMIT_GB": "1",
+  "QWEN_SDPA_FUSED_MIN_KV": "8192",
+  "QWEN_PREFILL_BUDGET": "16777216",
+  "QWEN_WIRED_LIMIT_GB": "27",
+  "QWEN_PRESENCE_PENALTY": "0",
+  "QWEN_VERIFY_ATT": "2",
+  "QWEN_DECODE_ATT": "8192",
+  "QWEN_KV_BITS": "8",
+  "QWEN_VATT_Q8": "1",
+  "QWEN_KVQ_PREFILL_FUSED": "1"
+ },
+ "args": {
+  "writer": 78000,
+  "foreign": 14300,
+  "foreign_mode": "read",
+  "repeat": 1,
+  "max_tokens": 64,
+  "ab": 2,
+  "ab_lib": true,
+  "max_ab_tokens": 256,
+  "probe": true,
+  "json": "$PERF_OUT/kv8_w78000.json"
+ },
+ "results": [
+  {
+   "id": "probe-plain",
+   "mode": "read",
+   "prompt": 27,
+   "reused": 0,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.42,
+   "active_before_gib": 16.33,
+   "prefill_peak_gib": 16.63,
+   "transient_gib": 0.29,
+   "peak_gib": 16.63,
+   "active_after_gib": 16.34,
+   "cache_gib": 0.0,
+   "entries": [],
+   "text": "```python\ndef merge_sorted_lists(list1: list, list2: list) -> list:\n    \"\"\"\n    Merge two sorted lists into a single sor",
+   "tps": 12.95,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "probe-plain"
+  },
+  {
+   "id": "probe-dflash",
+   "mode": "read",
+   "prompt": 27,
+   "reused": 0,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.65,
+   "active_before_gib": 16.34,
+   "prefill_peak_gib": 16.63,
+   "transient_gib": 0.29,
+   "peak_gib": 17.67,
+   "active_after_gib": 16.34,
+   "cache_gib": 0.0,
+   "entries": [],
+   "text": "```python\ndef merge_sorted_lists(list1: list, list2: list) -> list:\n    \"\"\"\n    Merge two sorted lists into a single sor",
+   "tps": 37.19,
+   "rounds": 22,
+   "accepted": 4.82,
+   "round_ms": 155.2,
+   "variant": "probe-dflash"
+  },
+  {
+   "id": "writer1",
+   "mode": "",
+   "prompt": 78036,
+   "reused": 0,
+   "n": 64,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 968.53,
+   "active_before_gib": 16.34,
+   "prefill_peak_gib": 22.54,
+   "transient_gib": 6.19,
+   "peak_gib": 22.54,
+   "active_after_gib": 19.71,
+   "cache_gib": 3.37,
+   "entries": [
+    78100
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with t",
+   "tps": 7.78,
+   "rounds": 30,
+   "accepted": 1.13,
+   "round_ms": 269.8
+  },
+  {
+   "id": "foreign1",
+   "mode": "read",
+   "prompt": 14332,
+   "reused": 0,
+   "n": 39,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 142.25,
+   "active_before_gib": 19.71,
+   "prefill_peak_gib": 23.24,
+   "transient_gib": 3.52,
+   "peak_gib": 23.24,
+   "active_after_gib": 19.71,
+   "cache_gib": 3.37,
+   "entries": [
+    78100
+   ],
+   "text": "7/10: The code is well-structured with clear docstrings, but the extreme density of inline comments and the massive, unb",
+   "tps": 14.37,
+   "rounds": 14,
+   "accepted": 1.86,
+   "round_ms": 188.9
+  },
+  {
+   "id": "writer2",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 21,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.44,
+   "active_before_gib": 19.71,
+   "prefill_peak_gib": 20.5,
+   "transient_gib": 0.78,
+   "peak_gib": 21.55,
+   "active_after_gib": 19.57,
+   "cache_gib": 3.22,
+   "entries": [
+    78099
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with t",
+   "tps": 15.46,
+   "rounds": 4,
+   "accepted": 4.25,
+   "round_ms": 323.3
+  },
+  {
+   "id": "plain1",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 20,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.31,
+   "active_before_gib": 19.57,
+   "prefill_peak_gib": 20.25,
+   "transient_gib": 0.68,
+   "peak_gib": 20.25,
+   "active_after_gib": 19.47,
+   "cache_gib": 3.12,
+   "entries": [
+    78099
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with",
+   "tps": 11.95,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain",
+   "same_as_plain": true
+  },
+  {
+   "id": "dflash1",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 21,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.62,
+   "active_before_gib": 19.47,
+   "prefill_peak_gib": 20.16,
+   "transient_gib": 0.68,
+   "peak_gib": 20.96,
+   "active_after_gib": 19.48,
+   "cache_gib": 3.13,
+   "entries": [
+    78099
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with t",
+   "tps": 17.31,
+   "rounds": 4,
+   "accepted": 4.25,
+   "round_ms": 288.8,
+   "variant": "dflash",
+   "same_as_plain": false
+  },
+  {
+   "id": "plain-lib1",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 21,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.37,
+   "active_before_gib": 19.48,
+   "prefill_peak_gib": 20.17,
+   "transient_gib": 0.68,
+   "peak_gib": 20.17,
+   "active_after_gib": 19.47,
+   "cache_gib": 3.12,
+   "entries": [
+    78100
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with t",
+   "tps": 5.5,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain-lib",
+   "same_as_plain": false
+  },
+  {
+   "id": "dflash-lib1",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 20,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.47,
+   "active_before_gib": 19.47,
+   "prefill_peak_gib": 20.16,
+   "transient_gib": 0.68,
+   "peak_gib": 21.01,
+   "active_after_gib": 19.48,
+   "cache_gib": 3.13,
+   "entries": [
+    78098
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with",
+   "tps": 4.97,
+   "rounds": 4,
+   "accepted": 4.0,
+   "round_ms": 955.1,
+   "variant": "dflash-lib",
+   "same_as_plain": true
+  },
+  {
+   "id": "dflash2",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 21,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.33,
+   "active_before_gib": 19.48,
+   "prefill_peak_gib": 20.17,
+   "transient_gib": 0.68,
+   "peak_gib": 20.97,
+   "active_after_gib": 19.48,
+   "cache_gib": 3.13,
+   "entries": [
+    78099
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with t",
+   "tps": 20.49,
+   "rounds": 4,
+   "accepted": 4.25,
+   "round_ms": 244.0,
+   "variant": "dflash",
+   "same_as_plain": false
+  },
+  {
+   "id": "plain-lib2",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 21,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.35,
+   "active_before_gib": 19.48,
+   "prefill_peak_gib": 20.17,
+   "transient_gib": 0.68,
+   "peak_gib": 20.17,
+   "active_after_gib": 19.47,
+   "cache_gib": 3.12,
+   "entries": [
+    78100
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with t",
+   "tps": 5.35,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain-lib",
+   "same_as_plain": false
+  },
+  {
+   "id": "dflash-lib2",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 20,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.38,
+   "active_before_gib": 19.47,
+   "prefill_peak_gib": 20.16,
+   "transient_gib": 0.68,
+   "peak_gib": 21.01,
+   "active_after_gib": 19.48,
+   "cache_gib": 3.13,
+   "entries": [
+    78098
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with",
+   "tps": 4.87,
+   "rounds": 4,
+   "accepted": 4.0,
+   "round_ms": 975.6,
+   "variant": "dflash-lib",
+   "same_as_plain": true
+  },
+  {
+   "id": "plain2",
+   "mode": "",
+   "prompt": 78078,
+   "reused": 78016,
+   "n": 20,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 1.4,
+   "active_before_gib": 19.48,
+   "prefill_peak_gib": 20.17,
+   "transient_gib": 0.68,
+   "peak_gib": 20.17,
+   "active_after_gib": 19.47,
+   "cache_gib": 3.12,
+   "entries": [
+    78099
+   ],
+   "text": "The cascade attention results confirm that grouping rows sharing a long prompt prefix is both safe and effective, with",
+   "tps": 12.0,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain",
+   "same_as_plain": true
+  }
+ ]
+}
