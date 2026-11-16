@@ -764,7 +764,7 @@ reports `max_batch` 1. Measured: 8 rows × 8K-token prompts peak at 17.5 GB on t
 9B. How the gateway uses `max_batch` (`GATEWAY_MAX_INFLIGHT`, several gateways on
 one worker, metrics): see *Observability* and *Env knobs*.
 
-See **CLAUDE.md** for design decisions, implementation notes, and gotchas.
+See **CLAUDE.md** for design decisions and gotchas, and [docs/MAP.md](docs/MAP.md) for the topic notes (implementation, measurements, the full env knob table).
 
 ## Observability
 ```zsh
