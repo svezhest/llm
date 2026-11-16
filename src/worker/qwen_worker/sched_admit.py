@@ -406,7 +406,7 @@ class _AdmitMixin:
         # fp16 KV only (a round's rollback trims the cache), no thinking budget
         look = (self.eng.draft is None and LOOKUP == "1" and self.kv["kv_bits"] is None
                 and req.thinking is None)
-        if ((self.eng.draft is None and not look) or cfg.BATCH_INVARIANT or req.images
+        if ((self.eng.draft is None and getattr(self.eng, "mtp", None) is None and not look) or cfg.BATCH_INVARIANT or req.images
                 or req.golden is not None or not (greedy or DRAFT_SAMPLING)):
             return False
         if row.lpk is not None or _wants(req, "prompt_logprobs"):

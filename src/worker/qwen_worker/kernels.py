@@ -149,7 +149,20 @@ def _mr_rows(linear, x):
     return linear(x.reshape(T, 1, K)).reshape(1, T, -1)
 
 
+def _qmv_t(x):
+    """QWEN_VERIFY_QMV: a (1, T, K) fp16 verify block with 2 <= T <= the knob."""
+    return (cfg.VERIFY_QMV and x.ndim == 3 and x.shape[0] == 1 and 2 <= x.shape[1] <= cfg.VERIFY_QMV
+            and x.dtype == mx.float16)
+
+
+def _qmv_rows(w, sc, b, x):
+    _, T, K = x.shape
+    return sys.modules["mrqmv"].rows(x.reshape(T, K), w, sc, b).reshape(1, T, -1)
+
+
 def _verify_linear(self, linear, x):
+    if linear.__dict__.get("_qmv") and _qmv_t(x):
+        return _qmv_rows(linear["weight"], linear["scales"], linear["biases"], x)
     if VERIFY_MR and _verify_mr(linear, x):
         return _mr_rows(linear, x)
     if x.shape[1] > VERIFY_EXACT_MAX_T:
@@ -428,6 +441,23 @@ def _verify_attention(self, attention, x, mask, cache, position_ids, position_em
 
 
 def _verify_linears(self, linears, x):
+    if linears and _qmv_t(x):
+        # QWEN_VERIFY_QMV: the GDN in-projections' 4-bit width groups over
+        # their concatenation, then every marked module (mrqmv.install); the
+        # rest below
+        out = [None] * len(linears)
+        f = linears[0].__dict__.get("_qmv_fused")
+        if f is not None and tuple(map(id, linears)) == f[0]:
+            for idx, w, sc, b, split in f[1]:
+                for i, o in zip(idx, mx.split(_qmv_rows(w, sc, b, x), split, axis=-1)):
+                    out[i] = o
+        for i, linear in enumerate(linears):
+            if out[i] is None and linear.__dict__.get("_qmv"):
+                out[i] = _verify_linear(self, linear, x)
+        if any(o is not None for o in out):
+            rest = [linear for linear, o in zip(linears, out) if o is None]
+            rest = iter(_verify_linears(self, rest, x) if rest else ())
+            return tuple(next(rest) if o is None else o for o in out)
     if VERIFY_MR:
         f = linears[0].__dict__.get("_verify_fused") if linears else None
         if f is not None and tuple(map(id, linears)) == f[0] and _verify_rows(x):
@@ -489,11 +519,37 @@ def _setup_verify_mrqmm(lm, draft):
     if not VERIFY_MR:
         return "drafter lm_head only"
     gdn = _install_verify_mrqmm(lm)
-    if not cfg.DRAFT_BLOCK and draft is not None:   # (None: QWEN_LOOKUP's rounds only)
+    if draft is None:                   # an MTP head alone (QWEN_MTP_K + 1) / QWEN_LOOKUP's rounds
+        return f"verify blocks of 3..16 tokens ({gdn} GDN layers fused)"
+    if not cfg.DRAFT_BLOCK:
         cfg.DRAFT_BLOCK = VERIFY_MR_BLOCK
         draft.prefer_requested_block_size = True
     return (f"verify blocks of 3..16 tokens + drafter lm_head ({gdn} GDN layers fused), "
             f"block {cfg.DRAFT_BLOCK}")
+
+
+def _setup_verify_qmv(lm):
+    """QWEN_VERIFY_QMV=N, at load with a drafter (after _setup_verify_mrqmm):
+    verify blocks of 2..N tokens through mrqmv on every 4 / 5 / 6 / 8-bit g64 module (and
+    fused GDN in-projection) whose shape passes its self-test (each row ==
+    MLX's solo qmv bit for bit). -> what the load log says (None: off)."""
+    if not cfg.VERIFY_QMV:
+        return None
+    import mrqmv
+    fused = []
+    for _, m in lm.named_modules():
+        gs = m.__dict__.get("_fused_in")
+        if not gs:
+            continue
+        ls = [m[a] for a in _GDN_IN]
+        groups = [(tuple(_GDN_IN.index(a) for a in g.names), g.w, g.s, g.b, g.split) for g in gs
+                  if g.bits in mrqmv.BITS_OK and g.gs == 64 and g.mode == "affine"]
+        if groups:
+            fused.append((ls[0], groups, tuple(map(id, ls))))
+    n, nf = mrqmv.install(lm, cfg.VERIFY_QMV, fused)
+    cfg.VERIFY_QMV = mrqmv.MAX_ROWS if n else 0
+    return (f"verify blocks of 2..{mrqmv.MAX_ROWS} tokens on mrqmv: {n} modules, {nf} fused GDN "
+            f"in-projections" if n else "off: no 4 / 5 / 6 / 8-bit g64 module passed")
 
 
 def _draft_wide(draft):

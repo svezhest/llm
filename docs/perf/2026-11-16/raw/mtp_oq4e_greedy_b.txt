@@ -1,0 +1,23 @@
+loaded in 15 s; active 17.86 GB; dflash DFlash2DraftModel mtp MTPDraft; DRAFT_BLOCK 8 VERIFY_MR True
+warm plain: n=256 tps=15.04
+warm dflash: n=256 tps=31.82
+warm mtp0+q: n=256 tps=25.95
+warm mtp0+q4: n=256 tps=25.51
+warm hyb0+q+p: n=256 tps=25.62
+r0 code-2k-0  plain   n=256 tps= 13.13 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 code-2k-0  dflash  n=256 tps= 28.14 tok/round=4.81 round_ms= 171.0 dflash=53r/55.2% mtp=0r/ 0.0%  plain=0
+r0 code-2k-0  mtp0+q  n=256 tps= 23.16 tok/round=3.59 round_ms= 155.1 dflash=0r/ 0.0% mtp=71r/68.7% {0: 9, 1: 11, 2: 7, 3: 17, 4: 27} plain=0
+r0 code-2k-0  mtp0+q4 n=256 tps= 23.47 tok/round=3.64 round_ms= 155.2 dflash=0r/ 0.0% mtp=70r/71.4% {0: 8, 1: 10, 2: 6, 3: 21, 4: 25} plain=0
+r0 code-2k-0  hyb0+q+p n=256 tps= 23.64 tok/round=4.11 round_ms= 174.0 dflash=19r/48.1% mtp=43r/77.6% {0: 4, 1: 6, 2: 2, 3: 13, 4: 18} plain=8
+r0 en-2k-0    hyb0+q+p n=256 tps= 14.74 tok/round=4.32 round_ms= 293.2 dflash=28r/32.1% mtp=31r/43.3% {0: 10, 1: 5, 2: 8, 3: 8} plain=91
+r0 en-2k-0    mtp0+q4 n=256 tps= 16.91 tok/round=2.36 round_ms= 139.6 dflash=0r/ 0.0% mtp=108r/56.9% {0: 22, 1: 43, 2: 29, 3: 9, 4: 5} plain=0
+r0 en-2k-0    mtp0+q  n=256 tps= 16.84 tok/round=1.90 round_ms= 113.0 dflash=0r/ 0.0% mtp=134r/72.9% {0: 25, 1: 98, 2: 10, 3: 1} plain=0
+r0 en-2k-0    dflash  n=256 tps= 17.26 tok/round=3.07 round_ms= 178.0 dflash=83r/30.4% mtp=0r/ 0.0%  plain=0
+r0 en-2k-0    plain   n=256 tps= 12.15 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    plain   n=256 tps= 12.48 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    dflash  n=256 tps= 11.01 tok/round=1.89 round_ms= 171.6 dflash=135r/12.9% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    mtp0+q  n=256 tps= 16.01 tok/round=1.85 round_ms= 115.4 dflash=0r/ 0.0% mtp=138r/67.0% {0: 27, 1: 104, 2: 7} plain=0
+r0 ru-2k-0    mtp0+q4 n=256 tps= 15.35 tok/round=1.89 round_ms= 123.1 dflash=0r/ 0.0% mtp=135r/64.4% {0: 26, 1: 101, 2: 6, 4: 2} plain=0
+r0 ru-2k-0    hyb0+q+p n=256 tps= 12.33 tok/round=5.93 round_ms= 481.1 dflash=14r/17.3% mtp=29r/40.0% {0: 14, 1: 14, 2: 1} plain=179
+exit 143
+stopped for the sampling run Mon Nov 16 16:48:29 MSK 2026

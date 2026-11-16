@@ -1,0 +1,50 @@
+loaded in 13 s; active 16.96 GB; dflash DFlash2DraftModel mtp MTPDraft; DRAFT_BLOCK 8 VERIFY_MR True
+warm plain: n=256 tps=19.55
+warm dflash: n=256 tps=29.03
+warm mtp0+q: n=256 tps=32.08
+warm mtp1+q: n=256 tps=27.36
+r0 code-2k-0  plain   n=256 tps= 19.76 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 code-2k-0  dflash  n=256 tps= 31.56 tok/round=4.18 round_ms= 132.4 dflash=61r/46.7% mtp=0r/ 0.0%  plain=0
+r0 code-2k-0  mtp0+q  n=256 tps= 30.70 tok/round=2.60 round_ms=  84.8 dflash=0r/ 0.0% mtp=98r/69.8% {0: 8, 1: 60, 2: 6, 3: 11, 4: 13} plain=0
+r0 code-2k-0  mtp1+q  n=256 tps= 27.45 tok/round=1.90 round_ms=  69.3 dflash=0r/ 0.0% mtp=134r/90.3% {0: 13, 1: 121} plain=0
+r0 en-2k-0    mtp1+q  n=256 tps= 24.13 tok/round=1.66 round_ms=  68.6 dflash=0r/ 0.0% mtp=154r/66.2% {0: 52, 1: 102} plain=0
+r0 en-2k-0    mtp0+q  n=256 tps= 23.76 tok/round=1.72 round_ms=  72.5 dflash=0r/ 0.0% mtp=148r/59.0% {0: 50, 1: 91, 2: 5, 3: 1, 4: 1} plain=0
+r0 en-2k-0    dflash  n=256 tps= 21.34 tok/round=2.80 round_ms= 131.3 dflash=91r/26.2% mtp=0r/ 0.0%  plain=0
+r0 en-2k-0    plain   n=256 tps= 19.75 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    plain   n=256 tps= 18.90 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    dflash  n=256 tps= 13.70 tok/round=1.95 round_ms= 142.1 dflash=131r/13.8% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    mtp0+q  n=256 tps= 23.60 tok/round=1.83 round_ms=  77.7 dflash=0r/ 0.0% mtp=139r/73.0% {0: 29, 1: 104, 2: 6} plain=0
+r0 ru-2k-0    mtp1+q  n=256 tps= 22.56 tok/round=1.76 round_ms=  77.9 dflash=0r/ 0.0% mtp=145r/76.6% {0: 34, 1: 111} plain=0
+r1 code-2k-0  plain   n=256 tps= 16.59 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r1 code-2k-0  mtp1+q  n=256 tps= 23.15 tok/round=1.90 round_ms=  82.2 dflash=0r/ 0.0% mtp=134r/90.3% {0: 13, 1: 121} plain=0
+r1 code-2k-0  mtp0+q  n=256 tps= 26.72 tok/round=3.04 round_ms= 113.6 dflash=0r/ 0.0% mtp=84r/67.9% {0: 10, 1: 32, 2: 9, 3: 11, 4: 22} plain=0
+r1 code-2k-0  dflash  n=256 tps= 26.44 tok/round=4.18 round_ms= 158.1 dflash=61r/46.7% mtp=0r/ 0.0%  plain=0
+r1 en-2k-0    dflash  n=256 tps= 18.18 tok/round=2.80 round_ms= 154.1 dflash=91r/26.2% mtp=0r/ 0.0%  plain=0
+r1 en-2k-0    mtp0+q  n=256 tps= 20.13 tok/round=1.69 round_ms=  83.9 dflash=0r/ 0.0% mtp=151r/60.7% {0: 54, 1: 89, 2: 8} plain=0
+r1 en-2k-0    mtp1+q  n=256 tps= 21.34 tok/round=1.66 round_ms=  77.6 dflash=0r/ 0.0% mtp=154r/66.2% {0: 52, 1: 102} plain=0
+r1 en-2k-0    plain   n=256 tps= 18.18 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r1 ru-2k-0    plain   n=256 tps= 18.18 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r1 ru-2k-0    mtp1+q  n=256 tps= 23.24 tok/round=1.76 round_ms=  75.7 dflash=0r/ 0.0% mtp=145r/76.6% {0: 34, 1: 111} plain=0
+r1 ru-2k-0    mtp0+q  n=256 tps= 22.85 tok/round=1.77 round_ms=  77.5 dflash=0r/ 0.0% mtp=144r/73.2% {0: 35, 1: 106, 2: 3} plain=0
+r1 ru-2k-0    dflash  n=256 tps= 13.64 tok/round=1.95 round_ms= 142.7 dflash=131r/13.8% mtp=0r/ 0.0%  plain=0
+r2 code-2k-0  mtp0+q  n=256 tps= 27.47 tok/round=2.52 round_ms=  91.9 dflash=0r/ 0.0% mtp=101r/74.4% {0: 11, 1: 57, 2: 14, 3: 7, 4: 12} plain=0
+r2 code-2k-0  mtp1+q  n=256 tps= 25.18 tok/round=1.90 round_ms=  75.6 dflash=0r/ 0.0% mtp=134r/90.3% {0: 13, 1: 121} plain=0
+r2 code-2k-0  plain   n=256 tps= 18.02 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r2 code-2k-0  dflash  n=256 tps= 28.20 tok/round=4.18 round_ms= 148.3 dflash=61r/46.7% mtp=0r/ 0.0%  plain=0
+r2 en-2k-0    dflash  n=256 tps= 18.98 tok/round=2.80 round_ms= 147.6 dflash=91r/26.2% mtp=0r/ 0.0%  plain=0
+r2 en-2k-0    plain   n=256 tps= 17.94 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r2 en-2k-0    mtp1+q  n=256 tps= 21.83 tok/round=1.66 round_ms=  75.9 dflash=0r/ 0.0% mtp=154r/66.2% {0: 52, 1: 102} plain=0
+r2 en-2k-0    mtp0+q  n=256 tps= 21.73 tok/round=1.72 round_ms=  79.3 dflash=0r/ 0.0% mtp=148r/62.1% {0: 50, 1: 89, 2: 8, 3: 1} plain=0
+r2 ru-2k-0    mtp0+q  n=256 tps= 22.75 tok/round=1.77 round_ms=  77.8 dflash=0r/ 0.0% mtp=144r/73.2% {0: 35, 1: 106, 2: 3} plain=0
+r2 ru-2k-0    mtp1+q  n=256 tps= 23.15 tok/round=1.76 round_ms=  76.0 dflash=0r/ 0.0% mtp=145r/76.6% {0: 34, 1: 111} plain=0
+r2 ru-2k-0    plain   n=256 tps= 17.94 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r2 ru-2k-0    dflash  n=256 tps= 13.24 tok/round=1.95 round_ms= 147.0 dflash=131r/13.8% mtp=0r/ 0.0%  plain=0
+
+== median decode tok/s per prompt (median over rounds) ==
+plain   code-2k-0  18.02 en-2k-0  18.18 ru-2k-0  18.18 | tok/round 0.00 round    0.0 ms mtp acc  0.0% dfl acc  0.0% mtp share 0.00 == plain 9/9
+dflash  code-2k-0  28.20 en-2k-0  18.98 ru-2k-0  13.64 | tok/round 2.80 round  147.0 ms mtp acc  0.0% dfl acc 26.2% mtp share 0.00 == plain 6/9
+mtp0+q  code-2k-0  27.47 en-2k-0  21.73 ru-2k-0  22.85 | tok/round 1.77 round   79.3 ms mtp acc 69.8% dfl acc  0.0% mtp share 1.00 == plain 8/9
+mtp1+q  code-2k-0  25.18 en-2k-0  21.83 ru-2k-0  23.15 | tok/round 1.76 round   75.9 ms mtp acc 76.6% dfl acc  0.0% mtp share 1.00 == plain 9/9
+peak 19.91 GB, active 16.85 GB
+wrote $PERF_OUT/mtp/gate_greedy.json
+exit 0
