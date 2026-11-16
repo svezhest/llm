@@ -399,6 +399,36 @@ LOOKUP_K0 = int(os.environ.get("QWEN_LOOKUP_K0", "7"))
 # accepted one resets it to QWEN_LOOKUP_MIN (_Gate). 0 = off.
 LOOKUP_BACKOFF = os.environ.get("QWEN_LOOKUP_BACKOFF", "1") == "1"
 LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
+# MTP drafting (qwen_worker/mtp.py): QWEN_DRAFT may also name the target's own
+# MTP head split into a drafter dir (scripts/perf/mtp/split_mtp.py; the kind is
+# detected from its config), and QWEN_DRAFT_MTP loads one beside a DFlash
+# QWEN_DRAFT. QWEN_MTP_K: drafts per MTP round (chained: k head steps + k
+# lm_heads, then a (k + 1)-token verify). QWEN_MTP_REFEED=1: every accepted
+# position's head entry is recomputed from the target's hidden state (default:
+# the chained steps' entries are kept, as mlx-vlm does). QWEN_DRAFT_HYBRID with
+# both drafters: "1" = per round the one with the larger expected tokens per
+# second (mtp.Chooser), "dflash" / "mtp" = always that one.
+DRAFT_MTP = os.environ.get("QWEN_DRAFT_MTP", "")
+MTP_K = int(os.environ.get("QWEN_MTP_K") or "0")
+# QWEN_MTP_K=0: adaptive (mtp.MTPDraft.next_k), QWEN_MTP_COST = one draft's cost
+# as a fraction of a round's verify
+MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
+# QWEN_MTP_KMAX: the adaptive draft count's ceiling (a verify block of KMAX + 1
+# rows; mrqmm's cost is flat over 3..8 rows on the 27B)
+MTP_KMAX = max(1, min(15, int(os.environ.get("QWEN_MTP_KMAX") or "4")))
+MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
+DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
+# QWEN_SPEC_PLAIN=1: plain steps are an arm of the per-round choice (mtp.Chooser)
+# beside the loaded drafter(s): a request whose drafts are rarely accepted
+# (short Russian prose on the 27B: DFlash below plain) decodes mostly plain,
+# re-probing the drafters every mtp.Chooser.EXPLORE tokens.
+SPEC_PLAIN = os.environ.get("QWEN_SPEC_PLAIN", "0") == "1"
+# QWEN_VERIFY_QMV=N (2..3; 0 = off): verify blocks of 2..N tokens (MTP rounds:
+# QWEN_MTP_K + 1) on 4 / 5 / 6 / 8-bit g64 modules through mrqmv.py, a multi-row qmv whose
+# every row is MLX's solo qmv bit for bit (self-tested per shape at load):
+# the weights read once for the T rows, instead of mrqmm's MMA (rows padded
+# to 8, a flat ~x1.6 of a solo row) or mlx-vlm's exact kernels (T unpacks).
+VERIFY_QMV = int(os.environ.get("QWEN_VERIFY_QMV") or "0")
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs

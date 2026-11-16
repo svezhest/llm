@@ -1,0 +1,24 @@
+loaded in 16 s; active 17.99 GB; dflash DFlash2DraftModel mtp MTPDraft; DRAFT_BLOCK 8 VERIFY_MR True
+warm plain: n=256 tps=18.44
+warm dflash: n=256 tps=34.91
+warm mtp0+q: n=256 tps=29.67
+warm mtp0+q+k6: n=256 tps=28.22
+r0 code-2k-0  plain   n=256 tps= 13.45 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 code-2k-0  dflash  n=256 tps= 26.57 tok/round=4.81 round_ms= 181.1 dflash=53r/55.2% mtp=0r/ 0.0%  plain=0
+r0 code-2k-0  mtp0+q  n=256 tps= 16.80 tok/round=2.36 round_ms= 140.5 dflash=0r/ 0.0% mtp=108r/77.5% {0: 8, 1: 76, 2: 9, 3: 6, 4: 9} plain=0
+r0 code-2k-0  mtp0+q+k6 n=256 tps= 18.01 tok/round=2.66 round_ms= 147.5 dflash=0r/ 0.0% mtp=96r/67.7% {0: 5, 1: 65, 2: 7, 3: 5, 4: 6, 5: 7, 6: 1} plain=0
+r0 en-2k-0    mtp0+q+k6 n=256 tps= 14.93 tok/round=1.90 round_ms= 127.5 dflash=0r/ 0.0% mtp=134r/72.5% {0: 23, 1: 102, 2: 8, 3: 1} plain=0
+r0 en-2k-0    mtp0+q  n=256 tps= 14.86 tok/round=1.86 round_ms= 125.3 dflash=0r/ 0.0% mtp=137r/72.0% {0: 30, 1: 96, 2: 11} plain=0
+r0 en-2k-0    dflash  n=256 tps= 17.10 tok/round=3.07 round_ms= 179.7 dflash=83r/30.4% mtp=0r/ 0.0%  plain=0
+r0 en-2k-0    plain   n=256 tps= 11.89 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    plain   n=256 tps= 11.78 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    dflash  n=256 tps= 10.47 tok/round=1.89 round_ms= 180.4 dflash=135r/12.9% mtp=0r/ 0.0%  plain=0
+r0 ru-2k-0    mtp0+q  n=256 tps= 14.67 tok/round=1.88 round_ms= 127.8 dflash=0r/ 0.0% mtp=136r/62.8% {0: 30, 1: 95, 2: 9, 3: 1, 4: 1} plain=0
+r0 ru-2k-0    mtp0+q+k6 n=256 tps= 14.76 tok/round=1.89 round_ms= 128.0 dflash=0r/ 0.0% mtp=135r/69.5% {0: 28, 1: 93, 2: 14} plain=0
+r1 code-2k-0  plain   n=256 tps= 11.58 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0%  plain=0
+r1 code-2k-0  mtp0+q+k6 n=256 tps= 18.97 tok/round=2.68 round_ms= 141.5 dflash=0r/ 0.0% mtp=95r/78.2% {0: 7, 1: 51, 2: 22, 3: 6, 4: 2, 5: 2, 6: 5} plain=0
+r1 code-2k-0  mtp0+q  n=256 tps= 18.63 tok/round=2.68 round_ms= 144.1 dflash=0r/ 0.0% mtp=95r/74.4% {0: 8, 1: 54, 2: 12, 3: 2, 4: 19} plain=0
+r1 code-2k-0  dflash  n=256 tps= 25.67 tok/round=4.81 round_ms= 187.4 dflash=53r/55.2% mtp=0r/ 0.0%  plain=0
+r1 en-2k-0    dflash  n=256 tps= 16.54 tok/round=3.07 round_ms= 185.8 dflash=83r/30.4% mtp=0r/ 0.0%  plain=0
+exit 130
+Mon Nov 16 16:13:09 MSK 2026

@@ -17,7 +17,7 @@ import worker_pb2 as pb
 
 from . import config as cfg
 from . import sizing
-from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, EVENT_POLL_S, FP16,
+from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, DRAFT_MTP, EVENT_POLL_S, FP16,
                      GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, LOOKUP, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
                      PROMPT_CACHE_GB, PROMPT_CACHE_REPLY, RESERVE_TOKENS, SAMPLING_KWARGS,
@@ -31,7 +31,9 @@ from .grammar import _grammar, _Guide, _response_schema, _tool_choice, _ws_masks
 from .rows import _install_rows_attention
 from .kernels import (_draft_wide, _install_drafter_compile, _install_drafter_mrqmm,
                       _install_fast_paths, _install_gdn_fuse, _invariant_check, _log_invariant,
-                      _probe_decode_att, _probe_verify_attention, _setup_verify_mrqmm, _widen_drafter)
+                      _probe_decode_att, _probe_verify_attention, _setup_verify_mrqmm, _setup_verify_qmv,
+                      _widen_drafter)
+from .mtp import load_mtp, mtp_dir
 from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_LOGPROBS,
                        PROMPT_CACHE_MODES)
 from .request import _Req
@@ -131,6 +133,7 @@ class Engine:
         self._pcache = _PrefixCache()
         self.draft = None
         self.draft_wide = False                 # QWEN_DRAFT_FP32: fp32 drafter activations
+        self.mtp = None                         # the MTP head drafter (QWEN_DRAFT / QWEN_DRAFT_MTP)
         self._span_tokens = None        # (header, think pre-opens, <|im_end|>): _assistant_spans
         self._tok_str = {}              # id -> tokenizer.decode([id]) (logprobs; vocab-bounded)
         self._plain = None              # _PlainContent (QWEN_SPLIT_SPECIAL_TOKENS)
@@ -167,6 +170,8 @@ class Engine:
         if DRAFT and cfg.BATCH_INVARIANT:
             log.warning("QWEN_DRAFT ignored: QWEN_BATCH_INVARIANT=1 (the verify rounds "
                         "differently from the batch's decode)")
+        elif DRAFT and mtp_dir(DRAFT):            # the target's own MTP head (mtp.py)
+            self.mtp = load_mtp(DRAFT, self.model.language_model, FP16)
         elif DRAFT:
             # Quantized KV too (2026-11-15): _spec quantizes its cache where
             # the plain loop does (after every prefill slab and fed token past
@@ -185,6 +190,11 @@ class Engine:
             if wide and not DRAFT_BITS:
                 log.warning("QWEN_DRAFT_FP32 with QWEN_DRAFT_BITS=0: the drafter's weights stay "
                             "bf16 (slow on M1/M2: no native bf16)")
+        if DRAFT_MTP and self.draft is not None:  # beside DFlash: QWEN_DRAFT_HYBRID
+            self.mtp = load_mtp(DRAFT_MTP, self.model.language_model, FP16)
+        elif DRAFT_MTP:
+            log.warning("QWEN_DRAFT_MTP ignored: it goes beside a DFlash QWEN_DRAFT (an MTP head "
+                        "alone is QWEN_DRAFT itself)")
         _tok = getattr(self.processor, "tokenizer", self.processor)
         # mlx-vlm стопит только на верхнем eos_token_id; у qwen их два
         # (<|im_end|> и <|endoftext|>), стоп на всех — как в HF/vLLM
@@ -273,7 +283,7 @@ class Engine:
         import pfqmm                       # after the fp16 cast (fp16 scales only); LM only
         pfqmm.install(lm)
         # a verify path: a drafter, or QWEN_LOOKUP's rounds without one
-        spec = self.draft is not None or (LOOKUP == "1" and KV_KWARGS["kv_bits"] is None
+        spec = self.draft is not None or self.mtp is not None or (LOOKUP == "1" and KV_KWARGS["kv_bits"] is None
                                           and not cfg.BATCH_INVARIANT)
         if self.max_batch >= 3 or (spec and VERIFY_MR_HEAD):
             # after the fp16 cast (the kernel takes fp16 scales only); the
@@ -297,6 +307,8 @@ class Engine:
             # never with QWEN_BATCH_INVARIANT (it loads no drafter)
             how = _setup_verify_mrqmm(lm, self.draft)
             log.info("DFlash through mrqmm (QWEN_VERIFY_MRQMM=%s): %s", VERIFY_MRQMM, how)
+        if spec and cfg.VERIFY_QMV:
+            log.info("verify through mrqmv (QWEN_VERIFY_QMV=%d): %s", cfg.VERIFY_QMV, _setup_verify_qmv(lm))
         if self.draft is not None and (cfg.DRAFT_MRQMM or cfg.DRAFT_COMPILE):
             log.info("drafter fast paths: %s", _setup_drafter_fast(self.draft, self.draft_wide))
         if spec:
