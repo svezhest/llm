@@ -28,12 +28,42 @@ The target verifies every draft (the same verify forward as DFlash), so the
 drafts only move acceptance; greedy output == the DFlash path's.
 """
 
-import time
-
 import mlx.core as mx
 
 from . import config as cfg
 from .config import log
+
+
+class Clock:
+    """Wall time of a steady round per kind ("dflash", "plain", ("mtp", k)),
+    process-wide: a property of the model and the machine, shared by requests.
+    The machine's speed drifts (+-30 % over minutes) and a kind that is not
+    taken is not measured, so a time is kept as g * c[kind]: a sample moves
+    the common factor g (weight G) more than its own c (weight C), and the
+    other kinds' times follow the drift instead of going stale. A sample
+    counts within [1/2, 2] of the expectation (a pause is not the kind's cost)."""
+
+    G, C = 0.2, 0.05
+
+    def __init__(self, ms=None):
+        self.g, self.c = 1.0, dict(ms or {})
+
+    def ms(self, kind):
+        c = self.c.get(kind)
+        return None if c is None else self.g * c
+
+    def add(self, kind, ms):
+        if ms <= 0.0:
+            return
+        if kind not in self.c:
+            self.c[kind] = ms / self.g
+            return
+        r = min(2.0, max(0.5, ms / (self.g * self.c[kind])))
+        self.g *= r ** self.G
+        self.c[kind] *= r ** self.C
+
+
+CLOCK = Clock()
 
 
 class MTPDraft:
@@ -71,53 +101,73 @@ class MTPDraft:
         self.skip = 0                   # successors already covered by kept draft entries
         self.appended = 0               # approximate entries of the current round
         self.seed = None                # (token (1, 1), hidden (1, 1, H)) or None
+        self.fresh()
+
+    def fresh(self):
+        """A new request's acceptance statistics (no head state: tools too)."""
         self.accept_lens, self.draft_lens = [], []
-        self.t0 = None                  # the current round's start (draft)
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
-        self.seen = [0] * self.KMAX     # rounds that drafted depth i
+        self.seen = [0] * self.KMAX     # drafts of depth i scored (rounds + shadow drafts)
         self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
+        self.ps = [self.P0] * self.KMAX  # the same, slow (the hybrid's comparison: expect)
+        self.scored = 0                 # rounds + shadow drafts scored
 
     # QWEN_MTP_K=0: the draft count per round from the request's own acceptance
-    # and the process's measured round times per k (MS: shared by requests,
+    # and the process's measured round times per k (CLOCK: shared by requests,
     # a property of the model and machine; the verify cost is not linear in T:
     # 2 tokens exact qmv, 3..16 mrqmm's flat MMA cost on the 27B)
     KMAX, P0, ALPHA, EXPLORE = 4, 0.5, 0.25, 8
-    MS = {}
+    SLOW, PRIOR = 1.0 / 16, 2
 
     def _ms(self, k):
         """Expected wall time of a k-draft round: measured, else scaled from
         the nearest measured k by the linear prior (1 + QWEN_MTP_COST * k)."""
-        if k in self.MS:
-            return self.MS[k]
+        ms = CLOCK.ms(("mtp", k))
+        if ms is not None:
+            return ms
         c = cfg.MTP_COST
-        if self.MS:
-            k0 = min(self.MS, key=lambda j: abs(j - k))
-            return self.MS[k0] * (1.0 + c * k) / (1.0 + c * k0)
+        ks = [j[1] for j in CLOCK.c if isinstance(j, tuple) and j[0] == "mtp"]
+        if ks:
+            k0 = min(ks, key=lambda j: abs(j - k))
+            return CLOCK.ms(("mtp", k0)) * (1.0 + c * k) / (1.0 + c * k0)
         return 1.0 + c * k
 
-    def next_k(self):
-        """Drafts for the next round: QWEN_MTP_K, or (0) the k in 1..KMAX with
-        the most expected tokens per ms, (1 + sum_i prod_{j<=i} p_j) / ms(k),
-        from per-depth acceptance averages and the measured round times; every
-        EXPLORE-th round one more or (alternately) one fewer (the averages of
-        the neighbours would go stale)."""
-        if cfg.MTP_K > 0:
-            return cfg.MTP_K
-        best, bk, e, q, pk = -1.0, 1, 1.0, 1.0, self.P0
-        for k in range(1, self.KMAX + 1):
+    def _best(self, p):
+        """(k, tokens, ms): the k in 1..KMAX with the most expected tokens
+        per ms, (1 + sum_i prod_{j<=i} p_j) / ms(k), by the per-depth
+        acceptance averages `p` and the measured round times."""
+        best, out, e, q, pk = -1.0, (1, 1.0, 1.0), 1.0, 1.0, self.P0
+        for k in range(1, max(self.KMAX, cfg.MTP_K) + 1):
             # a depth this request has not drafted yet takes the shallower
             # one's estimate (else a request that started at k = 1 stays
             # there: its deeper averages never move from the prior)
-            pk = self.p[k - 1] if self.seen[k - 1] else pk
+            pk = p[k - 1] if k <= self.KMAX and self.seen[k - 1] else pk
             q *= pk
             e += q
-            v = e / self._ms(k)
-            if v > best:
-                best, bk = v, k
-        r = len(self.accept_lens)
+            ms = self._ms(k)
+            if cfg.MTP_K == k or (cfg.MTP_K <= 0 and e / ms > best):
+                best, out = e / ms, (k, e, ms)
+        return out
+
+    def next_k(self):
+        """Drafts for the next round: QWEN_MTP_K, or (0) the k of _best by the
+        fast averages; every EXPLORE-th round one more or (alternately) one
+        fewer (the averages of the neighbours would go stale)."""
+        if cfg.MTP_K > 0:
+            return cfg.MTP_K
+        bk = self._best(self.p)[0]
+        r = self.scored
         if r % self.EXPLORE == self.EXPLORE - 1:
             bk = min(self.KMAX, bk + 1) if (r // self.EXPLORE) % 2 == 0 else max(1, bk - 1)
         return bk
+
+    def expect(self):
+        """(tokens, ms) of a round at the best draft count by the slow
+        averages (mtp.Chooser's comparison with the other arms); ms None:
+        no MTP round timed in this process yet."""
+        _, e, ms = self._best(self.ps)
+        timed = any(isinstance(j, tuple) and j[0] == "mtp" for j in CLOCK.c)
+        return e, (ms if timed else None)
 
     def push(self, h):
         """Hidden states (1, n, H, the target's post-norm) of the next n
@@ -169,7 +219,6 @@ class MTPDraft:
         if self.seed is None:
             raise RuntimeError("mtp: no seed (a pushed position without its successor)")
         tok, h = self.seed
-        self.t0 = time.perf_counter()
         toks = [tok]
         self.appended = 0
         for _ in range(n - 1):
@@ -199,18 +248,33 @@ class MTPDraft:
             self.push(h[:, keep:accepted + 1])
         self.skip += keep
 
-    def record(self, accepted, drafted):
-        """After a round's tokens were read: its acceptance and wall time."""
-        if self.t0 is not None and drafted:
-            ms, d = 1000.0 * (time.perf_counter() - self.t0), int(drafted)
-            self.MS[d] = ms if d not in self.MS else (1 - self.ALPHA) * self.MS[d] + self.ALPHA * ms
-            self.t0 = None
-        self.accept_lens.append(int(accepted))
-        self.draft_lens.append(int(drafted))
+    def cancel(self):
+        """The chained entries of the last draft() leave the head's cache: a
+        shadow draft (mtp.Chooser: scored against the emitted tokens, not
+        verified; the round's positions are then pushed whole by round_end)."""
+        if self.appended:
+            for c in self.cache:
+                c.trim(self.appended)
+            self.pos -= self.appended
+            self.appended = 0
+        self.seed = None
+
+    def learn(self, accepted, drafted):
+        """A draft of `drafted` tokens whose first `accepted` were right (a
+        verified round or a scored shadow draft) -> the per-depth averages."""
+        self.scored += 1
         for i in range(min(int(accepted) + 1, int(drafted), self.KMAX)):
             hit = 1.0 if i < accepted else 0.0
-            self.seen[i] += 1
             self.p[i] += self.ALPHA * (hit - self.p[i])
+            self.ps[i] += max(self.SLOW, 1.0 / (self.seen[i] + 1 + self.PRIOR)) * (hit - self.ps[i])
+            self.seen[i] += 1
+
+    def record(self, accepted, drafted):
+        """After a round's tokens were read: its acceptance (the round's wall
+        time goes to CLOCK from _spec)."""
+        self.accept_lens.append(int(accepted))
+        self.draft_lens.append(int(drafted))
+        self.learn(accepted, drafted)
 
     # ---- the head ----
 
@@ -231,71 +295,162 @@ class MTPDraft:
 class Chooser:
     """Which arm a round takes (QWEN_DRAFT_HYBRID / QWEN_SPEC_PLAIN): "dflash",
     "mtp" (a drafter's round) or "plain" (one plain step) - the one with the
-    most expected tokens per ms, tokens per round / wall time per round.
+    most expected tokens per ms.
 
-    Tokens per round (1 + accepted drafts) start at a prior worth PRIOR rounds
-    (a drafter gets the benefit of the doubt; plain is exactly 1) and follow
-    an exponential average (weight max(ALPHA, 1 / (rounds + PRIOR))). Wall
-    time: the arm's first round is replaced by its second (a DFlash round
-    right after prefill feeds the drafter the whole prompt window), then an
-    exponential average. Every arm is first taken PROBE rounds in a row; an
-    arm not taken while EXPLORE tokens were emitted gets PROBE rounds again
-    (re-probing: a drafter that lost on one stretch of text can win on the
-    next). A plain step costs about half a drafter round on the 27B, so a
-    losing drafter's re-probe costs ~PROBE plain steps per EXPLORE tokens."""
+    Wall time per round: CLOCK (process-wide, steady rounds only: _spec leaves
+    out a round after a switch, whose drafter catches up on the positions it
+    missed, and rounds with shadow drafts). Tokens per round (1 + accepted
+    drafts): DFlash an average over its samples (the mean of the first ones
+    with a prior worth PRIOR samples, then exponential, weight ALPHA), the MTP
+    head its own per-depth averages at its best draft count (MTPDraft.expect),
+    plain exactly 1.
 
-    ALPHA = 0.2
-    EXPLORE = 64
-    PROBE = 2
+    An arm that is not taken is still sampled: shadows() names the drafters to
+    draft this round WITHOUT verifying; their drafts are scored against the
+    tokens the request emits from the same anchor (Shadows) - what a verify
+    would have kept, at the cost of the draft alone (27B: an MTP draft step
+    ~3.5 ms, a DFlash block ~17 ms, against a 110-180 ms round). So no arm's
+    estimate goes stale at the value it had when it lost (the per-round
+    comparison of a noisy average with frozen ones kept the arm without
+    noise: plain took 91 / 179 of 256 tokens on prose where both drafters
+    beat it). Every round of the first WARM, then after NEAR rounds without a
+    sample for an arm within CLOSE of the current one's rate, FAR for one
+    further behind. The current arm is left only for one whose rate is MARGIN higher.
+    An arm never timed in this process is taken PROBE rounds first."""
+
+    ALPHA = 1.0 / 16
     PRIOR = 2
-    PRIORS = {"dflash": 3.0, "mtp": 2.5, "plain": 1.0}
+    PRIORS = {"dflash": 3.0}
+    MARGIN = 0.05
+    WARM, NEAR, FAR, CLOSE = 8, 8, 32, 0.8
+    PROBE = 3
+    BURST = 8
 
-    def __init__(self, kinds):
+    def __init__(self, kinds, mtp=None):
         self.kinds = list(kinds)
+        self.mtp = mtp                          # MTPDraft: the "mtp" arm's estimate
         self.tok = {k: self.PRIORS.get(k, 2.0) for k in kinds}
-        self.ms = {k: None for k in kinds}
+        self.seen = {k: 0 for k in kinds}       # acceptance samples (rounds + shadows)
         self.n = {k: 0 for k in kinds}          # rounds taken
-        self.idle = {k: 0 for k in kinds}       # tokens emitted since the arm's last round
-        self.left = {k: self.PROBE for k in kinds}   # probe rounds still owed
-        self.t0 = self.cur = None
-        self.taken = self.n
+        self.shadowed = {k: 0 for k in kinds}   # shadow drafts
+        self.since = {k: 0 for k in kinds}      # rounds since the arm's last sample
+        self.cur, self.left, self.rounds, self.r = None, 0, 0, None
 
-    def rate(self, k):
-        return self.tok[k] / self.ms[k] if self.ms[k] else float("inf")
+    def expect(self, k):
+        """(tokens per round, ms per round or None: never timed) of arm k."""
+        if k == "plain":
+            return 1.0, CLOCK.ms(k)
+        if k == "mtp" and self.mtp is not None:
+            return self.mtp.expect()
+        return self.tok[k], CLOCK.ms(k)
 
     def pick(self, force=None):
+        self.rounds += 1
+        self.r = None
         if force in self.kinds:
             k = force
-        elif self.cur is not None and self.left[self.cur] > 0:
-            k = self.cur                        # finish the running probe
+        elif self.left > 0:
+            k, self.left = self.cur, self.left - 1      # finish the running probe
         else:
-            owed = [k for k in self.kinds if self.left[k] > 0]
-            stale = [k for k in self.kinds if self.idle[k] >= self.EXPLORE]
-            if not owed and stale:
-                self.left[stale[0]] = self.PROBE
-                owed = stale[:1]
-            k = owed[0] if owed else max(self.kinds, key=self.rate)
-        self.cur, self.t0 = k, time.perf_counter()
+            ex = {k: self.expect(k) for k in self.kinds}
+            new = [k for k in self.kinds if ex[k][1] is None]
+            if new:
+                k, self.left = new[0], self.PROBE - 1
+            else:
+                r = self.r = {k: t / ms for k, (t, ms) in ex.items()}
+                best = max(self.kinds, key=r.get)
+                k = self.cur
+                if k is None or (best != k and r[best] > r[k] * (1.0 + self.MARGIN)):
+                    k = best
+        self.cur = k
         return k
 
-    def done(self, accepted):
-        """The round of the last pick() kept `accepted` drafts (call after
-        its tokens were read: the wall time covers drafting + verify)."""
-        k, ms = self.cur, 1000.0 * (time.perf_counter() - self.t0)
-        tok = 1.0 + accepted
-        if k != "plain":
-            a = max(self.ALPHA, 1.0 / (self.n[k] + 1 + self.PRIOR))
-            self.tok[k] = (1 - a) * self.tok[k] + a * tok
-        self.ms[k] = ms if self.n[k] <= 1 else (1 - self.ALPHA) * self.ms[k] + self.ALPHA * ms
+    def shadows(self):
+        """The drafters (not the arm just picked) to draft this round without
+        verifying."""
+        if self.r is None:                      # a forced arm, a probe
+            return []
+        out = []
+        for k in self.kinds:
+            if k in ("plain", self.cur):
+                continue
+            gap = (0 if self.rounds <= self.WARM
+                   else self.NEAR if self.r[k] >= self.CLOSE * self.r[self.cur] else self.FAR)
+            if self.since[k] >= gap:
+                out.append(k)
+        return out
+
+    def sample(self, k, accepted, drafted, full=True):
+        """A draft of arm k (`drafted` tokens) whose first `accepted` were
+        right: a shadow draft scored; `full`: a block of the usual size."""
+        if k == "mtp" and self.mtp is not None:
+            self.mtp.learn(accepted, drafted)
+        elif k != "plain" and full:
+            a = max(self.ALPHA, 1.0 / (self.seen[k] + 1 + self.PRIOR))
+            self.tok[k] += a * (1.0 + accepted - self.tok[k])
+        self.seen[k] += 1
+
+    def steps(self):
+        """Plain steps of a plain round (one burst with step-ahead)."""
+        return self.BURST
+
+    def done(self, accepted, drafted=0, full=True, shadows=(), steps=1):
+        """The round of the last pick() kept `accepted` of its `drafted`
+        drafts; `shadows`: the arms drafted beside it; `steps`: a plain
+        round's steps."""
+        k = self.cur
+        if k != "mtp" or self.mtp is None:      # (the head's rounds: MTPDraft.record)
+            self.sample(k, accepted, drafted, full)
+        else:
+            self.seen[k] += 1
         self.n[k] += 1
-        self.left[k] = max(0, self.left[k] - 1)
         for x in self.kinds:
-            self.idle[x] = 0 if x == k else self.idle[x] + tok
+            self.since[x] = 0 if x == k or x in shadows else self.since[x] + 1
+        for x in shadows:
+            self.shadowed[x] += 1
 
     def summary(self):
-        return ", ".join(f"{k} {self.n[k]} rounds" + (
-            f" ({self.tok[k]:.2f} tok / {self.ms[k]:.0f} ms)" if self.ms[k] else "")
-            for k in self.kinds)
+        out = []
+        for k in self.kinds:
+            t, ms = self.expect(k)
+            out.append(f"{k} {self.n[k]} rounds" + (f" + {self.shadowed[k]} shadows" if self.shadowed[k] else "")
+                       + (f" ({t:.2f} tok / {ms:.0f} ms)" if ms else ""))
+        return ", ".join(out)
+
+
+class Shadows:
+    """Drafts that were not verified, scored against the tokens the request
+    emits after their anchor: the length of the matching prefix is what a
+    verify of that draft would have kept (greedy: the emitted tokens are the
+    target's argmax whichever arm drafted; sampling: the target's draws)."""
+
+    def __init__(self):
+        self.toks, self.base, self.pend = [], 0, []
+
+    def emit(self, tok):
+        self.toks.append(tok)
+
+    def add(self, kind, drafts):
+        """`drafts`: the tokens proposed after the last emitted token."""
+        if drafts:
+            self.pend.append((kind, self.base + len(self.toks), list(drafts)))
+
+    def settle(self):
+        """-> [(kind, accepted, drafted)] of the drafts whose outcome is known
+        (a mismatch, or every draft's position emitted)."""
+        out, keep = [], []
+        for kind, at, d in self.pend:
+            got = self.toks[at - self.base:at - self.base + len(d)]
+            acc = next((i for i, (x, y) in enumerate(zip(d, got)) if x != y), len(got))
+            if acc < len(got) or len(got) == len(d):
+                out.append((kind, acc, len(d)))
+            else:
+                keep.append((kind, at, d))
+        self.pend = keep
+        drop = min([at for _, at, _ in keep], default=self.base + len(self.toks)) - self.base
+        if drop > 256:
+            self.toks, self.base = self.toks[drop:], self.base + drop
+        return out
 
 
 def mtp_dir(path):

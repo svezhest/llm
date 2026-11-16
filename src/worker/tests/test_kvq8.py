@@ -279,6 +279,106 @@ def test_dflash_quantized_demoted(dense, monkeypatch):
     assert 0 < len(sched.eng.draft.accept_lens) < 10
 
 
+def spec_arms(sched, plain, ids, arms, wrong=True):
+    """The drafters of `arms` on `sched` (both propose the known answer `plain`
+    after the tokens emitted so far, the last draft wrong every other round)."""
+    from test_mtp import Oracle, head
+    emitted = []
+    stop = sched.eng.stopping
+    sched.eng.stopping = lambda t: emitted.append(t) or stop(t)     # every emitted token
+
+    class Rec(Blocks):
+        def draft_block(self, b, hidden, cache, bs, sampler, dtype):
+            self.sizes.append(bs)
+            d = (plain[len(emitted):] + [0] * bs)[:bs - 1]
+            if wrong and len(self.sizes) % 2:
+                d[-1] = (d[-1] + 1) % 400
+            return mx.array([d], dtype=dtype)
+    d = mt = None
+    if "dflash" in arms:
+        d = sched.eng.draft = Rec(plain)
+    if "mtp" in arms:
+        mt = sched.eng.mtp = Oracle(head(sched.lm), sched.lm, ids + plain, wrong=wrong)
+    return d, mt
+
+
+def same_kv(got, ref, least):
+    """The dequantized KV of two rows over their common positions. A verify
+    block's rows differ from the plain step's by fp32 rounding (~1e-6), which
+    moves an element at a rounding boundary one q8 level (~0.02): at most a
+    few lone elements; a position that attended the other KV format moves
+    every element of the positions after it (by a level's worth; a lone
+    flipped element moves the later positions by ~1e-4)."""
+    assert len(got) == len(ref)
+    for (k, v, q), (k0, v0, q0) in zip(got, ref):
+        m = min(k.shape[2], k0.shape[2])
+        assert q and q0 and m >= least
+        for x, y in ((k[:, :, :m], k0[:, :, :m]), (v[:, :, :m], v0[:, :, :m])):
+            d = mx.abs(x - y)
+            assert (d > 2e-3).sum().item() <= 3 and d.max().item() < 0.05
+
+
+@pytest.mark.parametrize("k", [0, 1, 3])
+@pytest.mark.parametrize("start", [0, 12, 26, 27, 29, 33])
+def test_mtp_quantized_equals_plain(dense, monkeypatch, start, k):
+    """The MTP head's rounds over a q8 cache (QWEN_DRAFT=auto on the stand's
+    QWEN_KV_BITS=8): the plain answer and the plain loop's KV, as DFlash's -
+    quantized at the same point, no block crossing the start while the cache
+    is fp16 (the drafts already made for a longer block are dropped)."""
+    no_metal_verify(monkeypatch)
+    monkeypatch.setattr(worker, "MTP_K", k)
+    monkeypatch.setattr(worker, "CLOCK", worker.Clock())
+    p = prompts([25], 30)[0]
+    sp = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
+    ref = final_kv(sp, "a")
+    plain = run(sp, [request(p, 30, "a")])["a"]
+    sched = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
+    _, mt = spec_arms(sched, plain[0], p, ("mtp",))
+    got = final_kv(sched, "a")
+    assert run(sched, [request(p, 30, "a")])["a"] == plain
+    assert len(mt.accept_lens) > 3 and sum(mt.accept_lens) > 3
+    same_kv(got["a"], ref["a"], len(p) + 28 - 4)
+
+
+@pytest.mark.parametrize("order", ["dmp", "pmd", "mdp", "chooser"])
+@pytest.mark.parametrize("start", [0, 12, 26, 27, 29, 33, 40])
+def test_hybrid_quantized_equals_plain(dense, monkeypatch, start, order):
+    """Both drafters + the plain arm (QWEN_DRAFT=auto) over a q8 cache: every
+    arm after every other across the quantization start, shadow drafts of the
+    arms not taken every round - the plain answer and the plain loop's KV."""
+    no_metal_verify(monkeypatch)
+    monkeypatch.setattr(worker, "MTP_K", 2)
+    monkeypatch.setattr(worker, "SPEC_PLAIN", True)
+    monkeypatch.setattr(worker, "CLOCK", worker.Clock())
+    monkeypatch.setattr(worker.Chooser, "BURST", 2)
+    took = []
+    if order != "chooser":
+        seq = {"d": "dflash", "m": "mtp", "p": "plain"}
+
+        def pick(self, force=None):
+            self.rounds += 1
+            self.cur = seq[order[len(took) % 3]]
+            self.r = {}
+            took.append(self.cur)
+            return self.cur
+        monkeypatch.setattr(worker.Chooser, "pick", pick)
+        monkeypatch.setattr(worker.Chooser, "shadows",
+                            lambda self: [x for x in ("dflash", "mtp") if x != self.cur])
+    p = prompts([25], 30)[0]
+    sp = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
+    ref = final_kv(sp, "a")
+    plain = run(sp, [request(p, 30, "a")])["a"]
+    sched = scheduler(dense, max_batch=1, kv_bits=8, kv_start=start)
+    d, mt = spec_arms(sched, plain[0], p, ("dflash", "mtp"))
+    got = final_kv(sched, "a")
+    x = request(p, 30, "a")
+    assert run(sched, [x])["a"] == plain
+    if order != "chooser":
+        assert {"dflash", "mtp", "plain"} <= set(took)
+        assert d.accept_lens and mt.accept_lens and x.spec_stats["plain_steps"] >= 4
+    same_kv(got["a"], ref["a"], len(p) + 28 - 4)
+
+
 def test_verify_attention_kernel_skips_quantized_caches(dense, monkeypatch):
     """QWEN_VERIFY_ATT (the fp16 vector kernel): a verify block over a
     QuantizedKVCache goes to the library's one-query quantized calls; over

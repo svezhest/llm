@@ -292,7 +292,26 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # inside the rounds (2026-11-11: the block is cut where the budget forces the
 # next token, \n</think> go through plain steps; _Scheduler._spec).
 # Output is identical to the plain greedy loop up to fp16 noise.
+#
+# QWEN_DRAFT=auto: the one setting. The worker loads every drafter it finds for
+# the model (engine._auto_drafters: the DFlash dir and the MTP head dir next to
+# the model dir, by their config.json; QWEN_DRAFT_DFLASH / QWEN_DRAFT_MTP name
+# one explicitly, "none" = not that one; the load log says what was found),
+# and per request and round takes the arm with the most tokens per second
+# (mtp.Chooser: DFlash / the MTP head / plain steps, + prompt lookup rounds),
+# sampling and penalty requests included. It sets the defaults of the knobs
+# below it stands for - QWEN_DRAFT_SAMPLING=1, QWEN_SPEC_PLAIN=1,
+# QWEN_LOOKUP=draft, QWEN_VERIFY_QMV=3 - each still overridable (the A/B
+# tools). A model with one drafter or none loads and runs (none: plain decode).
 DRAFT = os.environ.get("QWEN_DRAFT", "")
+DRAFT_DFLASH = os.environ.get("QWEN_DRAFT_DFLASH", "")
+
+
+def _auto(name, auto, default):
+    """A knob's value: the environment's, else `auto` under QWEN_DRAFT=auto."""
+    return os.environ.get(name) or (auto if DRAFT == "auto" else default)
+
+
 # QWEN_DRAFT_BLOCK: tokens per verify round (the last accepted token + N - 1
 # drafts), fixed. 0 = automatic: VERIFY_MR_BLOCK (8) when QWEN_VERIFY_MRQMM=1 and
 # mrqmm covers the target (kernels._setup_verify_mrqmm sets it at load), else
@@ -364,7 +383,8 @@ DRAFT_TAIL_END = int(os.environ.get("QWEN_DRAFT_TAIL_END", "2048"))
 # x0.8 on prose (accept ~1.1/round), so it is off by default. Falling back to
 # plain decoding on low acceptance was tried and lost: a probe of 8 rounds
 # costs ~0.5 s, and the drafter restarts cold (~130 ms rounds, lower accept).
-DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
+# QWEN_DRAFT=auto: on (the chooser's plain arm is the fallback, per request).
+DRAFT_SAMPLING = _auto("QWEN_DRAFT_SAMPLING", "1", "0") == "1"
 # QWEN_LOOKUP: prompt lookup decoding (lookup.py, _Scheduler._spec): a round's
 # draft is the continuation of the latest earlier occurrence of the text's
 # last QWEN_LOOKUP_N..QWEN_LOOKUP_NMAX tokens (prompt + output; no MLX op),
@@ -373,7 +393,8 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 # leaves >= 2 drafts (a verify block of >= 3 rows), at most QWEN_LOOKUP_K
 # drafts (<= 15: mrqmm's 16 rows).
 #   "0" (default) off.
-#   "draft": rows the drafter takes only (below); plain rows stay the plain loop.
+#   "draft": rows a drafter takes only (below; DFlash or the MTP head); plain
+#        rows stay the plain loop.
 #   "1": with a drafter (QWEN_DRAFT), a lookup round when a match exists, else
 #        the drafter's block (its context = every position since its last
 #        block); without a drafter (a lone greedy row, fp16 KV, no thinking
@@ -383,7 +404,7 @@ DRAFT_SAMPLING = os.environ.get("QWEN_DRAFT_SAMPLING", "0") == "1"
 #   "splice": with a drafter, the drafter's block every round; where a match
 #        exists and its continuation agrees with the drafter on the first
 #        token, the (longer) continuation instead (a host read of the drafts).
-LOOKUP = os.environ.get("QWEN_LOOKUP", "0") or "0"
+LOOKUP = _auto("QWEN_LOOKUP", "draft", "0")          # QWEN_DRAFT=auto: "draft"
 LOOKUP_N = int(os.environ.get("QWEN_LOOKUP_N", "3"))
 LOOKUP_NMAX = int(os.environ.get("QWEN_LOOKUP_NMAX", "32"))
 LOOKUP_MIN = int(os.environ.get("QWEN_LOOKUP_MIN", "4"))
@@ -422,13 +443,23 @@ DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
 # beside the loaded drafter(s): a request whose drafts are rarely accepted
 # (short Russian prose on the 27B: DFlash below plain) decodes mostly plain,
 # re-probing the drafters every mtp.Chooser.EXPLORE tokens.
-SPEC_PLAIN = os.environ.get("QWEN_SPEC_PLAIN", "0") == "1"
+SPEC_PLAIN = _auto("QWEN_SPEC_PLAIN", "1", "0") == "1"
+# QWEN_SPEC_TRACE=1 (tools): _spec keeps one tuple per round in
+# req.spec_stats["trace"]: (arm, block tokens, drafts accepted, start s, wall ms,
+# positions DFlash's drafter was fed, [(arm, shadow drafts)], the round's tokens),
+# times on the scheduler's clock.
+SPEC_TRACE = os.environ.get("QWEN_SPEC_TRACE", "0") == "1"
+# QWEN_SPEC_SHADOW=all (tools): with mtp.Chooser every round also drafts every
+# other drafter without verifying (the head: QWEN_MTP_KMAX drafts); with
+# QWEN_SPEC_PLAIN=1 QWEN_DRAFT_HYBRID=plain and the trace: both drafters' drafts
+# at every position of the plain answer (scripts/perf/mtp/chooser_sim.py).
+SPEC_SHADOW = os.environ.get("QWEN_SPEC_SHADOW", "")
 # QWEN_VERIFY_QMV=N (2..3; 0 = off): verify blocks of 2..N tokens (MTP rounds:
 # QWEN_MTP_K + 1) on 4 / 5 / 6 / 8-bit g64 modules through mrqmv.py, a multi-row qmv whose
 # every row is MLX's solo qmv bit for bit (self-tested per shape at load):
 # the weights read once for the T rows, instead of mrqmm's MMA (rows padded
 # to 8, a flat ~x1.6 of a solo row) or mlx-vlm's exact kernels (T unpacks).
-VERIFY_QMV = int(os.environ.get("QWEN_VERIFY_QMV") or "0")
+VERIFY_QMV = int(_auto("QWEN_VERIFY_QMV", "3", "0"))     # QWEN_DRAFT=auto: 3
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs

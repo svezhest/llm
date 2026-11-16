@@ -1,6 +1,7 @@
 """_Scheduler: DFlash speculative decoding."""
 
 import copy
+import time
 
 import mlx.core as mx
 
@@ -12,7 +13,7 @@ from .lookup import _DraftCtx, _Gate, _Lookup, _lstat
 from .pcache import _own_states, _resume_tail, _tail_copy
 from .sizing import _slab
 from .kernels import _verify_head
-from .mtp import Chooser
+from .mtp import CLOCK, Chooser, Shadows
 
 
 def _budget_cut(think, new, stopping):
@@ -246,7 +247,7 @@ class _SpecMixin:
             first = one(out.logits[:, -1, :])
         mx.eval(first, hidden)
         first = first.item()
-        on = LOOKUP in ("1", "splice") or (LOOKUP == "draft" and draft is not None)
+        on = LOOKUP in ("1", "splice") or (LOOKUP == "draft" and (draft is not None or mt is not None))
         lk = _Lookup(req.ids, LOOKUP_N, LOOKUP_NMAX) if on and max_tokens > 1 else None
         req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
         # Reply KV (QWEN_PROMPT_CACHE_REPLY): row.fed takes every generated
@@ -271,16 +272,22 @@ class _SpecMixin:
                 # block stays allocated): one array of their own now and then
                 recent[:] = [_tail_copy(recent, keep)]
 
-        def emit(tok):
+        shadow = None                           # mtp.Shadows: with a Chooser
+
+        def emit(tok, fed=False):
+            """`fed`: a plain step on `tok` is already queued (pburst: it
+            counted the token for the penalties)."""
             if mt is not None:
                 mt.emit(tok)
+            if shadow is not None:
+                shadow.emit(tok)
             if gen is not None:
                 gen.append(tok)
             if self.eng.stopping(tok):
                 return False
             if lk is not None:
                 lk.add(tok)
-            if pen.active:
+            if pen.active and not fed:
                 pen.add(mx.array([tok]))
             req.out.put(("tok", tok, True))
             return True
@@ -343,10 +350,14 @@ class _SpecMixin:
         drounds = 0                             # the drafter's rounds
         pick_kind = None                        # hybrid / plain arm: mtp.Chooser
 
+        trace = [] if cfg.SPEC_TRACE else None  # QWEN_SPEC_TRACE: one tuple per round
+
         def stats():
             req.spec_stats = dict(dflash_rounds=drounds, dflash_drafted=drafted, dflash_accepted=acc,
                                   lookup_rounds=lstat[0], lookup_drafted=lstat[1],
                                   lookup_accepted=lstat[2], plain_steps=lstat[3])
+            if trace is not None:
+                req.spec_stats["trace"] = trace
         fa = lm.model.fa_idx
 
         def step(x):
@@ -392,6 +403,53 @@ class _SpecMixin:
                     return tok, False
                 y = nxt
 
+        def pstep(x):
+            """A plain step with a drafter loaded: the plain loop's forward and
+            draw (_step at B = 1, _logits, _sample) with the drafters' hidden
+            states captured. `x`: the input token, an int (emitted) or the
+            lazy (1,) token of the step before (counted for the penalties
+            here, as _logits). -> (the next token, lazy (1,); the hidden
+            states of x's position)."""
+            lazy = not isinstance(x, int)
+            o = lm(x.reshape(1, 1) if lazy else mx.array([[x]], dtype=dtype), cache=cache,
+                   capture_layer_ids=layers, return_hidden=fin)
+            if lazy and pen.active:
+                pen.add(x)
+            requant()
+            return one(o.logits[:, -1, :]), mx.concatenate(o.hidden_states, axis=-1)
+
+        def pburst(b, steps, before=None):
+            """The plain arm (mtp.Chooser): up to `steps` plain steps from `b`
+            (emitted, not in the cache) with the plain loop's step-ahead - the
+            next step is queued before a token is read, so the GPU never waits
+            for the host inside the burst. `before()`: called once the first
+            step is queued (the shadow drafts are read there). -> (the last
+            emitted token, not in the cache; stopped; the steps' tokens)."""
+            nonlocal n
+            y, h = pstep(b)
+            mx.async_eval(y, h)
+            if before is not None:
+                before()
+            toks = []
+            while True:
+                nxt = None
+                if len(toks) + 1 < steps and n + 1 < max_tokens:
+                    nxt = pstep(y)
+                    mx.async_eval(*nxt)
+                tok = y.item()
+                toks.append(tok)
+                req.steps, req.rows_sum, lstat[3] = req.steps + 1, req.rows_sum + 1, lstat[3] + 1
+                if mt is not None:              # the position this step fed: both drafters' context
+                    mt.push(h[..., -H:])
+                seen(h)
+                dctx.add(dfl(h))
+                if not emit(tok, nxt is not None):
+                    return tok, True, toks
+                n += 1
+                if nxt is None:
+                    return tok, False, toks
+                y, h = nxt
+
         gate = _Gate(LOOKUP_K0, LOOKUP_K, LOOKUP_MIN, LOOKUP_NMAX, LOOKUP_BACKOFF)
 
         def propose(left):
@@ -429,9 +487,15 @@ class _SpecMixin:
             arms = [x for x, on in (("dflash", draft is not None), ("mtp", mt is not None),
                                     ("plain", cfg.SPEC_PLAIN and (draft is not None or mt is not None)))
                     if on]
-            pick_kind = Chooser(arms) if len(arms) > 1 else None
+            pick_kind = Chooser(arms, mt) if len(arms) > 1 else None
+            shadow = Shadows() if pick_kind is not None else None
             force = cfg.DRAFT_HYBRID if cfg.DRAFT_HYBRID in arms else None
             kind = arms[0] if arms else None
+            # a round's wall time (start to the next round's start) goes to CLOCK
+            # when it is the arm's steady cost: `timed` = (kind, start, steps),
+            # None after a switch (the drafter catches up), shadow drafts, a cut
+            # block, the request's first round (DFlash: the prompt window)
+            timed, prev = None, None
             b, why = first, None
             f = budget(first)
             if f is not None:                   # a budget the first token already passes
@@ -445,6 +509,10 @@ class _SpecMixin:
                 if req.cancel.is_set():
                     finish = "cancelled"
                     break
+                t_round, fed_ctx = time.perf_counter(), 0
+                if timed is not None:
+                    CLOCK.add(timed[0], 1000.0 * (t_round - timed[1]) / timed[2])
+                    timed = None
                 row.pos = cache[fa].offset
                 self._regrow(row)
                 head = self.waiting[0] if self.waiting else None
@@ -468,8 +536,12 @@ class _SpecMixin:
                     if n % 256 < LOOKUP_BURST and CLEAR_CACHE:
                         mx.clear_cache()
                     continue
+                also = ()                       # the arms drafted without a verify
                 if look is None and pick_kind is not None:
                     kind = pick_kind.pick(force)
+                    also = pick_kind.shadows()
+                    if cfg.SPEC_SHADOW == "all":
+                        also = [x for x in arms if x not in ("plain", kind)]
                 if look is None and kind == "plain":
                     bs, drafts = 1, None        # the plain arm: one target step (step1)
                 elif look is None:
@@ -487,8 +559,9 @@ class _SpecMixin:
                         drafts = mt.draft(bs - 1)
                         mx.async_eval(drafts)
                     elif bs > 1:
-                        drafts = draft.draft_block(b, _wide(dctx.take(draft_cache)), draft_cache, bs,
-                                                   argmax, dtype)
+                        hctx = dctx.take(draft_cache)
+                        fed_ctx = hctx.shape[1]
+                        drafts = draft.draft_block(b, _wide(hctx), draft_cache, bs, argmax, dtype)
                         mx.async_eval(drafts)
                 elif draft is not None and LOOKUP == "splice":
                     # the drafter's block, unless the continuation agrees on its first draft
@@ -506,6 +579,49 @@ class _SpecMixin:
                 else:
                     drafts = mx.array([look], dtype=dtype)
                     bs = len(look) + 1
+                sdrafts = []
+                for x in also:
+                    # (each drafter's state moves as in a round of its own: the
+                    # head's chained entries leave at once, DFlash's cache takes
+                    # the context it would take at its next block)
+                    if x == "mtp":
+                        ks = min(mt.KMAX if cfg.SPEC_SHADOW == "all" else mt.next_k(), max_tokens - n)
+                        if ks < 1:
+                            continue
+                        d = mt.draft(ks)
+                        mt.cancel()
+                    else:
+                        if max_tokens - n + 1 < block_total:
+                            continue
+                        hctx = dctx.take(draft_cache)
+                        fed_ctx = hctx.shape[1]
+                        d = draft.draft_block(b, _wide(hctx), draft_cache, block_total, argmax, dtype)
+                    mx.async_eval(d)
+                    sdrafts.append((x, d))
+                if look is None and kind == "plain" and pick_kind is not None and think is None:
+                    # the plain arm: a burst of plain steps with step-ahead (a
+                    # thinking budget: one synchronous step per round, below)
+                    def before():
+                        for x, d in sdrafts:
+                            shadow.add(x, d.reshape(-1).tolist())
+                    b, stopped, new = pburst(b, 1 if cfg.SPEC_SHADOW == "all" else pick_kind.steps(), before)
+                    k = len(new)
+                    pick_kind.done(0, 0, True, [x for x, _ in sdrafts], steps=k)
+                    for x, sa, sd in shadow.settle():
+                        pick_kind.sample(x, sa, sd)
+                    if prev == "plain" and not sdrafts:
+                        timed = ("plain", t_round, k)
+                    prev = "plain"
+                    if trace is not None:
+                        trace.append(("plain", 1, 0, round(t_round, 4),
+                                      round(1000.0 * (time.perf_counter() - t_round), 2), fed_ctx,
+                                      [(x, d.reshape(-1).tolist()) for x, d in sdrafts], new))
+                    if stopped:
+                        finish = "stop"
+                        break
+                    if n % 256 < k and CLEAR_CACHE:
+                        mx.clear_cache()
+                    continue
                 left = fp16_left()
                 if left is not None and 0 < left < bs:
                     bs = left                   # the block ends at the last fp16 position
@@ -555,8 +671,20 @@ class _SpecMixin:
                 elif look is not None and bs > 1:   # (not the drafter's: its adaptive block, stats)
                     lstat[0], lstat[1], lstat[2] = lstat[0] + 1, lstat[1] + bs - 1, lstat[2] + hit
                     gate.after(hit, bs - 1)
+                full = kind != "dflash" or bs == block_total
                 if look is None and pick_kind is not None:
-                    pick_kind.done(hit)
+                    pick_kind.done(hit, bs - 1, full, [x for x, _ in sdrafts])
+                    sdrafts = [(x, d.reshape(-1).tolist()) for x, d in sdrafts]
+                    for x, d in sdrafts:
+                        shadow.add(x, d)
+                arm = kind if look is None else None
+                if arm is not None and arm == prev and not sdrafts and full and (bs > 1 or arm == "plain"):
+                    timed = (("mtp", bs - 1) if arm == "mtp" else arm, t_round, 1)
+                prev = arm
+                if trace is not None:
+                    trace.append(("lookup" if look is not None else kind, bs, hit, round(t_round, 4),
+                                  round(1000.0 * (time.perf_counter() - t_round), 2), fed_ctx,
+                                  sdrafts, list(new)))
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
                 if hidden is not None:
                     if accepted < bs - 1:       # the positions the commit kept
@@ -575,12 +703,16 @@ class _SpecMixin:
                     if f is not None and j != len(new) - 1:
                         raise RuntimeError("dflash: the thinking budget forced a token inside "
                                            "a committed block")
+                if shadow is not None:
+                    for x, sa, sd in shadow.settle():
+                        pick_kind.sample(x, sa, sd)
                 if stopped or not new:
                     break
                 b = new[-1]
                 if f is not None:
                     # new[-1] is a draft the commit kept (the block was cut
                     # there) or the target's own token (not in the cache yet)
+                    timed = None
                     b, ctx, why = close(b, cut is not None and cut < hit, f)
                     for h in ctx:
                         dctx.add(dfl(h))

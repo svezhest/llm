@@ -17,7 +17,8 @@ import worker_pb2 as pb
 
 from . import config as cfg
 from . import kernels, sizing
-from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, DRAFT_MTP, EVENT_POLL_S, FP16,
+from .config import (_WIRED_GB, CACHE_LIMIT_GB, CLEAR_CACHE, DRAFT, DRAFT_BITS, DRAFT_DFLASH, DRAFT_MTP,
+                     EVENT_POLL_S, FP16,
                      GDN_FAST, GDN_FUSE, GIB, KV_KWARGS, log, LOOKUP, MAX_BATCH, MAX_CONTEXT,
                      PREFILL_BUDGET, PREFILL_MIN_STEP, PREFILL_SHARE, PREFILL_STEP, PROMPT_CACHE,
                      PROMPT_CACHE_GB, PROMPT_CACHE_REPLY, RESERVE_TOKENS, SAMPLING_KWARGS,
@@ -38,6 +39,59 @@ from .logprobs import (_assistant_spans, _span_tokens, LOGPROBS_CHUNK, MAX_TOP_L
                        PROMPT_CACHE_MODES)
 from .request import _Req
 from .scheduler import _Scheduler
+
+
+def _auto_drafters(model_path, config, dflash="", mtp=""):
+    """QWEN_DRAFT=auto: the drafter dirs for the model at `model_path` ->
+    (DFlash dir or "", MTP head dir or ""), logged. `dflash` / `mtp`
+    (QWEN_DRAFT_DFLASH / QWEN_DRAFT_MTP): a dir named explicitly, "none" =
+    not that kind. Otherwise the dirs next to the model dir, by their
+    config.json alone: a DFlash drafter (`dflash_config`) trained for a
+    target of this hidden size, layer count and vocabulary; an MTP head
+    (model_type *_mtp) whose text config has them. Several fit: the name
+    sharing the longest prefix with the model dir's, then the first by name."""
+    here = os.path.normpath(os.path.abspath(model_path))
+    root, name = os.path.dirname(here), os.path.basename(here)
+    tc = config.get("text_config") or config
+    want = tuple(tc.get(k) for k in ("hidden_size", "num_hidden_layers", "vocab_size"))
+    fits = {"dflash": [], "mtp": []}
+    for n in sorted(os.listdir(root)) if os.path.isdir(root) else ():
+        f = os.path.join(root, n, "config.json")
+        if n == name or not os.path.isfile(f):
+            continue
+        try:
+            with open(f) as fh:
+                c = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(c.get("dflash_config"), dict):
+            kind, got = "dflash", (c.get("hidden_size"), c.get("num_target_layers"), c.get("vocab_size"))
+        elif str(c.get("model_type", "")).endswith("_mtp"):
+            t = c.get("text_config") or {}
+            kind, got = "mtp", tuple(t.get(k) for k in ("hidden_size", "num_hidden_layers", "vocab_size"))
+        else:
+            continue
+        if got == want:
+            fits[kind].append(n)
+        else:
+            log.info("QWEN_DRAFT=auto: %s (%s) is for another target (hidden / layers / vocab %s, "
+                     "this model %s)", n, kind, got, want)
+    out = []
+    for kind, given, env in (("dflash", dflash, "QWEN_DRAFT_DFLASH"), ("mtp", mtp, "QWEN_DRAFT_MTP")):
+        if given:
+            out.append("" if given == "none" else given)
+            log.info("QWEN_DRAFT=auto: %s drafter %s (%s)", kind,
+                     "off" if given == "none" else given, env)
+            continue
+        c = sorted(fits[kind], key=lambda n: (-len(os.path.commonprefix([n, name])), n))
+        out.append(os.path.join(root, c[0]) if c else "")
+        if c:
+            log.info("QWEN_DRAFT=auto: %s drafter found: %s%s", kind, out[-1],
+                     f" (also fit, not taken: {', '.join(c[1:])})" if c[1:] else "")
+        else:
+            log.info("QWEN_DRAFT=auto: no %s drafter for %s next to it in %s (%s names one)",
+                     kind, name, root, env)
+    return out[0], out[1]
 
 
 def _load_drafter(model, path, bits):
@@ -167,12 +221,16 @@ class Engine:
             lm.apply(lambda a: a.astype(mx.float16) if a.dtype == mx.bfloat16 else a)
             mx.eval(lm.parameters())
             log.info("language model cast to float16 (QWEN_FP16=1)")
+        auto = DRAFT == "auto"
+        draft_dir, mtp_path = DRAFT, DRAFT_MTP
+        if auto and not cfg.BATCH_INVARIANT:
+            draft_dir, mtp_path = _auto_drafters(self.model_path, self.config, DRAFT_DFLASH, DRAFT_MTP)
         if DRAFT and cfg.BATCH_INVARIANT:
             log.warning("QWEN_DRAFT ignored: QWEN_BATCH_INVARIANT=1 (the verify rounds "
                         "differently from the batch's decode)")
-        elif DRAFT and mtp_dir(DRAFT):            # the target's own MTP head (mtp.py)
-            self.mtp = load_mtp(DRAFT, self.model.language_model, FP16)
-        elif DRAFT:
+        elif draft_dir and not auto and mtp_dir(draft_dir):   # the target's own MTP head (mtp.py)
+            self.mtp = load_mtp(draft_dir, self.model.language_model, FP16)
+        elif draft_dir:
             # Quantized KV too (2026-11-15): _spec quantizes its cache where
             # the plain loop does (after every prefill slab and fed token past
             # quantized_kv_start; no block crosses the start while the cache
@@ -180,21 +238,38 @@ class Engine:
             # QuantizedKVCache's offset (mlx-vlm 0.7.6: its rows are
             # quantized per token, so trimming is exact). The verify attends
             # the quantized KV through the library's one-query calls.
-            draft, wide = _load_drafter(self.model, DRAFT, DRAFT_BITS)
-            self.draft, self.draft_wide = draft, wide
-            log.info("dflash drafter loaded: %s (%s %s, %s, block %s, target layers %s)", DRAFT,
-                     type(draft).__name__, f"{DRAFT_BITS}-bit" if DRAFT_BITS else
-                     ("bf16" if wide or not FP16 else "fp16"),
-                     "fp32 activations (QWEN_DRAFT_FP32)" if wide else "activations as the weights",
-                     cfg.DRAFT_BLOCK or "adaptive", list(draft.config.target_layer_ids))
-            if wide and not DRAFT_BITS:
-                log.warning("QWEN_DRAFT_FP32 with QWEN_DRAFT_BITS=0: the drafter's weights stay "
-                            "bf16 (slow on M1/M2: no native bf16)")
-        if DRAFT_MTP and self.draft is not None:  # beside DFlash: QWEN_DRAFT_HYBRID
-            self.mtp = load_mtp(DRAFT_MTP, self.model.language_model, FP16)
-        elif DRAFT_MTP:
+            try:
+                draft, wide = _load_drafter(self.model, draft_dir, DRAFT_BITS)
+            except Exception:  # noqa: BLE001 — auto: the model runs without it
+                if not auto:
+                    raise
+                log.exception("QWEN_DRAFT=auto: the DFlash drafter %s did not load; going on without it",
+                              draft_dir)
+            else:
+                self.draft, self.draft_wide = draft, wide
+                log.info("dflash drafter loaded: %s (%s %s, %s, block %s, target layers %s)", draft_dir,
+                         type(draft).__name__, f"{DRAFT_BITS}-bit" if DRAFT_BITS else
+                         ("bf16" if wide or not FP16 else "fp16"),
+                         "fp32 activations (QWEN_DRAFT_FP32)" if wide else "activations as the weights",
+                         cfg.DRAFT_BLOCK or "adaptive", list(draft.config.target_layer_ids))
+                if wide and not DRAFT_BITS:
+                    log.warning("QWEN_DRAFT_FP32 with QWEN_DRAFT_BITS=0: the drafter's weights stay "
+                                "bf16 (slow on M1/M2: no native bf16)")
+        if mtp_path and auto and not cfg.BATCH_INVARIANT:      # beside DFlash, or alone
+            try:
+                self.mtp = load_mtp(mtp_path, self.model.language_model, FP16)
+            except Exception:  # noqa: BLE001
+                log.exception("QWEN_DRAFT=auto: the MTP head %s did not load; going on without it", mtp_path)
+        elif mtp_path and self.draft is not None:  # beside DFlash: QWEN_DRAFT_HYBRID
+            self.mtp = load_mtp(mtp_path, self.model.language_model, FP16)
+        elif mtp_path:
             log.warning("QWEN_DRAFT_MTP ignored: it goes beside a DFlash QWEN_DRAFT (an MTP head "
                         "alone is QWEN_DRAFT itself)")
+        if auto:
+            log.info("QWEN_DRAFT=auto: %s; lookup %s, sampling requests %s, plain arm %s",
+                     " + ".join(x for x, on in (("DFlash", self.draft is not None),
+                                                ("MTP head", self.mtp is not None)) if on) or "no drafter (plain decode)",
+                     LOOKUP, "speculative" if cfg.DRAFT_SAMPLING else "plain", "on" if cfg.SPEC_PLAIN else "off")
         _tok = getattr(self.processor, "tokenizer", self.processor)
         # mlx-vlm стопит только на верхнем eos_token_id; у qwen их два
         # (<|im_end|> и <|endoftext|>), стоп на всех — как в HF/vLLM

@@ -54,11 +54,19 @@ ap.add_argument("--set", default="bench27", choices=["bench27", "wtest", "short"
 ap.add_argument("--prompts", default="code-2k-0,en-2k-0,ru-2k-0", help="bench27 prompt ids")
 ap.add_argument("--tasks", type=int, default=5, help="wtest: the first N TASKS")
 ap.add_argument("--max-tokens", type=int, default=256)
-ap.add_argument("--sampling", action="store_true")
+ap.add_argument("--sampling", action="store_true", help="= --modes sampling")
+ap.add_argument("--modes", default="", help="greedy,sampling: the cells are modes x prompts (a sampling "
+                                            "cell's key ends in @s); default greedy")
+ap.add_argument("--speed-cells", default="", help="the speed rounds' cells (default: every cell)")
 ap.add_argument("--ident", default="", help="variants checked against plain greedy (wtest TASKS)")
 ap.add_argument("--ident-tasks", type=int, default=16)
 ap.add_argument("--skip-speed", action="store_true")
 ap.add_argument("--json", default="")
+ap.add_argument("--trace", action="store_true", help="QWEN_SPEC_TRACE: per-round rows in the JSON")
+ap.add_argument("--dump", action="store_true",
+                help="per prompt one request of plain steps with both drafters' shadow drafts at every "
+                     "position (QWEN_SPEC_SHADOW=all): the input of chooser_sim.py")
+ap.add_argument("--warm-tokens", type=int, default=0, help="max_tokens of the warm-up requests (0 = --max-tokens)")
 a = ap.parse_args()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -94,20 +102,24 @@ def qmv_bits(only4):
 QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
 
 
-def set_variant(v):
+def set_variant(v, sampling=False):
     """Flip what the scheduler reads (idle scheduler: between requests)."""
-    W.MTP_REFEED, W.DRAFT_HYBRID = REFEED0, "1"
-    W.DRAFT_SAMPLING = a.sampling or SAMPLING0
+    W.MTP_REFEED, W.DRAFT_HYBRID, W.SPEC_SHADOW = REFEED0, "1", ""
+    W.DRAFT_SAMPLING = sampling or SAMPLING0
     flags = set(v.split("+")[1:])
     v = v.split("+")[0]
     W.SPEC_PLAIN = "p" in flags
+    W.SPEC_TRACE = a.trace or v == "dump"
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
     W.VERIFY_QMV = QMV0 if ("q" in flags or "q4" in flags) else 0
     qmv_bits("q4" in flags)
     if ("q" in flags or "q4" in flags) and not QMV0:
         raise SystemExit(f"{v}+q: mrqmv not installed (QWEN_VERIFY_QMV unset or its self-test failed)")
-    if v == "plain":
+    if v == "dump":
+        eng.draft, eng.mtp = D, M
+        W.MTP_K, W.SPEC_PLAIN, W.DRAFT_HYBRID, W.SPEC_SHADOW = 0, True, "plain", "all"
+    elif v == "plain":
         eng.draft = eng.mtp = None
     elif v == "dflash":
         eng.draft, eng.mtp = D, None
@@ -134,6 +146,10 @@ SHORT = {
 
 
 def messages_of(key):
+    if key.startswith("short-"):                # prompts2k.SHORT: short-en / short-ru
+        sys.path.insert(0, os.path.join(HERE, "..", "dflash2"))
+        from prompts2k import SHORT as S2
+        return [pb.Message(role="user", content=dict(S2)[key[6:] + "_prose"])]
     if a.set == "short":
         return [pb.Message(role="user", content=SHORT[key])]
     if a.set == "wtest":
@@ -147,17 +163,25 @@ def messages_of(key):
 if a.set == "bench27":
     sys.path.insert(0, os.environ["BENCH27"])
 KEYS = a.prompts.split(",") if a.set in ("bench27", "short") else [str(i) for i in range(a.tasks)]
+MODES = (a.modes or ("sampling" if a.sampling else "greedy")).split(",")
+KEYS = [k + ("@s" if m == "sampling" else "") for m in MODES for k in KEYS]     # the cells
+SPEED = a.speed_cells.split(",") if a.speed_cells else KEYS
+
+
+def sv(v, cell):
+    set_variant(v, cell.endswith("@s"))
 MSGS = {}
 
 
-def request(key, rid, seed=0):
+def request(cell, rid, seed=0, max_tokens=0):
+    key, _, mode = cell.partition("@")
     if key not in MSGS:
         MSGS[key] = messages_of(key)
     kw = dict(temperature=0.0)
-    if a.sampling:
+    if mode == "s":
         kw = dict(temperature=0.6, top_p=0.95, top_k=20, seed=seed)
     req = pb.Request(id=rid, messages=MSGS[key],
-                     params=pb.Params(presence_penalty=0.0, max_tokens=a.max_tokens,
+                     params=pb.Params(presence_penalty=0.0, max_tokens=max_tokens or a.max_tokens,
                                       chat_template_kwargs_json=json.dumps({"enable_thinking": False}),
                                       **kw))
     formatted, _ = eng._render(req, [])
@@ -180,11 +204,11 @@ def stats(dr):
                 per_round=sum(acc) / len(acc), hist=dict(sorted(collections.Counter(acc).items())))
 
 
-def run(key, rid, v, seed=0):
+def run(key, rid, v, seed=0, max_tokens=0):
     for dr in (D, M):
         if dr is not None:
             dr.accept_lens, dr.draft_lens = [], []
-    r = request(key, rid, seed)
+    r = request(key, rid, seed, max_tokens)
     t0 = time.perf_counter()
     eng.sched.submit(r)
     toks, times = [], []
@@ -198,6 +222,11 @@ def run(key, rid, v, seed=0):
     dt = times[-1] - times[0] if n > 2 else 0.0
     out = dict(tokens=toks, n=n, prompt=len(r.ids), ttft=times[0] - t0 if times else None,
                tps=(n - 1) / dt if dt else 0.0, finish=[str(x) for x in ev[1:2]])
+    if W.SPEC_TRACE:
+        out["trace"] = (r.spec_stats or {}).get("trace")
+        out["times"] = [round(t, 4) for t in times]
+    if v == "dump":
+        out["ids"] = [int(t) for t in r.ids]
     if v != "plain":
         sd = stats(D) if D is not None and eng.draft is not None else {}
         sm = stats(M) if M is not None and eng.mtp is not None else {}
@@ -214,7 +243,7 @@ def med(xs):
 
 
 res = {"args": vars(a), "model": os.environ["QWEN_MODEL"], "draft": os.environ.get("QWEN_DRAFT"),
-       "draft_mtp": os.environ.get("QWEN_DRAFT_MTP"), "speed": [], "ident": []}
+       "draft_mtp": os.environ.get("QWEN_DRAFT_MTP"), "speed": [], "ident": [], "dump": []}
 VS = a.variants.split(",")
 
 
@@ -223,25 +252,35 @@ def dump():
     if not a.json:
         return
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
-    out = dict(res, speed=[{k: x for k, x in o.items() if k != "tokens"} for o in res["speed"]])
+    out = dict(res, speed=[{k: x for k, x in o.items() if k != "tokens"} for o in res["speed"]],
+               clock={"g": W.CLOCK.g, "ms": {str(k): W.CLOCK.ms(k) for k in W.CLOCK.c}})
     json.dump(out, open(a.json + ".tmp", "w"), indent=1)
     os.replace(a.json + ".tmp", a.json)
 
 
-if not a.skip_speed:
-    set_variant("plain")
-    run(KEYS[0], "warm", "plain")
+if not a.skip_speed or a.dump:
+    sv("plain", KEYS[0])
+    run(KEYS[0], "warm", "plain", max_tokens=a.warm_tokens)
     for v in VS:
-        set_variant(v)
-        o = run(KEYS[0], f"warm-{v}", v)
+        sv(v, KEYS[0])
+        o = run(KEYS[0], f"warm-{v}", v, max_tokens=a.warm_tokens)
         print(f"warm {v}: n={o['n']} tps={o['tps']:.2f}", flush=True)
+if a.dump:
+    for key in KEYS:
+        sv("dump", key)
+        o = run(key, f"dump-{key}", "dump")
+        o.update(variant="dump", key=key)
+        res["dump"].append(o)
+        print(f"dump {key}: n={o['n']} rounds={len(o['trace'] or [])} tps={o['tps']:.2f}", flush=True)
+        dump()
+if not a.skip_speed:
     for rnd in range(a.rounds):
-        for ki, key in enumerate(KEYS):
+        for ki, key in enumerate(SPEED):
             order = VS[rnd % len(VS):] + VS[:rnd % len(VS)]
             if (rnd + ki) % 2:
                 order = order[::-1]
             for v in order:
-                set_variant(v)
+                sv(v, key)
                 o = run(key, f"s{rnd}-{key}-{v}", v, seed=1000 * rnd + ki)
                 o.update(variant=v, round=rnd, key=key)
                 res["speed"].append(o)
@@ -258,7 +297,7 @@ if not a.skip_speed:
     summ = {}
     for v in VS:
         rows = [o for o in res["speed"] if o["variant"] == v]
-        per = {k: med([o["tps"] for o in rows if o["key"] == k]) for k in KEYS}
+        per = {k: med([o["tps"] for o in rows if o["key"] == k]) for k in SPEED}
         same = sum(o["tokens"] == plain.get((o["round"], o["key"])) for o in rows)
         summ[v] = dict(per_prompt=per, tps=med(per.values()),
                        tok_per_round=med([o.get("tok_per_round") for o in rows]),
@@ -278,7 +317,7 @@ if not a.skip_speed:
 if a.ident:
     a.set = "wtest"
     MSGS.clear()
-    sampling, a.sampling = a.sampling, False
+    KEYS = [str(i) for i in range(a.ident_tasks)]
     print(f"\n== identity vs plain greedy, {a.ident_tasks} wtest tasks ==", flush=True)
     for ti in range(a.ident_tasks):
         set_variant("plain")
