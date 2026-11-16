@@ -413,6 +413,9 @@ MTP_K = int(os.environ.get("QWEN_MTP_K") or "3")
 # QWEN_MTP_K=0: adaptive (mtp.MTPDraft.next_k), QWEN_MTP_COST = one draft's cost
 # as a fraction of a round's verify
 MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
+# QWEN_MTP_KMAX: the adaptive draft count's ceiling (a verify block of KMAX + 1
+# rows; mrqmm's cost is flat over 3..8 rows on the 27B)
+MTP_KMAX = max(1, min(15, int(os.environ.get("QWEN_MTP_KMAX") or "4")))
 MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
 DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
 # QWEN_SPEC_PLAIN=1: plain steps are an arm of the per-round choice (mtp.Chooser)

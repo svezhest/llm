@@ -10,6 +10,7 @@ Variants (comma separated):
   mtpK         the MTP head alone, K drafts per round (QWEN_MTP_K); mtpKr = QWEN_MTP_REFEED=1
   hybK         both, per-round choice (QWEN_DRAFT_HYBRID=1), MTP rounds of K drafts
   <v>+p        any of the above with plain steps as an arm (QWEN_SPEC_PLAIN=1)
+  <v>+k<N>      the adaptive draft count's ceiling N (QWEN_MTP_KMAX)
   <v>+x        verify blocks through mlx-vlm's exact multi-row qmv (QWEN_VERIFY_MRQMM off)
   <v>+q        verify blocks of 2..N tokens through mrqmv (load with QWEN_VERIFY_QMV=N; without
                +q the variant runs with it off)
@@ -71,6 +72,7 @@ print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() /
       f"dflash {type(D).__name__ if D else None} mtp {type(M).__name__ if M else None}; "
       f"DRAFT_BLOCK {W.DRAFT_BLOCK} VERIFY_MR {W.VERIFY_MR}", flush=True)
 REFEED0, SAMPLING0, MR0 = W.MTP_REFEED, W.DRAFT_SAMPLING, (W.VERIFY_MR, W.VERIFY_MR_HEAD)
+KMAX0 = W.MTP_KMAX
 QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
 
 
@@ -81,6 +83,7 @@ def set_variant(v):
     flags = set(v.split("+")[1:])
     v = v.split("+")[0]
     W.SPEC_PLAIN = "p" in flags
+    W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
     W.VERIFY_QMV = QMV0 if "q" in flags else 0
     if "q" in flags and not QMV0:
@@ -194,6 +197,18 @@ def med(xs):
 res = {"args": vars(a), "model": os.environ["QWEN_MODEL"], "draft": os.environ.get("QWEN_DRAFT"),
        "draft_mtp": os.environ.get("QWEN_DRAFT_MTP"), "speed": [], "ident": []}
 VS = a.variants.split(",")
+
+
+def dump():
+    """Write what has been measured so far (after every request: a stopped run keeps its rows)."""
+    if not a.json:
+        return
+    os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
+    out = dict(res, speed=[{k: x for k, x in o.items() if k != "tokens"} for o in res["speed"]])
+    json.dump(out, open(a.json + ".tmp", "w"), indent=1)
+    os.replace(a.json + ".tmp", a.json)
+
+
 if not a.skip_speed:
     set_variant("plain")
     run(KEYS[0], "warm", "plain")
@@ -218,6 +233,7 @@ if not a.skip_speed:
                       f"mtp={sm.get('rounds', 0)}r/{sm.get('accept', 0):4.1f}% {sm.get('hist', '')} "
                       f"plain={o.get('plain_steps', 0)}",
                       flush=True)
+                dump()
     plain = {(o["round"], o["key"]): o["tokens"] for o in res["speed"] if o["variant"] == "plain"}
     print("\n== median decode tok/s per prompt (median over rounds) ==")
     summ = {}
@@ -255,6 +271,7 @@ if a.ident:
                        None if len(ref) == len(got) else min(len(ref), len(got)))
             res["ident"].append(dict(task=ti, variant=v, same=div is None, diverge=div, n=len(ref)))
             print(f"t{ti} {v}: {'same' if div is None else f'diverges at {div}'} (n={len(ref)})", flush=True)
+            dump()
     for v in a.ident.split(","):
         rows = [o for o in res["ident"] if o["variant"] == v]
         print(f"{v:7s} identical {sum(o['same'] for o in rows)}/{len(rows)}; divergence at "
@@ -264,10 +281,7 @@ res["peak_gb"] = mx.get_peak_memory() / 1e9
 res["active_gb"] = mx.get_active_memory() / 1e9
 print(f"peak {res['peak_gb']:.2f} GB, active {res['active_gb']:.2f} GB", flush=True)
 if a.json:
-    os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
-    for o in res["speed"]:
-        o.pop("tokens", None)
-    json.dump(res, open(a.json, "w"), indent=1)
+    dump()
     print("wrote", a.json)
 sys.stdout.flush()
 os._exit(0)          # the scheduler thread never returns (worker.py: MLX stream teardown)

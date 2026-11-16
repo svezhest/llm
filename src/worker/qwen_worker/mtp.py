@@ -73,6 +73,7 @@ class MTPDraft:
         self.seed = None                # (token (1, 1), hidden (1, 1, H)) or None
         self.accept_lens, self.draft_lens = [], []
         self.t0 = None                  # the current round's start (draft)
+        self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
         self.seen = [0] * self.KMAX     # rounds that drafted depth i
         self.p = [self.P0] * self.KMAX  # QWEN_MTP_K=0: P(draft i kept | drafts < i kept)
 

@@ -309,6 +309,14 @@ def test_adaptive_k(dense, spec, monkeypatch):
     mt = Oracle(head(dense), dense, ids + ref[0], wrong=False)
     assert with_mtp(dense, ids, 40, mt) == ref
     assert max(mt.draft_lens) == 4
+    # QWEN_MTP_KMAX: the ceiling of the adaptive count
+    monkeypatch.setattr(worker, "MTP_KMAX", 7)
+    monkeypatch.setattr(worker.MTPDraft, "MS", {})
+    mt = worker.MTPDraft(head(dense), dense)
+    mt.start(0)
+    for _ in range(20):
+        mt.record(7, 7)
+    assert mt.KMAX == 7 and len(mt.p) == 7 and mt.next_k() == 7
 
 
 def test_token_bytes(dense):
