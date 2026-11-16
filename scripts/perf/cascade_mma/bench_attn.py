@@ -5,7 +5,7 @@ per-row attention, synthetic 9B shapes (Hq 16, Hkv 4, D 256, fp16 KV, 8
 full-attention layers per step). NEEDS THE GPU LEASE (nothing else on the GPU;
 no model is loaded). One process, variants interleaved per round (order
 reversed every other round), medians over rounds -- the machine drifts
-+-20-30 % over minutes (CLAUDE.md "Measuring performance").
++-20-30 % over minutes (docs/measuring.md).
 
 Per config (P, B; ragged suffixes S_j = 150 .. ~500, one decode step = 8
 layers of attention, layers independent, one eval per step):

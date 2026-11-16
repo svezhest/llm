@@ -4,7 +4,7 @@
 # (weights/qwen38-27b-mlx-4bit): the 6-bit multi-row kernel (QWEN_MRQMM6), the GDN
 # in-projection fused by width groups (QWEN_GDN_FUSE), plain and DFlash speed.
 # Design: docs/perf/2026-11-15/design/oq4e_speed.md. Run from the repo root on an
-# idle GPU (CLAUDE.md "Measuring performance"; `setopt NO_BG_NICE` if backgrounded).
+# idle GPU (docs/measuring.md; `setopt NO_BG_NICE` if backgrounded).
 # Every step writes to $PERF_OUT/oq4e/. Steps 1-3 load no model (tensors only);
 # 4-8 load one 27B per process (wired-limit dance first:
 #   sudo sysctl iogpu.wired_limit_mb=28672).

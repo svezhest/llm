@@ -1,6 +1,6 @@
 """GPU microbenchmark: Gated DeltaNet recurrence kernels (prefill slabs + decode).
 
-CLAUDE.md: GDN is ~22% of a 9B prefill. Three implementations exist once the
+CLAUDE.md at the time (prefill notes now in docs/prefill.md): GDN is ~22% of a 9B prefill. Three implementations exist once the
 libraries are bumped:
   vlm      - mlx_vlm.models.qwen3_5.gated_delta.gated_delta_kernel: what the
              worker runs today (0.6.2 imports it from mlx-lm 0.31.3; 0.7.x

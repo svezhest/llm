@@ -74,7 +74,7 @@ def doc(files, n, head):
     return head + tok.decode(ids[:n])
 
 
-WDOC = doc([os.path.join(ROOT, f) for f in ("README.md", "CLAUDE.md", "BACKLOG.md")]
+WDOC = doc([os.path.join(ROOT, f) for f in ["README.md", "CLAUDE.md"] + ["docs/" + t + ".md" for t in ("knobs", "prompt-cache", "scheduler", "api", "drafters", "kernels", "prefill", "decode", "models", "measuring", "layout", "MAP")] + ["BACKLOG.md"]]
            + sorted(glob.glob(os.path.join(ROOT, "docs/perf/2026-10-1*/*.md"))), max(a.writer, 1),
            "You are a writing assistant. The draft so far:\n\n")
 FDOC = doc(sorted(glob.glob(os.path.join(ROOT, "src/worker/qwen_worker/*.py"))), a.foreign,

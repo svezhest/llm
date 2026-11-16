@@ -1,7 +1,6 @@
 """In-process A/B of prompt lookup decoding (QWEN_LOOKUP) on the 27B + DFlash2:
 the real Engine and _Scheduler (no gRPC), one process, variants interleaved per
-(round, workload) in a rotating order, medians over rounds (CLAUDE.md
-"Measuring performance"). A sibling of scripts/perf/dflash2/ab27.py.
+(round, workload) in a rotating order, medians over rounds (docs/measuring.md). A sibling of scripts/perf/dflash2/ab27.py.
 
 Variants (comma separated; options after ':' as k=v joined by '+'):
   plain        no drafter, no lookup: the plain greedy loop

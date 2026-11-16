@@ -1,6 +1,6 @@
 """In-process A/B of DFlash2 speculative decoding on the 27B (5-bit) target: the
 real Engine and _Scheduler (no gRPC), one process, variants interleaved per
-(round, task), medians over rounds (CLAUDE.md "Measuring performance"). A
+(round, task), medians over rounds (docs/measuring.md). A
 sibling of scripts/perf/verify_mrqmm/dflash_ab.py with per-round statistics.
 
 Variants (comma separated):

@@ -8,8 +8,9 @@ reference.
 Where to look for more:
 
 - [`README.md`](../README.md): the full API notes and every feature in detail.
-- [`CLAUDE.md`](../CLAUDE.md): dense engineering notes. They hold the design decisions, the
-  performance history and the complete env-knob table.
+- [`CLAUDE.md`](../CLAUDE.md): the rules for working in the repo: design decisions, invariants, gotchas.
+- [`docs/MAP.md`](MAP.md): the index of the engineering notes in `docs/`: the performance
+  history, the mechanisms and the complete env-knob table ([`knobs.md`](knobs.md)).
 - [`docs/perf/`](perf/README.md): one folder per measurement campaign, with the reports,
   raw data and dead ends.
 
@@ -1570,7 +1571,7 @@ The lessons below cost real time to learn.
    `agree.py`), then measure speed.
 
 Perf scripts that write files use `PERF_OUT` (default `/tmp/perf`). The method and its
-history are in `CLAUDE.md`, *Measuring performance on this machine*.
+history are in [`measuring.md`](measuring.md).
 
 ---
 
@@ -1633,8 +1634,8 @@ Some invariants to keep in mind when you change the worker:
   breaks the step-ahead and idles the GPU. `QWEN_DEBUG_NO_SYNC=1` turns any host sync during
   step construction into an exception.
 - **The worker owns its prefill/decode loop**, a trimmed copy of mlx-vlm's `generate_step`.
-  When bumping mlx-vlm, diff the library functions the worker copies or patches; CLAUDE.md,
-  *Implementation notes*, lists them.
+  When bumping mlx-vlm, diff the library functions the worker copies or patches; [`scheduler.md`](scheduler.md)
+  lists them.
 
 ### 10.3 Tests
 
@@ -1689,7 +1690,7 @@ it true:
 3. **Log its effective state at load** when it can silently not apply. Cascade and the
    one-copy mode both say why they are off.
 4. **Test it** in the CPU suite by patching it through `worker`.
-5. **Document it** in the env tables of `CLAUDE.md` and `README.md`, with a measured number
+5. **Document it** in the env tables of [`knobs.md`](knobs.md) and `README.md`, with a measured number
    and its date, and link the report in `docs/perf/`.
 
 ### 10.6 Changing the proto
@@ -1717,7 +1718,7 @@ points:
 | disk tier, prefill lane, preemption, batch invariance | `docs/perf/2026-10-24/design/` |
 | DFlash2 on the 27B, long context | `docs/perf/2026-11-10/dflash2_27b.md` |
 
-`CLAUDE.md`'s *Performance notes* section is the distilled version, and it lists the dead
+The topic notes (index: [`MAP.md`](MAP.md)) are the distilled version, and [`prefill.md`](prefill.md#dead-ends) lists the dead
 ends so you do not retry them blindly.
 
 ---
@@ -1816,7 +1817,7 @@ planned but not built.
 Defaults below are checked against the code: `qwen_worker/config.py`, `pcdisk.py`,
 `mrqmm.py`, `pfqmm.py`, `grammar.py`, `logprobs.py`, `lookup.py`, and the gateway's `main.rs`, `api.rs`
 and `request.rs`. The authoritative long table with all the caveats is in
-[`CLAUDE.md`, *Env knobs*](../CLAUDE.md#env-knobs). Switches are on only when set to `1`
+[`knobs.md`](knobs.md). Switches are on only when set to `1`
 unless noted.
 
 **Gateway**

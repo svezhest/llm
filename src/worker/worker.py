@@ -15,7 +15,7 @@ Run:
   uv run --group proto bash gen_proto.sh   # once, to codegen
   uv run python worker.py                   # serve on 127.0.0.1:50051
 """
-# The code lives in the qwen_worker package (module map: CLAUDE.md "Layout").
+# The code lives in the qwen_worker package (module map: docs/layout.md).
 # This file is the entry point and a facade: `import worker` is the package's
 # modules as one namespace, as the single-file worker.py was.
 #   - Reading worker.NAME gives the live value from the module that holds it.

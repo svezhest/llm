@@ -23,7 +23,7 @@
 # Needs the GPU lease: refuses to start while another worker.py / pytest /
 # microbench runs (CMMA_FORCE=1 overrides). Never touches other processes.
 emulate -L zsh
-setopt NO_BG_NICE                                # background jobs at nice 0 (CLAUDE.md)
+setopt NO_BG_NICE                                # background jobs at nice 0 (docs/measuring.md)
 HERE=${0:A:h}
 T=${HERE:h:h:h}                                  # this tree's root
 MAIN=/Users/user/Projects/llm                    # venvs + weights + gateway binary

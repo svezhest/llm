@@ -1,7 +1,7 @@
 """In-process A/B of QWEN_VERIFY_MRQMM (DFlash verify blocks / the drafter's
 lm_head through mrqmm) on the real 9B + DFlash drafter: the real Engine and
 _Scheduler (no gRPC), one process, variants interleaved per (round, task),
-medians over rounds (CLAUDE.md "Measuring performance").
+medians over rounds (docs/measuring.md).
 
 The process starts with QWEN_VERIFY_MRQMM=1 (mrqmm installed, the fused GDN
 in-projections registered for verify); a variant only flips the module

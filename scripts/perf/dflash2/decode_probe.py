@@ -1,7 +1,7 @@
 """Plain greedy decode speed of the loaded model + a fixed GPU bandwidth probe
 in the same process, for comparing two checkpoints that cannot share a
 process (two 27B builds do not fit at once). The GPU drifts +-20-30 % over
-minutes (CLAUDE.md "Measuring performance"): run this for model A, B, A, B,
+minutes (docs/measuring.md): run this for model A, B, A, B,
 ... (gate_oq4e.sh step 5) and compare tok/s per probe GB/s, not raw tok/s.
 
 Real Engine + _Scheduler (no gRPC), whatever the env loads (QWEN_DRAFT unset:
@@ -99,7 +99,7 @@ W._Scheduler.tick = tick
 
 # --- requests ---------------------------------------------------------------
 text = ""
-for f in ["README.md", "CLAUDE.md", "BACKLOG.md"]:
+for f in ["README.md", "CLAUDE.md"] + ["docs/" + t + ".md" for t in ("knobs", "prompt-cache", "scheduler", "api", "drafters", "kernels", "prefill", "decode", "models", "measuring", "layout", "MAP")] + ["BACKLOG.md"]:
     text += open(os.path.join(ROOT, f)).read() + "\n\n"
 ids = tok.encode(text)
 assert len(ids) >= a.tokens, len(ids)
