@@ -1,0 +1,13 @@
+loaded; 33408 tokens
+prefill 32768 in 260 s; caches ['ArraysCache', 'QuantizedKVCache']
+  16 blocks, 53 s
+  32 blocks, 106 s
+  48 blocks, 158 s
+  64 blocks, 210 s
+lib|vq8 verify   : 512 positions  KL mean 2.15e-05  p99 0.000101  max 0.000149  top-1 99.80%  max|d logprob| 1.06  ref top-2 gap at flips [0.0]  PASS
+ref|lib verify   : 512 positions  KL mean 2.3e-05  p99 9.22e-05  max 0.000393  top-1 99.61%  max|d logprob| 0.962  ref top-2 gap at flips [0.0, 0.0]
+ref|vq8 verify   : 512 positions  KL mean 2.15e-05  p99 0.000115  max 0.00038  top-1 99.80%  max|d logprob| 0.256  ref top-2 gap at flips [0.0]
+lib|vq8 decode   : 128 positions  KL mean 1.67e-05  p99 7.92e-05  max 0.000369  top-1 100.00%  max|d logprob| 2.31  ref top-2 gap at flips []  PASS
+ref|lib decode   : 128 positions  KL mean 1.7e-05  p99 0.00013  max 0.000269  top-1 100.00%  max|d logprob| 2.84  ref top-2 gap at flips []
+ref|vq8 decode   : 128 positions  KL mean 1.44e-05  p99 6.28e-05  max 0.000107  top-1 100.00%  max|d logprob| 0.641  ref top-2 gap at flips []
+gate (KL(lib||vq8) <= 1e-4, top-1 >= 99.7 %, verify and decode): PASS

@@ -3,7 +3,7 @@
  "blocks": 64,
  "T": 8,
  "decode": 128,
- "model": "/Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit",
+ "model": "<repo>/weights/qwen38-27b-mlx-4bit",
  "kvq_prefill_fused": true,
  "pairs": {
   "lib|vq8 verify": {

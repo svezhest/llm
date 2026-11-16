@@ -17,11 +17,11 @@
   ],
   "thinking": false,
   "decode_mode": "read",
-  "json": "/private/tmp/claude-501/-Users-user-Projects-llm/176a34d3-ab10-46c6-ad35-6b333785089e/scratchpad/vq8/out/ab_32768.json"
+  "json": "$PERF_OUT/ab_32768.json"
  },
  "env": {
-  "QWEN_MODEL": "/Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit",
-  "QWEN_DRAFT": "/Users/user/Projects/llm/weights/qwen38-27b-dflash2",
+  "QWEN_MODEL": "<repo>/weights/qwen38-27b-mlx-4bit",
+  "QWEN_DRAFT": "<repo>/weights/qwen38-27b-dflash2",
   "QWEN_TEXT_ONLY": "1",
   "QWEN_MRQMM4": "1",
   "QWEN_KV_BITS": "8",

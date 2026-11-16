@@ -1,0 +1,78 @@
+{
+ "tokens": 32768,
+ "blocks": 64,
+ "T": 8,
+ "decode": 128,
+ "model": "<repo>/weights/qwen38-27b-mlx-oq4e",
+ "kvq_prefill_fused": true,
+ "pairs": {
+  "lib|vq8 verify": {
+   "n": 512,
+   "kl_mean": 2.1515741715404102e-05,
+   "kl_p99": 0.00010143918916583061,
+   "kl_max": 0.00014850683510303497,
+   "top1": 99.8046875,
+   "max_abs_dlogprob": 1.0574588775634766,
+   "ref_gap_at_flips": [
+    0.0
+   ],
+   "gate": true
+  },
+  "ref|lib verify": {
+   "n": 512,
+   "kl_mean": 2.3041086788485807e-05,
+   "kl_p99": 9.22061299206689e-05,
+   "kl_max": 0.0003928628284484148,
+   "top1": 99.609375,
+   "max_abs_dlogprob": 0.9617519378662109,
+   "ref_gap_at_flips": [
+    0.0,
+    0.0
+   ],
+   "gate": false
+  },
+  "ref|vq8 verify": {
+   "n": 512,
+   "kl_mean": 2.1524088172625647e-05,
+   "kl_p99": 0.00011505931615829468,
+   "kl_max": 0.00038020266219973564,
+   "top1": 99.8046875,
+   "max_abs_dlogprob": 0.2562084197998047,
+   "ref_gap_at_flips": [
+    0.0
+   ],
+   "gate": true
+  },
+  "lib|vq8 decode": {
+   "n": 128,
+   "kl_mean": 1.673623410144813e-05,
+   "kl_p99": 7.9248973634094e-05,
+   "kl_max": 0.00036914279917255044,
+   "top1": 100.0,
+   "max_abs_dlogprob": 2.3140182495117188,
+   "ref_gap_at_flips": [],
+   "gate": true
+  },
+  "ref|lib decode": {
+   "n": 128,
+   "kl_mean": 1.697263354002998e-05,
+   "kl_p99": 0.00012954394333064556,
+   "kl_max": 0.000268772360868752,
+   "top1": 100.0,
+   "max_abs_dlogprob": 2.843240737915039,
+   "ref_gap_at_flips": [],
+   "gate": true
+  },
+  "ref|vq8 decode": {
+   "n": 128,
+   "kl_mean": 1.4420129738089427e-05,
+   "kl_p99": 6.282574031502008e-05,
+   "kl_max": 0.00010744389146566391,
+   "top1": 100.0,
+   "max_abs_dlogprob": 0.6405506134033203,
+   "ref_gap_at_flips": [],
+   "gate": true
+  }
+ },
+ "gate": true
+}
