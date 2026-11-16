@@ -63,6 +63,7 @@ TARGET_TG = int(os.environ.get("VATT_TARGET_TG") or "256")   # pass-1 threadgrou
 TILE = os.environ.get("VATT_TILE", "")
 SPLIT = os.environ.get("VATT_SPLIT", "0") == "1"   # K / V / exchange in separate smem regions
 BK_MUL = int(os.environ.get("VATT_BK_MUL") or "1")           # > 1: BK = BK_MUL * BQ
+Q8_TIMING = int(os.environ.get("VATT_Q8_TIMING") or "0")   # microbench only, WRONG numbers: 1 = no scale / bias (no reads, no fma), 2 = 1 without the -1024, 3 = no KV reads at all (constants into the tiles: the MMA + merge alone)
 Q8_KMAP = os.environ.get("VATT_Q8_KMAP", "c")   # q8 K loader: "c" = threads over a key's units (coalesced reads), "k" = over keys
 
 _IMPL = r"""
@@ -335,7 +336,20 @@ struct Q8Loader {
     const short key = KF ? key0 : short(key0 + p * (TGP / CPK));
     const short c = KF ? short(c0 + p * (TGP / BK)) : c0;
     half v[16];
-    if (valid) {
+    if (valid && VATT_Q8_TIMING == 3) {
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 16; i++) v[i] = half(0.01h * half(c + 1));
+    } else if (valid && VATT_Q8_TIMING != 0) {
+      const uint4 q = *(const device uint4*)(w + key * wt + c * 4);
+      const half2 off = VATT_Q8_TIMING == 2 ? half2(0.0h) : half2(1024.0h);
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        const uint x = q[i];
+        const half2 lo = as_type<half2>((x & 0x00ff00ffu) | 0x64006400u) - off;
+        const half2 hi = as_type<half2>(((x >> 8) & 0x00ff00ffu) | 0x64006400u) - off;
+        v[4 * i] = lo.x; v[4 * i + 1] = hi.x; v[4 * i + 2] = lo.y; v[4 * i + 3] = hi.y;
+      }
+    } else if (valid) {
       const uint4 q = *(const device uint4*)(w + key * wt + c * 4);
       const half2 sc = half2(s[key * st + c / 4]);
       const half2 bi = half2(b[key * bt + c / 4]);
@@ -457,7 +471,8 @@ def _header() -> str:
     global _HEADER
     if _HEADER is None:
         _HEADER = (_cm.steel_headers() + _cm._OPS
-                   + f"#define VATT_Q8_KFAST {'false' if Q8_KMAP == 'c' else 'true'}\n" + _IMPL)
+                   + f"#define VATT_Q8_KFAST {'false' if Q8_KMAP == 'c' else 'true'}\n"
+                   + f"#define VATT_Q8_TIMING {Q8_TIMING}\n" + _IMPL)
     return _HEADER
 
 
