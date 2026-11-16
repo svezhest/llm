@@ -2321,7 +2321,7 @@
   }
  },
  "args": {
-  "weights": "/Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit",
+  "weights": "$WEIGHTS/qwen38-27b-mlx-4bit",
   "rounds": 5,
   "rows": "2,3,4,6,8,12,16",
   "reps": 16,

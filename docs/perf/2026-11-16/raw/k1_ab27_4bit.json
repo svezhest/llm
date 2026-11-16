@@ -4,8 +4,8 @@
  "thinking": false,
  "max_tokens": 256,
  "thinking_budget": -1,
- "model": "/Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit",
- "draft": "/Users/user/Projects/llm/weights/qwen38-27b-dflash2",
+ "model": "$WEIGHTS/qwen38-27b-mlx-4bit",
+ "draft": "$WEIGHTS/qwen38-27b-dflash2",
  "draft_bits": 4,
  "speed": [
   {

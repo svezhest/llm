@@ -1,8 +1,8 @@
-2026-11-15 10:09:55,213 INFO qwen.worker loading model: /Users/user/Projects/llm/weights/qwen38-27b-mlx-4bit
+2026-11-15 10:09:55,213 INFO qwen.worker loading model: $WEIGHTS/qwen38-27b-mlx-4bit
 2026-11-15 10:09:58,803 INFO qwen.worker QWEN_TEXT_ONLY=1: vision tower not loaded (333 tensors, 0.86 GiB of checkpoint weights never read); image requests will be refused
 2026-11-15 10:09:58,966 INFO qwen.worker language model cast to float16 (QWEN_FP16=1)
-2026-11-15 10:09:58,967 INFO mlx_vlm.speculative.drafters Auto-detected --draft-kind='dflash' for drafter '/Users/user/Projects/llm/weights/qwen38-27b-dflash2' (model_type='qwen3').
-2026-11-15 10:10:00,583 INFO qwen.worker dflash drafter loaded: /Users/user/Projects/llm/weights/qwen38-27b-dflash2 (DFlash2DraftModel 4-bit, fp32 activations (QWEN_DRAFT_FP32), block adaptive, target layers [5, 19, 33, 47, 61])
+2026-11-15 10:09:58,967 INFO mlx_vlm.speculative.drafters Auto-detected --draft-kind='dflash' for drafter '$WEIGHTS/qwen38-27b-dflash2' (model_type='qwen3').
+2026-11-15 10:10:00,583 INFO qwen.worker dflash drafter loaded: $WEIGHTS/qwen38-27b-dflash2 (DFlash2DraftModel 4-bit, fp32 activations (QWEN_DRAFT_FP32), block adaptive, target layers [5, 19, 33, 47, 61])
 2026-11-15 10:10:00,583 INFO qwen.worker eos token ids: [248044, 248046]
 2026-11-15 10:10:03,350 INFO qwen.worker wired limit set to 27.0 GB
 2026-11-15 10:10:03,350 INFO qwen.worker buffer pool limit 3.0 GB, clear after request: True, prompt cache: False
