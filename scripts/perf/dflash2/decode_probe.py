@@ -33,6 +33,7 @@ import worker_pb2 as pb  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "prof"))
+from doc_notes import NOTES  # noqa: E402
 from wtest import TASKS  # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -99,7 +100,7 @@ W._Scheduler.tick = tick
 
 # --- requests ---------------------------------------------------------------
 text = ""
-for f in ["README.md", "CLAUDE.md"] + ["docs/" + t + ".md" for t in ("knobs", "prompt-cache", "scheduler", "api", "drafters", "kernels", "prefill", "decode", "models", "measuring", "layout", "MAP")] + ["BACKLOG.md"]:
+for f in list(NOTES):
     text += open(os.path.join(ROOT, f)).read() + "\n\n"
 ids = tok.encode(text)
 assert len(ids) >= a.tokens, len(ids)

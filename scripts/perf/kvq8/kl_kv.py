@@ -43,6 +43,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "prof"))
+from doc_notes import NOTES  # noqa: E402
 sys.path.insert(0, os.getcwd())
 import mlx.core as mx  # noqa: E402
 import worker as W  # noqa: E402
@@ -79,8 +80,9 @@ else:
     pfqmm.install(lm)
     tok = getattr(proc, "tokenizer", proc)
     text = ""
-    for f in ["README.md", "CLAUDE.md", "BACKLOG.md"] + sorted(
-            glob.glob(os.path.join(ROOT, "docs", "**", "*.md"), recursive=True)):
+    for f in list(NOTES) + sorted(p for p in
+            glob.glob(os.path.join(ROOT, "docs", "**", "*.md"), recursive=True)
+            if os.path.relpath(p, ROOT) not in NOTES):
         text += open(os.path.join(ROOT, f), encoding="utf-8").read() + "\n\n"
         if len(text) > 6 * (a.tokens + a.decode):
             break

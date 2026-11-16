@@ -5,6 +5,7 @@ import argparse, os, sys, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mlx.core as mx
 import pf_common as C
+from doc_notes import NOTES
 import worker as W
 
 ap = argparse.ArgumentParser()
@@ -23,7 +24,7 @@ VAR = V.make(W, pfqmm, lm)
 tok = getattr(proc, "tokenizer", proc)
 R = "/Users/user/Projects/llm"
 text = ""
-for f in ["README.md", "CLAUDE.md", "BACKLOG.md", "src/worker/worker.py", "src/gateway/src/api.rs", "src/gateway/src/request.rs"]:
+for f in [*NOTES, "src/worker/worker.py", "src/gateway/src/api.rs", "src/gateway/src/request.rs"]:
     text += open(os.path.join(R, f)).read() + "\n\n"
 ids = tok.encode(text)[: a.tokens]
 print("tokens", len(ids), flush=True)
