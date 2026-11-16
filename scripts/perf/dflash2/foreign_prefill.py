@@ -10,7 +10,7 @@ Real Engine + _Scheduler, greedy, the worker's env as given. Steps:
   3. --writer > 0: the conversation's next turn -- must hit its own entry;
   4. --ab N: N rounds of that next turn again (prompt_cache "": with MOVE the entry
      moves into the row and comes back), plain decode and DFlash, --max-ab-tokens
-     tokens (--ab-ignore-eos: all of them), greedy: tok/s, DFlash rounds / accepted / ms per round, peaks; with
+     tokens (--ab-user: another last message), greedy: tok/s, DFlash rounds / accepted / ms per round, peaks; with
      --ab-lib and quantized KV also with the library's quantized SDPA (QWEN_VATT_Q8
      off for that run) -- interleaved in this process, tokens compared with the
      first plain run. --probe: a short coding prompt (plain + DFlash) first, the
@@ -45,7 +45,10 @@ ap.add_argument("--max-tokens", type=int, default=64)
 ap.add_argument("--ab", type=int, default=0)
 ap.add_argument("--ab-lib", action="store_true")
 ap.add_argument("--max-ab-tokens", type=int, default=256)
-ap.add_argument("--ab-ignore-eos", action="store_true", help="A/B runs generate --max-ab-tokens (EOS skipped)")
+ap.add_argument("--ab-ignore-eos", action="store_true",
+                help="A/B runs generate --max-ab-tokens (EOS skipped; note: token options turn DFlash off)")
+ap.add_argument("--ab-user", default="", help="the A/B turn's last user message instead of the next turn's "
+                "(e.g. one asking for a long answer, so that runs reach --max-ab-tokens with DFlash on)")
 ap.add_argument("--probe", action="store_true")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
@@ -156,13 +159,14 @@ if a.ab and a.writer and res[-1]["end"][0] == "done":
     q8 = (W._VATT_Q8, W._VATT_Q8_DEC)
     names = ["plain", "dflash"] + (["plain-lib", "dflash-lib"] if a.ab_lib and any(q8) else [])
     ref = None
+    amsgs = wmsgs[:-1] + [("user", a.ab_user)] if a.ab_user else wmsgs
     for k in range(a.ab):
         order = names[k % len(names):] + names[:k % len(names)]
         for name in order:
             eng.draft = DRAFT if name.startswith("dflash") else None
             lib = name.endswith("-lib")
             W._VATT_Q8, W._VATT_Q8_DEC = (False, False) if lib else q8
-            o = run(wmsgs, f"{name}{k + 1}", "", a.max_ab_tokens, ignore_eos=a.ab_ignore_eos)
+            o = run(amsgs, f"{name}{k + 1}", "", a.max_ab_tokens, ignore_eos=a.ab_ignore_eos)
             o["variant"] = name
             if name == "plain" and ref is None:
                 ref = o["tokens"]

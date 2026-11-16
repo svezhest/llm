@@ -612,6 +612,20 @@ through the one-pass kernel that DFlash verify blocks already use by default
 kernel took DFlash from 18.0 to 26.5 tok/s and `QWEN_DECODE_ATT` plain decode from 10.6 to
 14.4 tok/s, with the same tokens. The numbers above were measured before the kernel.
 
+**q8 KV for long conversations** (2026-11-16, `docs/perf/2026-11-16/vatt_q8.md`): with
+`QWEN_KV_BITS=8` the conversation's entry is 0.6× the fp16 one, and since `QWEN_VATT_Q8` (default
+on) the verify blocks and decode steps over q8 KV use the same one-pass kernel, reading the
+quantized cache in place. Before that the library ran two quantized matmuls per query. On oQ4e at
+78K tokens (measured):
+
+* the entry is 3.37 GiB instead of 5.61;
+* a 14.3K unrelated prompt (`prompt_cache: "read"`) runs beside it at a 23.24 GiB peak instead of
+  25.68, and the conversation's next turn still hits (TTFT 1.4 s);
+* plain decode is 12.0 tok/s and DFlash 18.9, vs 5.4 / 4.9 through the library.
+
+Add `QWEN_KV_BITS=8 QWEN_KVQ_PREFILL_FUSED=1` to the recipe above (and `QWEN_MAX_CONTEXT` up
+to what the budget then holds).
+
 ### Cascade attention (`QWEN_CASCADE`, default on with fp16 KV)
 
 Rows that share a long prompt prefix (one system prompt, the prompt cache on) can
@@ -810,7 +824,7 @@ with all the measurements is in `CLAUDE.md` (*Env knobs*).
 | `GATEWAY_SERVED_MODEL_NAMES` | gateway | unset — comma-separated extra names `model` may carry (vLLM `--served-model-name`); the loaded id is always accepted, anything else is a 404 |
 | `LOG_LEVEL` | worker | `INFO` |
 | `QWEN_MAX_CONTEXT` | worker | `131072` |
-| `QWEN_KV_BITS` | worker | `4` (35B); `0` = fp16 cache for the 9B, `8` for the 27B. Quantized KV works with DFlash and `QWEN_PROMPT_CACHE_MOVE` too (since 2026-11-15), but the one-pass verify / decode attention (`QWEN_VERIFY_ATT=2`, `QWEN_DECODE_ATT`) and cascade groups are fp16-only |
+| `QWEN_KV_BITS` | worker | `4` (35B); `0` = fp16 cache for the 9B, `8` for the 27B. Quantized KV works with DFlash and `QWEN_PROMPT_CACHE_MOVE` too (since 2026-11-15), the one-pass verify / decode attention runs on q8 KV through `QWEN_VATT_Q8` (default on; `QWEN_VERIFY_ATT=2` / `QWEN_DECODE_ATT` are the fp16 paths), cascade groups are fp16-only |
 | `QWEN_FP16` | worker | `1` — cast bf16 params to fp16 (M1/M2 have no native bf16: prefill ×1.45; KL vs bf16 0.0003). `0` = bf16 |
 | `QWEN_TEXT_ONLY` | worker | `0` — `1` loads a VL checkpoint without its vision tower (its `vision_tower.*` weights are never read: ~0.85 GiB on the 27B / 35B / 9B); image requests → 400, as on a text-only checkpoint; text unchanged |
 | `QWEN_DRAFT` | worker | unset — DFlash drafter dir for speculative decoding. Used only for text requests that are greedy **with no penalty** (temperature 0, presence / frequency 0, repetition 1): the worker's default `QWEN_PRESENCE_PENALTY=1.5` keeps it off, so set that to `0` (or send `"presence_penalty": 0`; `QWEN_DRAFT_SAMPLING=1` takes sampled / penalized requests too). Also not for grammar / token options / logprobs requests, nor with `QWEN_BATCH_INVARIANT=1`; only while nothing else runs or waits |
@@ -843,6 +857,7 @@ with all the measurements is in `CLAUDE.md` (*Env knobs*).
 | `QWEN_DRAFT_TAIL` / `QWEN_DRAFT_TAIL_END` | worker | `128` / `2048` — with the prompt cache, every state a DFlash row stores keeps the drafter's context there: the target's hidden states of the last N positions (27B: 51 KiB each); a DFlash row resuming from it starts its drafter with them instead of only the tokens the hit left to prefill. `TAIL`: checkpoints; `TAIL_END`: the entry's end (prompt end, reply end; capped at the drafter's window, ≤ 105 MB per entry on the 27B) — a turn that re-emits the previous answer's code needs the whole source in the drafter's sight. `0` = off |
 | `QWEN_VERIFY_ATT` | worker | `2` (since 2026-11-16) — `1`: a DFlash verify block's attention through MLX's vector attention kernel, several queries per call (queries × GQA factor ≤ 32: 5 on the 27B, 8 on the 9B; longer blocks in chunks) instead of mlx-vlm's one query per call, which reads the row's whole KV once per block token. Bit-equal to the one-query calls (checked on random data at load, else off). 27B, block 8: round 570 → 296 ms at 60K keys (×1.9), 210 → 202 ms at 24K; `0` = the library's calls; `2` = one pass for the whole block (`vatt.py`): the KV read once whatever the block size, not the one-query calls' bits (teacher-forced KL 1.3e-5, top-1 100 %); 27B 4-bit at 60K: round 284 → 192 ms, DFlash 18.0 → 26.5 tok/s (docs/perf/2026-11-16/verify_att2.md); self-tested at load, else `1`. fp16 KV only (quantized KV: the library's calls) |
 | `QWEN_DECODE_ATT` | worker | `0` — `N`: a decode step's attention over ≥ N fp16 keys through the same one-pass kernel instead of MLX's decode SDPA (27B: 2.8 → 0.9 ms a layer at 60K keys; plain decode 10.6 → 14.4 tok/s at 60K); `8192` for long contexts |
+| `QWEN_VATT_Q8` | worker | `1` — with `QWEN_KV_BITS=8`: DFlash verify blocks and decode steps attend the q8 cache through the one-pass kernel (dequantized in registers, read in place) instead of the library's quantized SDPA (27B at 78K: plain 5.4 → 12.0 tok/s, DFlash 4.9 → 18.9); `verify` / `decode` = one of them, `0` = the library |
 | `QWEN_DRAFT_SAMPLING` | worker | `0` (set `1`: speculative path also for temperature/presence-penalty requests, exact sample-match; code ×1.1–1.2, prose ×0.8) |
 | `QWEN_CLEAR_CACHE` / `QWEN_CACHE_LIMIT_GB` | worker | `1` / `3` (drop MLX buffer pool after each request / pool cap) |
 | `QWEN_MAX_BATCH` | worker | `16` — requests decoded together (continuous batching); `1` = one at a time, as before. Reported to the gateway (Health) as its in-flight limit |

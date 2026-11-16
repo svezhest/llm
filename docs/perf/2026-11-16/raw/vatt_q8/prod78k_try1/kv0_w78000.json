@@ -1,0 +1,335 @@
+{
+ "env": {
+  "QWEN_MODEL": "<repo>/weights/qwen38-27b-mlx-oq4e",
+  "QWEN_DRAFT": "<repo>/weights/qwen38-27b-dflash2",
+  "QWEN_MRQMM4": "1",
+  "QWEN_MRQMM5": "1",
+  "QWEN_MRQMM6": "1",
+  "QWEN_TEXT_ONLY": "1",
+  "QWEN_MAX_BATCH": "1",
+  "QWEN_PROMPT_CACHE": "1",
+  "QWEN_PROMPT_CACHE_MOVE": "1",
+  "QWEN_PROMPT_CACHE_GB": "6",
+  "QWEN_PROMPT_CACHE_CKPTS": "4",
+  "QWEN_PREFILL_RESERVE_GB": "2.5",
+  "QWEN_CACHE_LIMIT_GB": "1",
+  "QWEN_SDPA_FUSED_MIN_KV": "8192",
+  "QWEN_PREFILL_BUDGET": "16777216",
+  "QWEN_WIRED_LIMIT_GB": "27",
+  "QWEN_PRESENCE_PENALTY": "0",
+  "QWEN_VERIFY_ATT": "2",
+  "QWEN_DECODE_ATT": "8192",
+  "QWEN_KV_BITS": "0"
+ },
+ "args": {
+  "writer": 78000,
+  "foreign": 14300,
+  "foreign_mode": "read",
+  "repeat": 1,
+  "max_tokens": 64,
+  "ab": 3,
+  "ab_lib": false,
+  "max_ab_tokens": 256,
+  "ab_ignore_eos": true,
+  "probe": true,
+  "json": "$PERF_OUT/kv0_w78000.json"
+ },
+ "results": [
+  {
+   "id": "probe-plain",
+   "mode": "read",
+   "prompt": 27,
+   "reused": 0,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.42,
+   "active_before_gib": 16.33,
+   "prefill_peak_gib": 16.63,
+   "transient_gib": 0.29,
+   "peak_gib": 16.63,
+   "active_after_gib": 16.34,
+   "cache_gib": 0.0,
+   "entries": [],
+   "text": "```python\ndef merge_sorted_lists(list1: list, list2: list) -> list:\n    \"\"\"\n    Merge two sorted lists into a single sor",
+   "tps": 13.44,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "probe-plain"
+  },
+  {
+   "id": "probe-dflash",
+   "mode": "read",
+   "prompt": 27,
+   "reused": 0,
+   "n": 128,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 0.64,
+   "active_before_gib": 16.34,
+   "prefill_peak_gib": 16.63,
+   "transient_gib": 0.29,
+   "peak_gib": 17.67,
+   "active_after_gib": 16.34,
+   "cache_gib": 0.0,
+   "entries": [],
+   "text": "```python\ndef merge_sorted_lists(list1: list, list2: list) -> list:\n    \"\"\"\n    Merge two sorted lists into a single sor",
+   "tps": 38.62,
+   "rounds": 22,
+   "accepted": 4.82,
+   "round_ms": 149.5,
+   "variant": "probe-dflash"
+  },
+  {
+   "id": "writer1",
+   "mode": "",
+   "prompt": 78037,
+   "reused": 0,
+   "n": 64,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 924.5,
+   "active_before_gib": 16.34,
+   "prefill_peak_gib": 24.49,
+   "transient_gib": 8.15,
+   "peak_gib": 24.49,
+   "active_after_gib": 21.96,
+   "cache_gib": 5.61,
+   "entries": [
+    78101
+   ],
+   "text": "The cascade gate results confirm the design\u2019s memory and speed targets: 16 rows at 8K context reduced active memory by 3",
+   "tps": 7.99,
+   "rounds": 30,
+   "accepted": 1.13,
+   "round_ms": 262.8
+  },
+  {
+   "id": "foreign1",
+   "mode": "read",
+   "prompt": 14332,
+   "reused": 0,
+   "n": 39,
+   "end": [
+    "done",
+    "stop"
+   ],
+   "ttft": 127.25,
+   "active_before_gib": 21.96,
+   "prefill_peak_gib": 25.68,
+   "transient_gib": 3.72,
+   "peak_gib": 25.68,
+   "active_after_gib": 21.96,
+   "cache_gib": 5.61,
+   "entries": [
+    78101
+   ],
+   "text": "7/10: The code is well-structured with clear docstrings, but the extreme density of inline comments and the massive, unb",
+   "tps": 15.76,
+   "rounds": 14,
+   "accepted": 1.86,
+   "round_ms": 172.3
+  },
+  {
+   "id": "writer2",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 64,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 1.74,
+   "active_before_gib": 21.96,
+   "prefill_peak_gib": 22.79,
+   "transient_gib": 0.83,
+   "peak_gib": 23.79,
+   "active_after_gib": 21.81,
+   "cache_gib": 5.46,
+   "entries": [
+    78150
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 12.04,
+   "rounds": 22,
+   "accepted": 1.91,
+   "round_ms": 237.8
+  },
+  {
+   "id": "plain1",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 1.65,
+   "active_before_gib": 21.81,
+   "prefill_peak_gib": 22.55,
+   "transient_gib": 0.74,
+   "peak_gib": 22.57,
+   "active_after_gib": 21.73,
+   "cache_gib": 5.37,
+   "entries": [
+    78342
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 10.2,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain",
+   "same_as_plain": true
+  },
+  {
+   "id": "dflash1",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 1.96,
+   "active_before_gib": 21.73,
+   "prefill_peak_gib": 22.45,
+   "transient_gib": 0.72,
+   "peak_gib": 22.47,
+   "active_after_gib": 21.73,
+   "cache_gib": 5.37,
+   "entries": [
+    78342
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 10.36,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "dflash",
+   "same_as_plain": true
+  },
+  {
+   "id": "dflash2",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 1.94,
+   "active_before_gib": 21.73,
+   "prefill_peak_gib": 22.45,
+   "transient_gib": 0.72,
+   "peak_gib": 22.47,
+   "active_after_gib": 21.73,
+   "cache_gib": 5.37,
+   "entries": [
+    78342
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 10.25,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "dflash",
+   "same_as_plain": true
+  },
+  {
+   "id": "plain2",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 1.99,
+   "active_before_gib": 21.73,
+   "prefill_peak_gib": 22.45,
+   "transient_gib": 0.72,
+   "peak_gib": 22.48,
+   "active_after_gib": 21.73,
+   "cache_gib": 5.37,
+   "entries": [
+    78342
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 9.9,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain",
+   "same_as_plain": true
+  },
+  {
+   "id": "plain3",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 2.0,
+   "active_before_gib": 21.73,
+   "prefill_peak_gib": 22.45,
+   "transient_gib": 0.72,
+   "peak_gib": 22.45,
+   "active_after_gib": 21.73,
+   "cache_gib": 5.37,
+   "entries": [
+    78342
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 9.66,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "plain",
+   "same_as_plain": true
+  },
+  {
+   "id": "dflash3",
+   "mode": "",
+   "prompt": 78086,
+   "reused": 78017,
+   "n": 256,
+   "end": [
+    "done",
+    "length"
+   ],
+   "ttft": 2.06,
+   "active_before_gib": 21.73,
+   "prefill_peak_gib": 22.45,
+   "transient_gib": 0.72,
+   "peak_gib": 22.48,
+   "active_after_gib": 21.73,
+   "cache_gib": 5.37,
+   "entries": [
+    78342
+   ],
+   "text": "GiB and cut the decode step by 24%, while the 32K case admitted all 16 rows without OOM. The remaining open item is prof",
+   "tps": 9.43,
+   "rounds": 0,
+   "accepted": null,
+   "round_ms": null,
+   "variant": "dflash",
+   "same_as_plain": true
+  }
+ ]
+}

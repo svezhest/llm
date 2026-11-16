@@ -743,7 +743,7 @@ VERIFY_ATT2 = _VERIFY_ATT_MODE == "2"
 #   not MLX's bits (fp32 partials; error vs fp32 <= MLX's). Self-tested at load
 #   (_probe_decode_att), else off.
 DECODE_ATT_MIN_KV = int(os.environ.get("QWEN_DECODE_ATT") or "0")
-# QWEN_VATT_Q8 (0): the one-pass kernel (vatt.py) over an 8-bit QuantizedKVCache
+# QWEN_VATT_Q8 (1; "0" = off): the one-pass kernel (vatt.py) over an 8-bit QuantizedKVCache
 #   (QWEN_KV_BITS=8, group 64, fp16 scales; head_dim 256): the cache's own
 #   (packed, scales, biases) buffers are read in place and dequantized in
 #   registers into the kernel's fp16 key / value tiles, the rest of the kernel
@@ -755,8 +755,10 @@ DECODE_ATT_MIN_KV = int(os.environ.get("QWEN_DECODE_ATT") or "0")
 #   and QWEN_VERIFY_ATT / QWEN_DECODE_ATT apply. Numerics: the fp16 kernel's
 #   class over the dequantized KV (fp32 partials; not the library's bits).
 #   Self-tested at load against an fp32 reference on dequantized KV
-#   (_probe_vatt_q8), else off. docs/perf/2026-11-16/vatt_q8.md
-_VATT_Q8_MODE = os.environ.get("QWEN_VATT_Q8", "0")
+#   (_probe_vatt_q8), else off. Default on since 2026-11-16 (27B oQ4e, 32K:
+#   KL vs the library 2.15e-5 / top-1 99.80 % verify, 1.67e-5 / 100 % decode;
+#   plain x1.42, DFlash x1.54 vs the library): docs/perf/2026-11-16/vatt_q8.md
+_VATT_Q8_MODE = os.environ.get("QWEN_VATT_Q8", "1")
 VATT_Q8_VERIFY = _VATT_Q8_MODE in ("1", "verify")
 VATT_Q8_DECODE = _VATT_Q8_MODE in ("1", "decode")
 
