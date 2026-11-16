@@ -1,0 +1,21 @@
+N=8192 |q| x1.0: K values, mx.dequantize (fp16) vs affine: rms 5.80e-04; 8-bit quantization error rms 5.43e-03
+  attention over the affine values vs over mx.dequantize's (fp64 both): rel rms 8.46e-04 (K alone 5.86e-04, V alone 5.91e-04)
+  ... vs over the affine values rounded to fp16 once (fma): K values rms 1.96e-04; attention rel rms 2.82e-04 (K alone 2.04e-04, V alone 1.99e-04); with the output rounded to fp16 3.54e-04
+  fp16 rounding of the output alone: 2.16e-04
+  factored, fp32, code offset +1024: scores max |d| 1.5e-05; output vs fp64 over the affine values 1.02e-05, rounded to fp16 2.13e-04; rounded, vs fp64 over mx.dequantize's values 8.77e-04
+  factored, fp32, code offset    +0: scores max |d| 1.1e-06; output vs fp64 over the affine values 1.24e-06, rounded to fp16 2.13e-04; rounded, vs fp64 over mx.dequantize's values 8.77e-04
+  factored, fp32, code offset  -128: scores max |d| 6.6e-07; output vs fp64 over the affine values 4.39e-07, rounded to fp16 2.13e-04; rounded, vs fp64 over mx.dequantize's values 8.77e-04
+N=8192 |q| x2.0: K values, mx.dequantize (fp16) vs affine: rms 5.80e-04; 8-bit quantization error rms 5.43e-03
+  attention over the affine values vs over mx.dequantize's (fp64 both): rel rms 1.23e-03 (K alone 1.06e-03, V alone 5.91e-04)
+  ... vs over the affine values rounded to fp16 once (fma): K values rms 1.96e-04; attention rel rms 4.63e-04 (K alone 3.99e-04, V alone 2.03e-04); with the output rounded to fp16 4.95e-04
+  fp16 rounding of the output alone: 2.02e-04
+  factored, fp32, code offset +1024: scores max |d| 3.0e-05; output vs fp64 over the affine values 1.13e-05, rounded to fp16 2.03e-04; rounded, vs fp64 over mx.dequantize's values 1.27e-03
+  factored, fp32, code offset    +0: scores max |d| 2.3e-06; output vs fp64 over the affine values 1.28e-06, rounded to fp16 2.02e-04; rounded, vs fp64 over mx.dequantize's values 1.26e-03
+  factored, fp32, code offset  -128: scores max |d| 1.3e-06; output vs fp64 over the affine values 5.79e-07, rounded to fp16 2.02e-04; rounded, vs fp64 over mx.dequantize's values 1.26e-03
+N=8192 |q| x4.0: K values, mx.dequantize (fp16) vs affine: rms 5.80e-04; 8-bit quantization error rms 5.43e-03
+  attention over the affine values vs over mx.dequantize's (fp64 both): rel rms 1.30e-03 (K alone 1.16e-03, V alone 5.84e-04)
+  ... vs over the affine values rounded to fp16 once (fma): K values rms 1.96e-04; attention rel rms 4.43e-04 (K alone 3.86e-04, V alone 2.04e-04); with the output rounded to fp16 4.95e-04
+  fp16 rounding of the output alone: 2.10e-04
+  factored, fp32, code offset +1024: scores max |d| 6.0e-05; output vs fp64 over the affine values 9.41e-06, rounded to fp16 2.05e-04; rounded, vs fp64 over mx.dequantize's values 1.31e-03
+  factored, fp32, code offset    +0: scores max |d| 4.5e-06; output vs fp64 over the affine values 1.29e-06, rounded to fp16 2.04e-04; rounded, vs fp64 over mx.dequantize's values 1.31e-03
+  factored, fp32, code offset  -128: scores max |d| 2.6e-06; output vs fp64 over the affine values 5.89e-07, rounded to fp16 2.04e-04; rounded, vs fp64 over mx.dequantize's values 1.31e-03

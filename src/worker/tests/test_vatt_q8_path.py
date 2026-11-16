@@ -149,3 +149,36 @@ def test_probe(dense, monkeypatch):
     monkeypatch.setattr(vatt, "attention_q8", lambda *a, **k: real(*a, **k) * float("nan"))
     assert worker._probe_vatt_q8(dense) == (False, False)
     assert worker._VATT_Q8 is False and worker._VATT_Q8_DEC is False
+
+
+@pytest.mark.parametrize("kernel", ["tile", "reg", "regf"])
+def test_probe_with_the_kernel_knob(dense, monkeypatch, kernel):
+    """QWEN_VATT_Q8_KERNEL (vatt.Q8_KERNEL) picks the kernel inside vatt.attention_q8 only:
+    the worker's calls and the probe pass no kernel, and the probe's reference and bound are
+    the same for every kernel (fp32 over mx.dequantize's values; "regf" attends the affine
+    values unrounded, so on the CPU its stand-in is the exact reference and its error vs the
+    probe's reference is the largest of the three)."""
+    from mlx_vlm.models.qwen3_5 import language as q35
+    monkeypatch.setattr(worker, "_SDPA", q35.scaled_dot_product_attention)
+    monkeypatch.setattr(worker, "VATT_Q8_VERIFY", True)
+    monkeypatch.setattr(worker, "VATT_Q8_DECODE", True)
+    monkeypatch.setattr(worker.cfg, "KV_BITS", 8)
+    monkeypatch.setattr(vatt, "D_OK", (64,))
+    monkeypatch.setattr(worker, "_act_dtype", lambda lm: mx.float16)
+    monkeypatch.setattr(vatt, "Q8_KERNEL", kernel)
+    exacts, real = [], vatt.reference_q8
+
+    def ref(*a, exact=False, **k):
+        exacts.append(exact)
+        return real(*a, exact=exact, **k)
+    monkeypatch.setattr(vatt, "reference_q8", ref)
+    from qwen_worker import kernels
+    why, worst = kernels._vatt_q8_selftest(dense, (1, 8))
+    assert set(exacts) == ({False, True} if kernel == "regf" else {False})
+    assert worker._probe_vatt_q8(dense) == ((not why), (not why))
+    if kernel != "regf":
+        assert not why and worst < 4e-4
+    else:
+        assert worst > 4e-4                     # not mx.dequantize's values: the probe's bound decides
+    monkeypatch.setattr(vatt, "Q8_KERNEL", "tiles")
+    assert worker._probe_vatt_q8(dense) == (False, False)        # an unknown name: off, the library's calls

@@ -285,3 +285,167 @@ $ENV QWEN_KV_BITS=8 QWEN_VATT_Q8=1 QWEN_KVQ_PREFILL_FUSED=1 .venv/bin/python \
   --json $PERF_OUT/kv8_w78000.json
 ```
 
+
+## 2026-11-17: two faster pass-1 kernels for q8, written without a GPU — NOT YET MEASURED
+
+Branch `q8-timing`. Everything below the commands is to be filled by the GPU runs; **no Metal code of
+this section has been compiled or run** (the GPU was not available to the author). Checked on the
+CPU only: the index arithmetic of the new kernel (a numpy emulation of its lanes, loads, bit
+regrouping, steps, exchange and store for 8 tile shapes, both variants: equal to plain attention to
+7e-15), its C++ syntax and types (clang over stand-in Metal types, 14 template instantiations × 4
+timing variants), the Python plumbing and the worker routing (`tests/test_vatt.py` CPU part,
+`tests/test_vatt_q8_path.py`: 16 passed) [M, CPU].
+
+The goal: at 80K keys a decode step runs 0.910 ms a layer (191 GB/s of q8 bytes against a ~330 GB/s
+bus, floor ~0.53 ms), a verify block of 8 runs 3.486 ms against 3.227 for fp16 (above).
+
+### What was written (`QWEN_VATT_Q8_KERNEL`, default `tile`)
+
+| value | pass 1 | values attended |
+|---|---|---|
+| `tile` | the kernel above: `Q8Loader` dequantizes into `vatt_p1`'s threadgroup tiles; each 16-row query block (threadgroup) of a chunk converts the chunk's key tiles for itself | fp16, one fma a value |
+| `reg` | `vattq_p1`: no tiles. Every K / V MMA fragment is built in registers from the packed bytes, as `mrqmm.py` builds its weights: per 8 keys and group of 64 dims a thread loads one `uint2` per key (K) or one `uint4` (V), regroups it into 16-bit lanes once, and each of the 8 MMA steps is a shift, a mask and one fp16 fma. The dims of a group are permuted between the steps (step `st` takes d = 64 g + 8 c + st), the same for Q and K, and undone at the store for V. One barrier a key block (the score exchange between the simdgroups, two alternating buffers) instead of six | the same fp16 values (one fma), summed in another order |
+| `regf` | `reg` with change A: the MMAs run on the centred codes, scale and bias are applied to the sums | the affine values `s * code + b`, unrounded |
+
+* **Change B** (one conversion for all query blocks) is `reg`'s `MB`: a simdgroup holds `MB` 8-row query
+  blocks and multiplies each K / V fragment it builds by all of them. Tiles are `MBxWNxKF` (8-row
+  blocks a simdgroup × simdgroups splitting head_dim × 8-key fragments a key block), env
+  `VATT_Q8R_DECODE` (default `1x2x1`) / `VATT_Q8R_VERIFY` (default `2x4x1`: 16 rows a threadgroup as
+  the tile kernel, 16 output fragments in registers as it holds). `3x4x1` converts once per 24 rows;
+  a whole block of 48 rows in one simdgroup (`6x4x1`) needs 48 output fragments and is expected to
+  spill [E]. The defaults are guesses until the sweep runs.
+* `VATT_Q8_TIMING` is now per call (`attention_q8(timing=)`), for `tile` and `reg`: the bench runs
+  the cost split in one process.
+* The fp16 path's kernel text is untouched; the header it shares gained a function.
+
+### Change A, the arithmetic [analysis]
+
+With `c = code - 128` (exact in fp16: `(0x6400 | byte) - 1152`), `b' = b + 128 s`, per (key k, group g
+of 64 dims), all sums in fp32:
+
+* scores: `q . k = sum_g [ s[k,g] (q_g . c[k,g]) + b'[k,g] sum(q_g) ]`. A simdgroup accumulates
+  `q_g . c` over the group's 8 MMA steps, then adds `s * that + sum(q_g) * b'` (2 fma a thread and
+  row block); `sum(q_g)` is one MMA of the Q fragments with ones per group, once per threadgroup.
+* values: `out_g = sum_k (p[k] s[k,g]) c[k,g] + sum_k p[k] b'[k,g]`: the P fragment's columns are
+  multiplied by their keys' scales once per group, the last term is a per-row scalar reduced over the
+  simdgroup and added at the store.
+* Saved: 16 fp16 fma a thread per 8 keys and group pair. Added: 2 more scale / bias loads on the V
+  side, 2 fp32 fma and a 2-shuffle reduction per row block. In `reg` the fma is one instruction
+  beside each MMA, so the gain is expected to be small; `reg@1` (no scale / bias at all) bounds it.
+* **Cancellation** (`scripts/perf/dflash2/q8_factored_sim.py`, CPU, 8K keys, `raw/vatt_q8/reg/
+  factored_sim_8192.txt`) [M, CPU]: factored fp32 vs fp64 over the affine values, output rms rel
+  4e-7…6e-7 with centred codes, 1.3e-6 with raw codes, 1.0e-5 with the 0x6400 value (+1024) as it is;
+  after fp16 rounding of the output 2.0–2.1e-4 in every case. Not a problem.
+* **The reference is the problem.** The factored form attends `s * code + b` unrounded. `tile`, `reg`
+  and `reference_q8` attend the fp16 rounding of it. The two differ in the attention output by 3.5e-4
+  (|q| × 1) … 5.0e-4 (|q| × 4, the microbench) when the values are rounded once (an fma) and by
+  0.9–1.3e-3 against `mx.dequantize`'s CPU values (product and sum rounded separately) [M, CPU]. So
+  `regf` cannot meet "≤ 2.5e-4 vs the fp32 reference on the dequantized KV" by construction; against
+  fp32 over the affine values (`reference_q8(exact=True)`) it is expected at 2.0–2.1e-4. The 8-bit
+  quantization error itself is 5.4e-3 rms a value, 10–25× larger than either rounding. Keeping `regf`
+  therefore needs a decision on the reference, not a looser bound; the load self-test is unchanged
+  (its bound is 1.05 × the library's error, which `regf` is expected to pass).
+
+### GPU runs (in this order)
+
+`cd src/worker`; `$PY` = a worker venv's python; nothing else on the GPU.
+
+```zsh
+# 1. compile + numbers + load self-test per kernel + timing variants + fp16 bits vs cbd0e7a   (~1 min)
+$PY ../../scripts/perf/dflash2/vatt_q8_check.py --json $PERF_OUT/vatt_q8_reg/check.json
+# 2. kernel tests (306 = 299 GPU + 7 CPU; 98 before)                                          (~3 min)
+VATT_GPU=1 $PY -m pytest -q tests/test_vatt.py
+# 3. reg tile sweep at 80K -> VATT_Q8R_DECODE / VATT_Q8R_VERIFY for runs 4 and 5              (~1 min)
+$PY ../../scripts/perf/dflash2/vatt_q8_bench.py 81920 --rounds 7 \
+  --decode tile,reg:1x2x1,reg:1x4x1,reg:1x2x2,reg:1x4x2,reg:1x1x1,fp16 \
+  --verify tile,reg:2x4x1,reg:3x4x1,reg:2x2x1,reg:1x2x1,reg:1x4x1,reg:2x4x2,reg:3x4x2,fp16 \
+  --json $PERF_OUT/vatt_q8_reg/sweep_81920.json
+# 4. timing split (tile, reg: @0..3) + before / after (lib, tile, reg, regf, fp16), one process (~4 min)
+VATT_Q8R_DECODE=<best> VATT_Q8R_VERIFY=<best> $PY ../../scripts/perf/dflash2/vatt_q8_bench.py \
+  8192 32768 61440 81920 131072 --json $PERF_OUT/vatt_q8_reg/bench.json
+# 5. numerics gate, 32K, oQ4e ($ENV = the production env above, no QWEN_DRAFT)                (~15 min)
+$ENV QWEN_KV_BITS=8 QWEN_VATT_Q8=1 QWEN_KVQ_PREFILL_FUSED=1 VATT_Q8R_DECODE=<best> VATT_Q8R_VERIFY=<best> \
+  env -u QWEN_DRAFT $PY ../../scripts/perf/kvq8/vattq8_kl.py --tokens 32768 --blocks 64 --decode 128 \
+  --modes lib,tile,reg,ref --json $PERF_OUT/vatt_q8_reg/kl_32768.json
+```
+
+### Timing split (run 4; ms a layer, median; variant 1 = no scale / bias, 2 = 1 without the offset, 3 = no KV reads)
+
+| keys | use | kernel | full (0) | 1 | 2 | 3 | scale / bias + fma (0 − 1) | reads + conversion (1 − 3) |
+|---:|---|---|---:|---:|---:|---:|---:|---:|
+| 8K | decode | tile | | | | | | |
+| 8K | decode | reg | | | | | | |
+| 32K | decode | tile | | | | | | |
+| 32K | decode | reg | | | | | | |
+| 80K | decode | tile | | | | | | |
+| 80K | decode | reg | | | | | | |
+| 128K | decode | tile | | | | | | |
+| 128K | decode | reg | | | | | | |
+| 8K | verify 8 | tile | | | | | | |
+| 8K | verify 8 | reg | | | | | | |
+| 32K | verify 8 | tile | | | | | | |
+| 32K | verify 8 | reg | | | | | | |
+| 80K | verify 8 | tile | | | | | | |
+| 80K | verify 8 | reg | | | | | | |
+| 128K | verify 8 | tile | | | | | | |
+| 128K | verify 8 | reg | | | | | | |
+
+### Before / after (run 4; ms a layer, median, one process; GB/s of q8 bytes; roof ~330 GB/s)
+
+| keys | decode: library q8 | tile (before) | reg | regf | vatt fp16 | reg GB/s | % of the roof |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8K | | | | | | | |
+| 32K | | | | | | | |
+| 60K | | | | | | | |
+| 80K | | | | | | | |
+| 128K | | | | | | | |
+
+| keys | verify T=8: library q8 (8 calls) | tile (before) | reg | regf | vatt fp16 |
+|---:|---:|---:|---:|---:|---:|
+| 8K | | | | | |
+| 32K | | | | | |
+| 60K | | | | | |
+| 80K | | | | | |
+| 128K | | | | | |
+
+Error, rms relative (bound 2.5e-4; tile today 2.0–2.1e-4):
+
+| keys | tile vs ref | reg vs ref | regf vs ref | regf vs exact | tile vs exact |
+|---:|---:|---:|---:|---:|---:|
+| 8K decode / verify | | | | | |
+| 80K decode / verify | | | | | |
+| 128K decode / verify | | | | | |
+
+### Numerics gate (run 5; gate KL ≤ 1e-4, top-1 ≥ 99.7 % for lib ‖ kernel)
+
+| oQ4e, 32K | positions | KL mean | p99 | top-1 | flips at ref top-2 gap |
+|---|---:|---:|---:|---:|---|
+| verify, lib ‖ tile | 512 | | | | |
+| verify, lib ‖ reg | 512 | | | | |
+| verify, tile ‖ reg | 512 | | | | |
+| verify, ref ‖ reg | 512 | | | | |
+| decode, lib ‖ tile | 128 | | | | |
+| decode, lib ‖ reg | 128 | | | | |
+| decode, tile ‖ reg | 128 | | | | |
+| decode, ref ‖ reg | 128 | | | | |
+
+### Decisions the runs make
+
+* **Run 1 fails to compile `reg`**: the Metal log is printed; nothing else is decided.
+* **A in the tile kernel** (the 10 % rule): `tile@1` less than 10 % faster than `tile` for decode at
+  80K → NO-GO for decode, nothing to write. Same reading of `reg@1` vs `reg` for `regf` (and `regf`'s
+  own column measures it directly).
+* **A, numerics**: `regf vs ref` above 2.5e-4 (expected 5e-4 or more) → NO-GO under the bound as
+  written, whatever its speed; GO only with the reference redefined as the affine values and its own
+  KL gate (`--modes lib,tile,regf,ref`).
+* **`reg` (B and the tile-free loader)**: keep where `reg` beats `tile` in run 4 (decode and verify
+  judged separately; the knob is one value today, a per-use split is a small change), with `reg vs
+  ref` ≤ 2.5e-4, run 2 green and run 5 passing for `lib ‖ reg`. Then the default becomes `reg` and the
+  best tiles become the defaults.
+* **Verify**: if no `reg` tile beats `tile` at 80K (run 3), B is NO-GO in this structure: the block is
+  MMA-bound (4.6 TFLOPS at 80K against ~5–6.7 for the GPU's other fp32-accumulating MMA kernels) and
+  the conversions were not the cost.
+
+### Verdict
+
+To be written after the runs.

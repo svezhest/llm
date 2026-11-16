@@ -380,9 +380,9 @@ def _probe_vatt_q8(lm):
     if VATT_Q8_DECODE and _SDPA is None:
         log.warning("QWEN_VATT_Q8 decode off: the SDPA override is not installed")
     _VATT_Q8, _VATT_Q8_DEC = VATT_Q8_VERIFY, VATT_Q8_DECODE and _SDPA is not None
-    log.info("8-bit KV attention through the one-pass kernel (QWEN_VATT_Q8, vatt): verify blocks %s, decode "
-             "steps %s; self-test rms rel error <= %.2e", "on" if _VATT_Q8 else "off",
-             "on" if _VATT_Q8_DEC else "off", worst)
+    log.info("8-bit KV attention through the one-pass kernel (QWEN_VATT_Q8, vatt; QWEN_VATT_Q8_KERNEL=%s): "
+             "verify blocks %s, decode steps %s; self-test rms rel error <= %.2e", vatt.Q8_KERNEL,
+             "on" if _VATT_Q8 else "off", "on" if _VATT_Q8_DEC else "off", worst)
     return _VATT_Q8, _VATT_Q8_DEC
 
 

@@ -16,6 +16,10 @@ Then:
 A third variant, ref = the exact attention over the same dequantized KV
 (vatt.reference_q8: fp32 throughout, rounded to fp16 once), tells which side
 of a lib / vq8 disagreement is off: KL(ref || lib) vs KL(ref || vq8).
+--modes lib,tile,reg,regf,ref compares the q8 kernels of vatt.py by name in one
+run (tile = the threadgroup-tile loader, reg = fragments in registers, regf =
+reg with scale and bias out of the sums; vq8 = the one QWEN_VATT_Q8_KERNEL
+selects): every kernel against lib and ref, and tile against reg / regf.
 
 Per pair: KL(a || b) mean / p99 / max over every position (fp32 log-softmax
 of the logits), top-1 agreement, max |d logprob|, and for every top-1
@@ -44,6 +48,7 @@ ap.add_argument("--tokens", type=int, default=32768, help="context before the fi
 ap.add_argument("--blocks", type=int, default=64)
 ap.add_argument("--T", type=int, default=8)
 ap.add_argument("--decode", type=int, default=128)
+ap.add_argument("--modes", default="lib,vq8,ref")
 ap.add_argument("--json", default="")
 a = ap.parse_args()
 
@@ -102,9 +107,18 @@ def exact(q, kq, vq, n, scale, group_size=64, bits=8, chunk=None):
     return vatt.reference_q8(q, kq, vq, n, scale, group_size, bits).astype(q.dtype)
 
 
+def named(kernel):
+    def f(q, kq, vq, n, scale, group_size=64, bits=8, chunk=None):
+        return KERNEL(q, kq, vq, n, scale, group_size, bits, chunk, kernel=kernel)
+    return f
+
+
+ATT = dict(ref=exact, vq8=KERNEL, lib=KERNEL, tile=named("tile"), reg=named("reg"), regf=named("regf"))
+
+
 def mode(m):
-    """lib / vq8 / ref -> the q8 attention switches (verify and decode alike)."""
-    vatt.attention_q8 = exact if m == "ref" else KERNEL
+    """lib / vq8 / tile / reg / regf / ref -> the q8 attention switches (verify and decode alike)."""
+    vatt.attention_q8 = ATT[m]
     return m != "lib"
 
 
@@ -119,8 +133,11 @@ def verify(block, m):
     return lp
 
 
-MODES = ("lib", "vq8", "ref")
-PAIRS = (("lib", "vq8"), ("ref", "lib"), ("ref", "vq8"))
+MODES = tuple(a.modes.split(","))
+assert "lib" in MODES and "ref" in MODES and all(m in ATT for m in MODES), MODES
+KERNELS = tuple(m for m in MODES if m not in ("lib", "ref"))
+PAIRS = (tuple(("lib", k) for k in KERNELS) + (("ref", "lib"),) + tuple(("ref", k) for k in KERNELS)
+         + tuple(("tile", k) for k in KERNELS if k in ("reg", "regf") and "tile" in KERNELS))
 
 
 def add(s, la, lb, lr):
@@ -188,7 +205,8 @@ for i in range(a.decode):
     mx.eval([c.state for c in cache])
     pos += 1
 
-res = dict(tokens=a.tokens, blocks=a.blocks, T=a.T, decode=a.decode, model=os.environ["QWEN_MODEL"],
+res = dict(tokens=a.tokens, blocks=a.blocks, T=a.T, decode=a.decode, modes=MODES,
+           model=os.path.basename(os.environ["QWEN_MODEL"].rstrip("/")),
            kvq_prefill_fused=W.KVQ_PREFILL_FUSED, pairs={})
 ok = True
 for k, s in acc.items():
@@ -199,15 +217,15 @@ for k, s in acc.items():
     r = dict(n=n, kl_mean=sum(kl) / n, kl_p99=kl[min(n - 1, int(0.99 * n))], kl_max=kl[-1],
              top1=100.0 * s["agree"] / s["n"], max_abs_dlogprob=s["dmax"], ref_gap_at_flips=s["flip_gaps"])
     r["gate"] = r["kl_mean"] <= 1e-4 and r["top1"] >= 99.7
-    if k.startswith("lib|vq8"):
+    if k.startswith("lib|"):
         ok &= r["gate"]
     res["pairs"][k] = r
     print(f"{k:17s}: {n} positions  KL mean {r['kl_mean']:.3g}  p99 {r['kl_p99']:.3g}  "
           f"max {r['kl_max']:.3g}  top-1 {r['top1']:.2f}%  max|d logprob| {r['max_abs_dlogprob']:.3g}  "
           f"ref top-2 gap at flips {s['flip_gaps']}" + (f"  {'PASS' if r['gate'] else 'FAIL'}"
-                                                        if k.startswith("lib|vq8") else ""), flush=True)
+                                                        if k.startswith("lib|") else ""), flush=True)
 res["gate"] = ok
-print(f"gate (KL(lib||vq8) <= 1e-4, top-1 >= 99.7 %, verify and decode): {'PASS' if ok else 'FAIL'}",
+print(f"gate (KL(lib||kernel) <= 1e-4, top-1 >= 99.7 %, verify and decode): {'PASS' if ok else 'FAIL'}",
       flush=True)
 if a.json:
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
