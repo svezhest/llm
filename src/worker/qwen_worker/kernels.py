@@ -422,7 +422,7 @@ def _setup_verify_mrqmm(lm, draft):
 
 def _setup_verify_qmv(lm):
     """QWEN_VERIFY_QMV=N, at load with a drafter (after _setup_verify_mrqmm):
-    verify blocks of 2..N tokens through mrqmv on every 4-bit g64 module (and
+    verify blocks of 2..N tokens through mrqmv on every 4 / 5 / 6 / 8-bit g64 module (and
     fused GDN in-projection) whose shape passes its self-test (each row ==
     MLX's solo qmv bit for bit). -> what the load log says (None: off)."""
     if not cfg.VERIFY_QMV:
@@ -435,13 +435,13 @@ def _setup_verify_qmv(lm):
             continue
         ls = [m[a] for a in _GDN_IN]
         groups = [(tuple(_GDN_IN.index(a) for a in g.names), g.w, g.s, g.b, g.split) for g in gs
-                  if g.bits == 4 and g.gs == 64 and g.mode == "affine"]
+                  if g.bits in mrqmv.BITS_OK and g.gs == 64 and g.mode == "affine"]
         if groups:
             fused.append((ls[0], groups, tuple(map(id, ls))))
     n, nf = mrqmv.install(lm, cfg.VERIFY_QMV, fused)
     cfg.VERIFY_QMV = mrqmv.MAX_ROWS if n else 0
     return (f"verify blocks of 2..{mrqmv.MAX_ROWS} tokens on mrqmv: {n} modules, {nf} fused GDN "
-            f"in-projections" if n else "off: no 4-bit g64 module passed")
+            f"in-projections" if n else "off: no 4 / 5 / 6 / 8-bit g64 module passed")
 
 
 def _draft_wide(draft):

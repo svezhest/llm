@@ -11,6 +11,7 @@ Variants (comma separated):
   hybK         both, per-round choice (QWEN_DRAFT_HYBRID=1), MTP rounds of K drafts
   <v>+p        any of the above with plain steps as an arm (QWEN_SPEC_PLAIN=1)
   <v>+k<N>      the adaptive draft count's ceiling N (QWEN_MTP_KMAX)
+  <v>+q4        +q on the 4-bit modules only (the 5 / 6 / 8-bit ones on their old path)
   <v>+x        verify blocks through mlx-vlm's exact multi-row qmv (QWEN_VERIFY_MRQMM off)
   <v>+q        verify blocks of 2..N tokens through mrqmv (load with QWEN_VERIFY_QMV=N; without
                +q the variant runs with it off)
@@ -73,6 +74,23 @@ print(f"loaded in {time.time() - t_load:.0f} s; active {mx.get_active_memory() /
       f"DRAFT_BLOCK {W.DRAFT_BLOCK} VERIFY_MR {W.VERIFY_MR}", flush=True)
 REFEED0, SAMPLING0, MR0 = W.MTP_REFEED, W.DRAFT_SAMPLING, (W.VERIFY_MR, W.VERIFY_MR_HEAD)
 KMAX0 = W.MTP_KMAX
+# +q4: mrqmv on the 4-bit modules only (the marks of the others hidden for that variant)
+import mrqmv as _MQ  # noqa: E402
+QMV_MARKS = [(m, m.__dict__.get("_qmv"), m.__dict__.get("_qmv_fused"))
+             for _, m in eng.model.language_model.named_modules()
+             if isinstance(m, dict) and (m.__dict__.get("_qmv") or m.__dict__.get("_qmv_fused"))]
+
+
+def qmv_bits(only4):
+    for m, q, f in QMV_MARKS:
+        if q:
+            m.__dict__["_qmv"] = not only4 or _MQ.bits_of(m["weight"], m["scales"]) == 4
+        if f:
+            ids, groups = f
+            m.__dict__["_qmv_fused"] = (ids, tuple(g for g in groups if not only4
+                                                   or _MQ.bits_of(g[1], g[2]) == 4))
+
+
 QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
 
 
@@ -85,8 +103,9 @@ def set_variant(v):
     W.SPEC_PLAIN = "p" in flags
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
-    W.VERIFY_QMV = QMV0 if "q" in flags else 0
-    if "q" in flags and not QMV0:
+    W.VERIFY_QMV = QMV0 if ("q" in flags or "q4" in flags) else 0
+    qmv_bits("q4" in flags)
+    if ("q" in flags or "q4" in flags) and not QMV0:
         raise SystemExit(f"{v}+q: mrqmv not installed (QWEN_VERIFY_QMV unset or its self-test failed)")
     if v == "plain":
         eng.draft = eng.mtp = None

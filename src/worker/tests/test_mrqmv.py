@@ -1,4 +1,4 @@
-"""mrqmv (QWEN_VERIFY_QMV: multi-row 4-bit qmv for short verify blocks): every
+"""mrqmv (QWEN_VERIFY_QMV: multi-row 4 / 5 / 6 / 8-bit qmv for short verify blocks): every
 row of a T-row call is MLX's solo qmv of that row bit for bit, at the 27B's
 shapes (random 4-bit g64 weights) and small ones; install() marks modules and
 fused sets only where the self-test passed; the verify hooks route (1, T, K)
@@ -55,13 +55,43 @@ def test_outlier_rows_and_selftest(gpu):
     x = (mx.random.normal((4, 2048), key=mx.random.key(9)) * mx.array([[0.01], [1.0], [60.0], [3.0]])
          ).astype(mx.float16)
     assert mx.array_equal(mrqmv.rows(x, w, s, b), solo(x, w, s, b)).item()
-    assert mrqmv.tested(w, s, b, 6) and mrqmv._OK[(2048, 1024)] is None
+    assert mrqmv.tested(w, s, b, 6) and mrqmv._OK[(2048, 1024, 4)] is None
+
+
+def qb(N, K, bits, seed=0):
+    wf = (mx.random.normal((N, K), key=mx.random.key(seed)) * K ** -0.5).astype(mx.float16)
+    return mx.quantize(wf, group_size=64, bits=bits)
+
+
+# the oQ4e's 5 / 6 / 8-bit shapes (K, N): attention o / q, MLP down, GDN out, lm_head (a slice)
+SHAPES_B = [(6144, 5120), (5120, 12288), (17408, 5120), (5120, 1024), (5120, 4096), (512, 8)]
+
+
+@metal
+@pytest.mark.parametrize("bits", [5, 6, 8])
+@pytest.mark.parametrize("K,N", SHAPES_B)
+@pytest.mark.parametrize("T", [2, 3])
+def test_rows_equal_solo_qmv_other_bits(gpu, bits, K, N, T):
+    """5 / 6 / 8 bits (MLX's load_vector / qdot per row): == the solo qmv."""
+    w, s, b = qb(N, K, bits, seed=K + N + bits)
+    x = (mx.random.normal((T, K), key=mx.random.key(T)) * mx.array([[0.7], [30.0], [0.01]][:T])
+         ).astype(mx.float16)
+    assert mrqmv.shape_ok(w, s, b) and mrqmv.bits_of(w, s) == bits
+    one = mx.concatenate([mx.quantized_matmul(x[t:t + 1], w, s, b, transpose=True, group_size=64,
+                                              bits=bits) for t in range(T)])
+    assert mx.array_equal(mrqmv.rows(x, w, s, b), one).item()
+    assert mrqmv.tested(w, s, b, 3)
 
 
 def test_shape_rules():
     w, s, b = mx.quantize(mx.zeros((64, 1024), dtype=mx.float16), group_size=64, bits=4)
     assert mrqmv.shape_ok(w, s, b)
     assert not mrqmv.shape_ok(w, s, b, bits=8)
+    for bits in (5, 6, 8):
+        wb, sb, bb = mx.quantize(mx.zeros((64, 1024), dtype=mx.float16), group_size=64, bits=bits)
+        assert mrqmv.shape_ok(wb, sb, bb) and mrqmv.bits_of(wb, sb) == bits
+    w7, s7, b7 = mx.quantize(mx.zeros((64, 1024), dtype=mx.float16), group_size=64, bits=3)
+    assert not mrqmv.shape_ok(w7, s7, b7)                  # 3 bits: not taken
     assert not mrqmv.shape_ok(w, s, None)
     w2, s2, b2 = mx.quantize(mx.zeros((64, 576), dtype=mx.float16), group_size=64, bits=4)
     assert not mrqmv.shape_ok(w2, s2, b2)                  # K % 512
@@ -71,21 +101,23 @@ def test_shape_rules():
 
 @metal
 def test_install_and_verify_hooks(gpu, monkeypatch):
-    """install marks 4-bit g64 modules; _verify_linear(s) send 2..N-token
+    """install marks 4 / 5 / 6 / 8-bit g64 modules; _verify_linear(s) send 2..N-token
     blocks through mrqmv (== the solo rows) and anything else to the old path."""
     from qwen_worker import config as cfg
     from qwen_worker import kernels
     m = nn.Module()
     m.a = nn.QuantizedLinear(1024, 256, bias=False, group_size=64, bits=4)
     m.b = nn.QuantizedLinear(1024, 128, bias=False, group_size=64, bits=4)
-    m.c = nn.QuantizedLinear(1024, 128, bias=False, group_size=64, bits=8)
-    for name in ("a", "b", "c"):
+    m.c = nn.QuantizedLinear(1024, 128, bias=False, group_size=64, bits=3)   # not taken
+    m.d = nn.QuantizedLinear(1024, 128, bias=False, group_size=64, bits=8)
+    for name in ("a", "b", "c", "d"):
         lin = getattr(m, name)
         lin.scales = lin.scales.astype(mx.float16)
         lin.biases = lin.biases.astype(mx.float16)
     mx.eval(m.parameters())
     n, nf = mrqmv.install(m, 4)
-    assert (n, nf) == (2, 0) and m.a.__dict__.get("_qmv") and not m.c.__dict__.get("_qmv")
+    assert (n, nf) == (3, 0) and m.a.__dict__.get("_qmv") and m.d.__dict__.get("_qmv")
+    assert not m.c.__dict__.get("_qmv")
     monkeypatch.setattr(cfg, "VERIFY_QMV", 4)
     calls = []
     monkeypatch.setattr(kernels, "_VERIFY_LINEAR", lambda self, lin, x: calls.append(x.shape) or lin(x))

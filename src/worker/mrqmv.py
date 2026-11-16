@@ -1,5 +1,5 @@
-"""Multi-row 4-bit qmv for short verify blocks (QWEN_VERIFY_QMV): T = 2..MAX_ROWS
-rows of x against 4-bit affine g64 weights, each row's result bit for bit
+"""Multi-row qmv for short verify blocks (QWEN_VERIFY_QMV): T = 2..MAX_ROWS
+rows of x against 4 / 5 / 6 / 8-bit affine g64 weights, each row's result bit for bit
 MLX's own single-row kernel (affine_qmv_fast) on that row alone.
 
 An MTP round on the 27B verifies 2..5 tokens. mrqmm (simdgroup MMA, rows padded
@@ -23,6 +23,11 @@ mx.quantized_matmul of each row alone, mx.array_equal), and a mismatch or
 error leaves every call on the caller's own path (the knob's promise is
 "the verify == T plain steps", not just speed).
 
+5 / 6 / 8 bits (the oQ4e's attention, embedding-tied, down and lm_head
+modules): the same loop over MLX's own `load_vector` / `qdot` templates from the
+wheel's quantized.h (pfqmm's header), x of every row loaded per block and the
+weights read once per row from the cache; the same self-test decides.
+
 Shapes: K % 512 == 0 (qmv_fast's own condition), N % 8 == 0, fp16 x / scales /
 biases, (1, T, K) inputs. Everything else stays with the caller.
 """
@@ -36,6 +41,7 @@ import mlx.core as mx
 log = logging.getLogger("worker.mrqmv")
 
 BITS, GROUP = 4, 64
+BITS_OK = (4, 5, 6, 8)          # 4: the hand-unrolled kernel below; 5 / 6 / 8: MLX's templates
 BLOCK = 512                     # K per iteration: 32 threads x 16 values
 RPS, NSG = 4, 2                 # output features per simdgroup, simdgroups per threadgroup
 CHUNK = 3                       # rows whose x a thread holds at once (registers)
@@ -134,33 +140,112 @@ _SRC = r"""
     }
 """
 
-_KERNELS = {}                   # (T, K, N) -> metal_kernel
+# 5 / 6 / 8 bits: MLX's qmv_fast_impl with TT rows (load_vector / qdot from the
+# wheel's quantized.h: the same arithmetic per row by construction)
+_SRC_G = r"""
+    constexpr int PPT = BITS == 2 ? 1 : 2;
+    constexpr int PF = get_pack_factor<BITS, 32>();
+    constexpr int BPP = get_bytes_per_pack<BITS, 32>();
+    constexpr int VPT = PF * PPT;
+    constexpr int BS = VPT * 32;
+    constexpr int SSTEP = 64 / VPT;
+    constexpr int KW = K * BPP / PF;          // bytes per weight row
+    constexpr int KG = K / 64;
+    const uint n_tile = threadgroup_position_in_grid.y;
+    const uint sg = simdgroup_index_in_threadgroup;
+    const uint lid = thread_index_in_simdgroup;
+    const int out_row = int(n_tile) * (2 * 4) + int(sg) * 4;
+
+    const device uint8_t* ws = (const device uint8_t*)w + out_row * KW + lid * PPT * BPP;
+    const device half* sc = scales + out_row * KG + lid / SSTEP;
+    const device half* bi = biases + out_row * KG + lid / SSTEP;
+    const device half* xk = x + lid * VPT;
+
+    float result[TT][4];
+    _Pragma("clang loop unroll(full)")
+    for (int t = 0; t < TT; t++) {
+        _Pragma("clang loop unroll(full)")
+        for (int r = 0; r < 4; r++)
+            result[t][r] = 0.0f;
+    }
+    float xt[TT][VPT];
+    float sum[TT];
+
+    for (int k = 0; k < K; k += BS) {
+        _Pragma("clang loop unroll(full)")
+        for (int t = 0; t < TT; t++)
+            sum[t] = load_vector<half, float, VPT, BITS>(xk + t * K, xt[t]);
+        _Pragma("clang loop unroll(full)")
+        for (int r = 0; r < 4; r++) {
+            const device uint8_t* wl = ws + r * KW;
+            const float s = sc[r * KG];
+            const float b = bi[r * KG];
+            _Pragma("clang loop unroll(full)")
+            for (int t = 0; t < TT; t++)
+                result[t][r] += qdot<float, VPT, BITS>(wl, xt[t], s, b, sum[t]);
+        }
+        ws += BS * BPP / PF;
+        sc += BS / 64;
+        bi += BS / 64;
+        xk += BS;
+    }
+
+    _Pragma("clang loop unroll(full)")
+    for (int r = 0; r < 4; r++) {
+        _Pragma("clang loop unroll(full)")
+        for (int t = 0; t < TT; t++) {
+            float v = simd_sum(result[t][r]);
+            if (lid == 0) {
+                y[t * N + out_row + r] = static_cast<half>(v);
+            }
+        }
+    }
+"""
+
+_KERNELS = {}                   # (T, K, N, bits) -> metal_kernel
 _LOCK = threading.Lock()
-_OK = {}                        # (K, N) -> self-test verdict (None = passed, else why not)
+_OK = {}                        # (K, N, bits) -> self-test verdict (None = passed, else why not)
 
 
-def _kernel(T: int, K: int, N: int):
-    key = (T, K, N)
+def _kernel(T: int, K: int, N: int, bits: int = BITS):
+    key = (T, K, N, bits)
     k = _KERNELS.get(key)
     if k is None:
         with _LOCK:
             k = _KERNELS.get(key)
             if k is None:
                 consts = f"    constexpr int TT = {T}, K = {K}, N = {N}, CH = {min(T, CHUNK)};\n"
-                k = _KERNELS[key] = mx.fast.metal_kernel(
-                    name=f"mrqmv4_g64_t{T}_k{K}_n{N}", input_names=["x", "w", "scales", "biases"],
-                    output_names=["y"], source=consts + _SRC)
+                if bits == BITS:
+                    k = mx.fast.metal_kernel(
+                        name=f"mrqmv4_g64_t{T}_k{K}_n{N}", input_names=["x", "w", "scales", "biases"],
+                        output_names=["y"], source=consts + _SRC)
+                else:
+                    from pfqmm import _header
+                    k = mx.fast.metal_kernel(
+                        name=f"mrqmv{bits}_g64_t{T}_k{K}_n{N}", input_names=["x", "w", "scales", "biases"],
+                        output_names=["y"], source=consts + f"    constexpr int BITS = {bits};\n" + _SRC_G,
+                        header=_header())
+                _KERNELS[key] = k
     return k
 
 
-def shape_ok(w: mx.array, scales: mx.array, biases, bits: int = BITS, group_size: int = GROUP) -> bool:
-    """4-bit g64 affine fp16 weights of a shape qmv_fast takes."""
+def bits_of(w: mx.array, scales: mx.array) -> int:
+    """The bit width of g64 weights from their shapes (0: not a g64 layout)."""
+    K = scales.shape[-1] * GROUP
+    b, r = divmod(w.shape[-1] * 32, K) if K else (0, 1)
+    return b if r == 0 else 0
+
+
+def shape_ok(w: mx.array, scales: mx.array, biases, bits: int | None = None,
+             group_size: int = GROUP) -> bool:
+    """4 / 5 / 6 / 8-bit g64 affine fp16 weights of a shape qmv_fast takes."""
     if biases is None or w.dtype != mx.uint32 or w.ndim != 2 or scales.ndim != 2:
         return False
-    N, K = w.shape[0], w.shape[1] * 32 // BITS
-    return (bits == BITS and group_size == GROUP and scales.dtype == mx.float16
-            and biases.dtype == mx.float16 and K % BLOCK == 0 and N % 8 == 0
-            and scales.shape == (N, K // GROUP))
+    b = bits_of(w, scales)
+    N, K = w.shape[0], scales.shape[1] * GROUP
+    return (b in BITS_OK and (bits is None or bits == b) and group_size == GROUP
+            and scales.dtype == mx.float16 and biases.dtype == mx.float16 and K % BLOCK == 0
+            and N % 8 == 0 and biases.shape == scales.shape)
 
 
 def rows(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array) -> mx.array:
@@ -169,9 +254,9 @@ def rows(x: mx.array, w: mx.array, scales: mx.array, biases: mx.array) -> mx.arr
     passed. Call shape_ok first."""
     T, K = x.shape
     N = w.shape[0]
-    return _kernel(T, K, N)(inputs=[x, w, scales, biases], grid=(32, N // RPS, 1),
-                            threadgroup=(32, NSG, 1), output_shapes=[(T, N)],
-                            output_dtypes=[mx.float16])[0]
+    return _kernel(T, K, N, bits_of(w, scales))(
+        inputs=[x, w, scales, biases], grid=(32, N // RPS, 1), threadgroup=(32, NSG, 1),
+        output_shapes=[(T, N)], output_dtypes=[mx.float16])[0]
 
 
 def _selftest(w, scales, biases, max_rows) -> str | None:
@@ -179,6 +264,7 @@ def _selftest(w, scales, biases, max_rows) -> str | None:
     quantized_matmul of it, bit for bit, on these weights (random x at a
     realistic scale, one row of large values); else why not."""
     K = scales.shape[1] * GROUP
+    bits = bits_of(w, scales)
     for T in range(2, max_rows + 1):
         x = mx.random.normal((T, K), key=mx.random.key(T)) * 0.5
         if T >= 3:
@@ -187,7 +273,7 @@ def _selftest(w, scales, biases, max_rows) -> str | None:
         y = rows(x, w, scales, biases)
         for t in range(T):
             one = mx.quantized_matmul(x[t:t + 1], w, scales, biases, transpose=True,
-                                      group_size=GROUP, bits=BITS)
+                                      group_size=GROUP, bits=bits)
             if not mx.array_equal(y[t:t + 1], one).item():
                 d = mx.abs(y[t:t + 1].astype(mx.float32) - one.astype(mx.float32)).max().item()
                 return f"{T} rows: row {t} differs from its solo qmv (max |d| {d:.3g})"
@@ -197,20 +283,20 @@ def _selftest(w, scales, biases, max_rows) -> str | None:
 def tested(w, scales, biases, max_rows: int = MAX_ROWS) -> bool:
     """The self-test's verdict for this weight shape, run once per (K, N) per
     process (scheduler thread or load)."""
-    key = (w.shape[1] * 32 // BITS, w.shape[0])
+    key = (scales.shape[1] * GROUP, w.shape[0], bits_of(w, scales))
     if key not in _OK:
         try:
             _OK[key] = _selftest(w, scales, biases, max_rows)
         except Exception as e:  # noqa: BLE001 - any failure = off for this shape
             _OK[key] = f"error: {e}"
         if _OK[key] is not None:
-            log.warning("mrqmv: self-test FAILED for K %d N %d, those verify calls keep their "
+            log.warning("mrqmv: self-test FAILED for K %d N %d %d-bit, those verify calls keep their "
                         "old path: %s", *key, _OK[key])
     return _OK[key] is None
 
 
 def install(lm, max_rows: int, fused=()) -> tuple[int, int]:
-    """Marks every 4-bit g64 quantized linear of `lm` whose shape passes the
+    """Marks every 4 / 5 / 6 / 8-bit g64 quantized linear of `lm` whose shape passes the
     self-test (module.__dict__["_qmv"] = True) and the fused GDN in-projection
     groups `fused` hands over ((module, [(member positions, w, scales, biases,
     split), ...], ids of the four modules) -> its __dict__["_qmv_fused"]: the
