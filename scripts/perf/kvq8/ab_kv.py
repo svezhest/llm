@@ -176,7 +176,7 @@ def run(messages, rid, mode, max_tokens):
         time.sleep(0.05)
     acc = [int(x) for x in DRAFT.accept_lens] if DRAFT is not None and eng.draft is not None else []
     dt = times[-1] - times[0] if len(toks) > 2 else 0.0
-    return dict(id=rid, prompt=len(pids), reused=r.reused, n=len(toks), end=list(end)[:2],
+    return dict(id=rid, prompt=len(pids), reused=r.reused, n=len(toks), end=list(end)[:2], tokens=toks,
                 ttft=round(times[0] - t0, 2) if times else None,
                 tps=round((len(toks) - 1) / dt, 2) if dt else None, rounds=len(acc),
                 accepted=round(sum(acc) / len(acc), 2) if acc else None,
@@ -222,6 +222,21 @@ for ctx in a.contexts:
                 show(o)
                 res.append(o)
 
+print("\nidentity (tokens == the variant's first plain run):", flush=True)
+for ctx in a.contexts:
+    for v in a.variants:
+        os_ = [o for o in res if o["ctx"] == ctx and o["variant"] == v and o["mode"] != "prefill"]
+        ref = next((o["tokens"] for o in os_ if o["mode"] == "plain"), None)
+        for o in os_:
+            o["same_as_plain"] = ref is not None and o["tokens"] == ref
+        print(f"{ctx:6d} {v:5s} " + " ".join(f"{o['mode']}{o['round']}={'=' if o['same_as_plain'] else 'x'}"
+                                             for o in os_), flush=True)
+    toks = {v: next((o["tokens"] for o in res if o["ctx"] == ctx and o["variant"] == v and o["mode"] == "plain"),
+                    None) for v in a.variants}
+    print(f"{ctx:6d} plain answers equal across variants: "
+          + ", ".join(f"{v}={'=' if toks[v] == toks[a.variants[0]] else 'x'}" for v in a.variants), flush=True)
+for o in res:
+    o.pop("tokens", None)
 print("\nmedians (prefill: TTFT s; plain / dflash: tok/s, DFlash ms per round)", flush=True)
 summary = {}
 for ctx in a.contexts:
