@@ -119,7 +119,8 @@ accepted + 1 per round / round wall time:
   MTP flushes its pending pairs), so a drafter that was not used looks slower than it is and
   plain wins the comparison (round times of 293 / 481 ms on the hybrid rows). A fix would
   measure steady-state rounds only and add hysteresis; not done (no GPU time left), so the
-  recommendation is one drafter per worker.
+  recommendation is one drafter per worker. (2026-11-17: this explanation does not hold,
+  see "`QWEN_DRAFT=auto`" below.)
 
 Derived absolute numbers (ratio × the cool-machine plain decode measured in the same
 process's warm-up, 18.4 tok/s on code-2k) [D], against the cross-framework smoke of
@@ -171,19 +172,127 @@ Defaults changed: `QWEN_MTP_K` 3 → 0 (adaptive; only read with an MTP drafter,
 k = 3 was never the best measured setting). Everything else stays opt-in: `QWEN_VERIFY_QMV`
 `0` (bit-exact by its self-test, but its oQ4e gain rests on one pair), `QWEN_MTP_KMAX` 4.
 
+## `QWEN_DRAFT=auto`: one setting, the chooser rewritten (2026-11-17, GPU gate pending)
+
+Status: code + CPU tests on branch `chooser`; **nothing below is measured on the GPU yet**
+(the tables are laid out, cells empty). [M] here = read from the raw files of the runs above.
+
+**The diagnosis above was wrong** [M, `raw/mtp_oq4e_greedy_a.json`]. The "round times of
+293 / 481 ms" on the hybrid rows are `ab_mtp.py` dividing the decode time by the drafter
+rounds only (the plain steps' time included, their count not); the drafter rounds of those
+requests took 150–166 ms, as alone. The catch-up after a switch is cheap (DFlash's context
+positions pass `fc` + norm + the k/v projections, not its layers). What lost the rounds: the
+chooser compared a noisy average (EMA 0.2) of the arm in use with the *frozen* estimates of
+the arms not in use, frozen at the dip at which each lost, and re-probed them only after 64
+tokens. The plain arm has no noise, so it collected the rounds (91 / 179 of 256 tokens)
+although both drafters beat it.
+
+**The chooser now** (`mtp.Chooser`, `mtp.Shadows`, `mtp.Clock`, `mtp.Avg`; `_spec`):
+
+- *Shadow drafts.* An arm not taken still drafts now and then, without a verify; its drafts
+  are scored against the tokens the request emits after the same anchor (the matching
+  prefix = what a verify would have kept; greedy: the target's argmax, sampling: its
+  draws). Cost: the draft alone (MTP ~3.5 ms per draft, a DFlash block ~17 ms [M: above, `drafter.md`],
+  against 110–180 ms rounds). Every round until an arm has 3 drafts and while it looks
+  better than the current arm from < 2.5 recent samples (a trial); else as often as costs
+  1 % of the time (an arm within 0.8 of the current rate) or 0.4 %.
+- *Tokens per round*: means weighted exp(−age / 2.5 s) with a prior worth 2 samples
+  (DFlash 3.0 tokens; the head 0.5 per depth, at its best draft count); plain = 1.
+- *Round times*: process-wide per request class (context size class < 6K / 24K / 64K / more,
+  sampling, thinking budget), from steady rounds only (the same arm as the round before, no
+  shadow drafts, a full block), kept as drift × per-kind constant so that the kinds not
+  taken follow the machine's drift. A class's first request takes each arm 3 rounds (probe).
+- *Choice*: a request starts on the MTP head (the smallest loss when it is the wrong arm:
+  the oQ4e costs above, plain 80 : MTP k=1 113 : DFlash 180 ms, give a worst-case regret of
+  ~18 % for the head, 33 % for DFlash, 53 % for plain [D]); the current arm is left only for
+  one whose rate is 2 % higher and (a drafter) known from ≥ 2.5 recent samples.
+- *The plain arm* is a burst of 8 plain steps with the plain loop's step-ahead (2 while a
+  drafter is on trial); penalties are counted as in the batch path, a thinking budget ends
+  the burst where it forces a token.
+- `QWEN_DRAFT=auto` (config `_auto`, `engine._auto_drafters`): the drafters are found next
+  to the model dir by their `config.json` (hidden size / layers / vocabulary of the target;
+  `QWEN_DRAFT_DFLASH` / `QWEN_DRAFT_MTP` name one, `none` drops one; the load log says what
+  was found), and the defaults become `QWEN_DRAFT_SAMPLING=1`, `QWEN_SPEC_PLAIN=1`,
+  `QWEN_LOOKUP=draft`, `QWEN_VERIFY_QMV=3`. One drafter or none: it loads and runs (none:
+  the plain loop). The explicit knobs stay (the A/B variants).
+- Quantized KV: MTP and hybrid rounds follow DFlash's rules (no block across
+  `quantized_kv_start`, requantize after every round and plain step). The head's own cache
+  stays fp16 (4 KiB/token, now charged to quantized rows too); a prefill slab enters the
+  head 512 rows at a time (its attention scores are rows × keys × heads: a 2048-row slab at
+  32K keys was a 3 GiB transient — a candidate for the fp16 32K Metal OOM, not confirmed).
+
+CPU tests (`tests/test_mtp.py`, `tests/test_kvq8.py`; tiny models): the chooser's rules
+(start arm, margin, evidence, trial, shadow cadence, probe, the old failure as a regression
+test), `Avg` / `Clock` / `Shadows`; scheduler level: shadow drafts leave the answer and both
+drafters' state as their own rounds would (the head's cache == the head over the real
+pairs); plain bursts × penalties × thinking budget == the plain loop; sampling through all
+three arms is reproducible by seed; q8 KV: MTP (k 0 / 1 / 3) and the hybrid in every arm
+order == plain greedy at 6–7 positions of `quantized_kv_start`, the final KV == the plain
+loop's (up to lone one-level flips of q8 elements); drafter discovery.
+
+### Gate (to run; `scripts/perf/mtp/gate_auto.sh`, in-run interleaved, ratio to plain of the same pair)
+
+    WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh floor   # ~8 min
+    WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh dump    # ~8 min + CPU replay
+    WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh gate    # ~45 min (GATE_MODES=sampling | greedy: half)
+    WEIGHTS=<weights> PERF_OUT=<dir> scripts/perf/mtp/gate_auto.sh q8      # ~20 min, QWEN_KV_BITS=8, 8K context
+
+Pass: `auto` ≥ 0.97 × the best of {plain, dflash, mtp0+q} in every cell (`gate_table.py`).
+Cells: greedy / sampling (T 0.6, top_p 0.95, top_k 20) × code-2k-0, en-2k-0, ru-2k-0,
+short-en, short-ru (`prompts2k.SHORT`); 256 tokens, thinking off, 2 rounds.
+
+| cell | dflash × plain | mtp0+q × plain | auto × plain | plain tok/s | pairs | auto / best | |
+|---|---|---|---|---|---|---|---|
+| code-2k-0@s | | | | | | | |
+| en-2k-0@s | | | | | | | |
+| ru-2k-0@s | | | | | | | |
+| short-en@s | | | | | | | |
+| short-ru@s | | | | | | | |
+| code-2k-0 | | | | | | | |
+| en-2k-0 | | | | | | | |
+| ru-2k-0 | | | | | | | |
+| short-en | | | | | | | |
+| short-ru | | | | | | | |
+| code-8k-0 q8 | | | | | | | |
+| ru-8k-0 q8 | | | | | | | |
+| code-8k-0@s q8 | | | | | | | |
+| ru-8k-0@s q8 | | | | | | | |
+
+The arms `auto` took (share of rounds / of tokens; shadow drafts and switches per request):
+
+| cell | rounds: dflash / mtp / plain / lookup | tokens: dflash / mtp / plain / lookup | shadows (dflash / mtp) | switches |
+|---|---|---|---|---|
+| (as above) | | | | |
+
+Floor (`floor`): the plain arm alone inside `_spec` (`pplain`) vs the plain loop, pass ≥ 0.97:
+
+| cell | pplain × plain | pairs |
+|---|---|---|
+| en-2k-0@s / short-ru@s / en-2k-0 / short-ru | | |
+
+Replay (`dump` → `chooser_sim.py`, CPU): the worker's own `Chooser` / `Shadows` / `MTPDraft`
+classes over both drafters' drafts at every position of each cell's answer, with the round
+times of the run's clock; `--set TAU=…,MARGIN=…,WARM=…,NEED=…,START=dflash/mtp/plain` to try
+constants without the GPU, `--stitch a,b` for a change of the text's kind inside a request.
+
 ## Open
 
-- The chooser's switching cost (steady-state round times + hysteresis), then a re-gate: the
-  only way to beat llama.cpp on code and Russian with one worker.
+- The `QWEN_DRAFT=auto` gate (section above): nothing of the rewritten chooser is measured.
+  Its constants (start arm, priors, TAU, margin, shadow budget) are first guesses from the
+  greedy costs above; the replay on a dump is the way to set them.
 - oQ4e sampling A/B (plain / DFlash / MTP) and an identity run (`--ident mtp0+q,mtp1+q`).
 - mrqmv rows ≥ 4 spill registers; T = 4..5 verify blocks stay on mrqmm (×1.6 of a row).
 - The MTP draft step's lm_head (6-bit, 0.95 GB on oQ4e) is most of a draft step's ~3.5 ms; a
   reduced draft vocabulary would need frequency ranks (Russian tokens sit at ids ≥ 150K).
-- The plain arm is synchronous (no step-ahead).
+- The plain arm inside `_spec` captures the drafters' hidden states every step (their
+  context): its cost against the plain loop is the `floor` run.
+- `QWEN_DRAFT=auto` without a drafter is the plain loop: lookup rounds between plain steps
+  (`QWEN_LOOKUP=1`) are not turned on by it (fp16 KV only, not gated on the 9B).
 
 ## Files
 
 `src/worker/qwen_worker/mtp.py`, `sched_spec.py` (MTP / chooser hooks), `engine.py`,
 `kernels.py` (`_setup_verify_qmv`, verify hooks), `src/worker/mrqmv.py`,
 `tests/test_mtp.py`, `tests/test_mrqmv.py` (GPU), `scripts/perf/mtp/` (`split_mtp.py`,
-`ab_mtp.py`, `round_prof.py`), raw runs in `raw/mtp_*`.
+`ab_mtp.py`, `round_prof.py`, `gate_auto.sh`, `gate_table.py`, `chooser_sim.py`), raw runs in
+`raw/mtp_*`; `tests/test_kvq8.py` (q8 parity of MTP / hybrid rounds).

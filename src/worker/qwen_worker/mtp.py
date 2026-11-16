@@ -164,6 +164,7 @@ class MTPDraft:
     # 2 tokens exact qmv, 3..16 mrqmm's flat MMA cost on the 27B)
     KMAX, P0, ALPHA, EXPLORE = 4, 0.5, 0.25, 8
     TAU, PRIOR = 2500.0, 2
+    CHUNK = 512                         # head rows per forward (flush)
 
     def _clock(self):
         return self.clock if self.clock is not None else CLOCK
@@ -250,7 +251,10 @@ class MTPDraft:
             return
         h = self.pend[0] if len(self.pend) == 1 else mx.concatenate(self.pend, axis=1)
         toks = mx.array([self.succ[:r]], dtype=mx.int32)
-        out = self._forward(toks, h[:, :r])
+        # (a prefill slab at a long context: CHUNK rows at a time, the head's
+        # attention scores are rows x keys x heads)
+        for lo in range(0, r, self.CHUNK):
+            out = self._forward(toks[:, lo:lo + self.CHUNK], h[:, lo:min(r, lo + self.CHUNK)])
         rest = h[:, r:]
         self.pend, self.npend = ([rest] if rest.shape[1] else []), rest.shape[1]
         self.succ = self.succ[r:]
@@ -381,7 +385,7 @@ class Chooser:
     PRIOR = 2
     PRIORS = {"dflash": 3.0}
     START = ("mtp", "dflash", "plain")
-    MARGIN = 0.05
+    MARGIN = 0.02                               # (the gate allows 3 % below the best arm)
     WARM, NEED = 3, 2.5
     NEAR, FAR, CLOSE = 0.01, 0.004, 0.8
     COST = {"dflash": 0.10, "mtp": 0.06}        # a shadow draft, of the arm's round time

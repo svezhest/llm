@@ -257,8 +257,14 @@ def med(xs):
     return statistics.median(xs) if xs else None
 
 
-res = {"args": vars(a), "model": os.environ["QWEN_MODEL"], "draft": os.environ.get("QWEN_DRAFT"),
-       "draft_mtp": os.environ.get("QWEN_DRAFT_MTP"), "speed": [], "ident": [], "dump": []}
+def _name(p):                           # (no local paths in the JSON)
+    return os.path.basename(os.path.normpath(p)) if p and os.sep in p else p
+
+
+res = {"args": dict(vars(a), json=_name(a.json)), "model": _name(os.environ["QWEN_MODEL"]),
+       "draft": _name(os.environ.get("QWEN_DRAFT")), "draft_mtp": _name(os.environ.get("QWEN_DRAFT_MTP")),
+       "kv_bits": os.environ.get("QWEN_KV_BITS"), "loaded": dict(dflash=D is not None, mtp=M is not None),
+       "speed": [], "ident": [], "dump": []}
 VS = a.variants.split(",")
 
 
@@ -269,7 +275,8 @@ def dump():
     os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
     out = dict(res, speed=[{k: x for k, x in o.items() if k != "tokens"} for o in res["speed"]],
                clock={str(t): {"g": c.g, "ms": {str(k): c.ms(k) for k in c.c}}
-                      for t, c in W.CLOCK.sub.items()})
+                      for t, c in W.CLOCK.sub.items()},
+               peak_gb=mx.get_peak_memory() / 1e9, active_gb=mx.get_active_memory() / 1e9)
     json.dump(out, open(a.json + ".tmp", "w"), indent=1)
     os.replace(a.json + ".tmp", a.json)
 
@@ -277,13 +284,6 @@ def dump():
 if not a.skip_speed or a.dump:
     sv("plain", KEYS[0])
     run(KEYS[0], "warm", "plain", max_tokens=a.warm_tokens)
-    # every variant once per mode (kernels compiled; the chooser's round times
-    # per class of requests: its probe rounds are not the gate's)
-    for key in [next(k for k in KEYS if k.endswith("@s") == m) for m in sorted({k.endswith("@s") for k in KEYS})]:
-        for v in VS:
-            sv(v, key)
-            o = run(key, f"warm-{v}", v, max_tokens=a.warm_tokens)
-            print(f"warm {key} {v}: n={o['n']} tps={o['tps']:.2f}", flush=True)
 if a.dump:
     for key in KEYS:
         sv("dump", key)
@@ -292,6 +292,14 @@ if a.dump:
         res["dump"].append(o)
         print(f"dump {key}: n={o['n']} rounds={len(o['trace'] or [])} tps={o['tps']:.2f}", flush=True)
         dump()
+if not a.skip_speed:
+    # every variant once per mode (kernels compiled; the chooser's round times
+    # per class of requests: its probe rounds are not the gate's)
+    for key in [next(k for k in SPEED if k.endswith("@s") == m) for m in sorted({k.endswith("@s") for k in SPEED})]:
+        for v in VS:
+            sv(v, key)
+            o = run(key, f"warm-{v}", v, max_tokens=a.warm_tokens)
+            print(f"warm {key} {v}: n={o['n']} tps={o['tps']:.2f} arms={o.get('arms', '')}", flush=True)
 if not a.skip_speed:
     for rnd in range(a.rounds):
         for ki, key in enumerate(SPEED):

@@ -428,7 +428,9 @@ LOOKUP_BURST = max(1, int(os.environ.get("QWEN_LOOKUP_BURST", "16")))
 # position's head entry is recomputed from the target's hidden state (default:
 # the chained steps' entries are kept, as mlx-vlm does). QWEN_DRAFT_HYBRID with
 # both drafters: "1" = per round the one with the larger expected tokens per
-# second (mtp.Chooser), "dflash" / "mtp" = always that one.
+# second (mtp.Chooser: the arm not taken drafts now and then without a verify,
+# scored against the emitted tokens), "dflash" / "mtp" / "plain" = always that
+# arm (tools).
 DRAFT_MTP = os.environ.get("QWEN_DRAFT_MTP", "")
 MTP_K = int(os.environ.get("QWEN_MTP_K") or "0")
 # QWEN_MTP_K=0: adaptive (mtp.MTPDraft.next_k), QWEN_MTP_COST = one draft's cost
@@ -439,10 +441,12 @@ MTP_COST = float(os.environ.get("QWEN_MTP_COST") or "0.06")
 MTP_KMAX = max(1, min(15, int(os.environ.get("QWEN_MTP_KMAX") or "4")))
 MTP_REFEED = os.environ.get("QWEN_MTP_REFEED", "0") == "1"
 DRAFT_HYBRID = os.environ.get("QWEN_DRAFT_HYBRID") or "1"
-# QWEN_SPEC_PLAIN=1: plain steps are an arm of the per-round choice (mtp.Chooser)
-# beside the loaded drafter(s): a request whose drafts are rarely accepted
-# (short Russian prose on the 27B: DFlash below plain) decodes mostly plain,
-# re-probing the drafters every mtp.Chooser.EXPLORE tokens.
+# QWEN_SPEC_PLAIN=1 (the default under QWEN_DRAFT=auto): plain steps are an arm
+# of the per-round choice (mtp.Chooser) beside the loaded drafter(s): a request
+# whose drafts are rarely accepted (short Russian prose on the 27B: DFlash
+# below plain) decodes in bursts of plain steps with the plain loop's
+# step-ahead, the drafters still drafting now and then beside them (shadow
+# drafts: no verify, scored against the emitted tokens).
 SPEC_PLAIN = _auto("QWEN_SPEC_PLAIN", "1", "0") == "1"
 # QWEN_SPEC_TRACE=1 (tools): _spec keeps one tuple per round in
 # req.spec_stats["trace"]: (arm, block tokens, drafts accepted, start s, wall ms,

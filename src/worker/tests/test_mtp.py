@@ -86,6 +86,7 @@ def test_oracle_exact_and_the_heads_cache(dense, spec, monkeypatch, k, refeed):
     gives (the chained entries never survive)."""
     monkeypatch.setattr(worker, "MTP_K", k)
     monkeypatch.setattr(worker, "MTP_REFEED", refeed)
+    monkeypatch.setattr(worker.MTPDraft, "CHUNK", 7 if k % 2 else 512)   # the prefill slab in pieces
     ids = prompts([25], 31)[0]
     ref = plain(dense, ids, 30)
     mt = Oracle(head(dense), dense, ids + ref[0])
@@ -230,11 +231,11 @@ def test_chooser_rate_margin_and_probe(clock):
     assert c.pick() == "dflash"
     dflash(1.9)                                          # 10.6: the head
     assert c.pick() == "mtp"
-    dflash(1.8 * 180 / 115 * 1.04)                       # 4 % better: not worth a switch
+    dflash(1.8 * 180 / 115 * (1 + c.MARGIN - 0.01))      # a little better: not worth a switch
     assert c.pick() == "mtp"
-    dflash(1.8 * 180 / 115 * 1.06, e=1.0)                # better, from one sample: not yet
+    dflash(1.8 * 180 / 115 * (1 + c.MARGIN + 0.01), e=1.0)       # better, from one sample: not yet
     assert c.pick() == "mtp" and c.shadows() == ["dflash"]       # (a trial: drafted every round)
-    dflash(1.8 * 180 / 115 * 1.06)
+    dflash(1.8 * 180 / 115 * (1 + c.MARGIN + 0.01))
     assert c.pick() == "dflash"
     dflash(1.0)
     c.mtp.tok = 1.0                                      # both below a plain step
