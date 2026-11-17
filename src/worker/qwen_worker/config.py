@@ -301,7 +301,7 @@ FP16 = os.environ.get("QWEN_FP16", "1") == "1"
 # (mtp.Chooser: DFlash / the MTP head's gated rounds, + prompt lookup rounds),
 # sampling and penalty requests included. It sets the defaults of the knobs
 # below it stands for - QWEN_DRAFT_SAMPLING=1, QWEN_SPEC_PLAIN=1,
-# QWEN_LOOKUP=draft, QWEN_VERIFY_QMV=3 - each still overridable (the A/B
+# QWEN_LOOKUP=draft, QWEN_VERIFY_QMV=2 - each still overridable (the A/B
 # tools). A model with one drafter or none loads and runs (none: plain decode).
 DRAFT = os.environ.get("QWEN_DRAFT", "")
 DRAFT_DFLASH = os.environ.get("QWEN_DRAFT_DFLASH", "")
@@ -454,7 +454,9 @@ SPEC_TRACE = os.environ.get("QWEN_SPEC_TRACE", "0") == "1"
 # whose every row is MLX's solo qmv bit for bit (self-tested per shape at load):
 # the weights read once for the T rows, instead of mrqmm's MMA (rows padded
 # to 8, a flat ~x1.6 of a solo row) or mlx-vlm's exact kernels (T unpacks).
-VERIFY_QMV = int(_auto("QWEN_VERIFY_QMV", "3", "0"))     # QWEN_DRAFT=auto: 3
+# On the 27B's whole forward a block of 2 costs ~x1.2-1.27 of a step through
+# mrqmv, one of 3 ~x1.9-2.05 (mrqmm: ~x1.65-1.7), so auto routes only blocks of 2.
+VERIFY_QMV = int(_auto("QWEN_VERIFY_QMV", "2", "0"))     # QWEN_DRAFT=auto: 2
 
 # Multi-row 8-bit matmul for batched decode (QWEN_MRQMM, default 1, read by
 # mrqmm.install at load; 0 = always quantized_matmul): MLX runs
