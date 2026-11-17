@@ -211,13 +211,31 @@ def test_avg_weights_samples_by_age():
     assert a.mean == pytest.approx(1.0, abs=0.1) and a.e == pytest.approx(1.0, abs=0.05)
 
 
+def test_avg_prior_ages_from_its_first_sample():
+    """The prior ages from the first call, not from t = 0: `now` is
+    perf_counter ms (until 2026-11-18 a request's first DFlash draft wiped
+    it). se(): the mean's relative standard error, the prior a guess as
+    wide as its mean (1 / sqrt(n) alone), the samples' own spread after."""
+    a = worker.Avg(3.0, 2)
+    assert a.se() == pytest.approx(2 ** -0.5)
+    a.add(1.0, 7.3e8, 2500.0)                            # an unlucky first draft at perf_counter time
+    assert a.mean == pytest.approx(7.0 / 3) and a.se() > 0.4
+    for i in range(60):                                  # a steady 5 a round: the prior ages out
+        a.add(5.0, 7.3e8 + 50.0 * (i + 1), 2500.0)
+    assert a.mean == pytest.approx(5.0, abs=0.1) and a.se() < 0.05
+    b = worker.Avg(3.0, 2)
+    for i, x in enumerate([1, 8] * 20):                  # DFlash on code: 0 or all 7 kept
+        b.add(float(x), 50.0 * i, 2500.0)
+    assert 0.08 < b.se() < 0.2                           # sd 3.5 / mean 4.5 over ~30 rounds of weight
+
+
 def test_chooser_head_is_the_default_arm(clock):
     """With the gated head: DFlash never timed is probed PROBE rounds (the
     head never is), the head is taken until it is measured (a later request
     of the class starts on DFlash, the head's rate known), DFlash wins only
-    by a MARGIN known from recent samples, and the head is taken back on the
-    margin alone; its rate (tokens / ms of its rounds) follows the drift
-    while it is not taken; nothing else is a plain arm."""
+    when its rate less one standard error is a MARGIN higher, and the head
+    is taken back on the margin alone; its rate (tokens / ms of its rounds)
+    follows the drift while it is not taken; nothing else is a plain arm."""
     assert worker.Chooser(("dflash", "plain")).pick() == "dflash"     # (without the head: a plain arm)
     c = worker.Chooser(("dflash", "mtp"), mtp=object())
     P = c.PROBE
@@ -234,16 +252,19 @@ def test_chooser_head_is_the_default_arm(clock):
     assert c.expect("mtp") == (pytest.approx(2.0), pytest.approx(115.0))
     r = 2.0 / 115.0 * 180.0                              # DFlash's tokens per round at the head's rate
 
-    def dflash(tok, e=10.0):
-        c.tok["dflash"].h, c.tok["dflash"].w, c.tok["dflash"].e = tok * 10.0, 10.0, e
+    def dflash(tok, w=40.0, cv=0.6):                     # DFlash's mean from w rounds spread by cv
+        a = c.tok["dflash"]
+        a.h, a.q, a.w, a.e, a.t = tok * w, tok * tok * (1 + cv * cv) * w, w, w, c.t
 
     dflash(1.9)
     assert c.pick() == "mtp"
     dflash(r * (1 + c.MARGIN - 0.01))                    # a little better: not worth a switch
     assert c.pick() == "mtp"
-    dflash(r * (1 + c.MARGIN + 0.01), e=1.0)             # better, from one sample: not yet
+    dflash(r * 1.3, w=4.0)                               # better, from 4 samples: not shown (se 0.3)
     assert c.pick() == "mtp" and c.shadows() == ["dflash"]       # (a trial: drafted every round)
-    dflash(r * (1 + c.MARGIN + 0.01))
+    dflash(r * 1.1)                                      # 10 % better: within its se (0.095)
+    assert c.pick() == "mtp" and c.shadows() == ["dflash"]
+    dflash(r * 1.3)                                      # 1.3 * (1 - 0.095) > 1.02
     assert c.pick() == "dflash" and c.shadows() == []    # (the head is never shadow-drafted)
     dflash(r * 0.95)                                     # the head back: no evidence needed
     assert c.pick() == "mtp"
@@ -255,11 +276,91 @@ def test_chooser_head_is_the_default_arm(clock):
     # the class's next request: the head's arm is known (Clock.arm), so it starts on DFlash
     # and the head takes over as soon as DFlash's own rounds read below it
     c = worker.Chooser(("dflash", "mtp"), mtp=object())
-    assert c.expect("mtp")[0] == pytest.approx(2.0) and c.pick() == "dflash"
+    assert c.expect("mtp")[0] == pytest.approx(2.0)
+    assert [c.pick() for _ in range(P)] == ["dflash"] * P     # its first PROBE rounds: a measurement
     dflash(1.0)
     assert c.pick(now=5e6) == "mtp" and c.switches == 1
     c.timed("mtp", 1.0, 115.0)                           # an unlucky round: the class's rate still weighs
-    assert c.expect("mtp")[0] == pytest.approx((2.0 * c.HEAD_PRIOR + 1.0) / (c.HEAD_PRIOR + 1))
+    assert c.expect("mtp")[0] == pytest.approx((2.0 * c.PRIOR + 1.0) / (c.PRIOR + 1))
+    for _ in range(P - 1):
+        c.timed("mtp", 1.0, 115.0)
+    assert c.expect("mtp")[0] == pytest.approx(1.0)      # PROBE rounds of its own: the guess is gone
+    assert clock.arm[0] == pytest.approx(1.0)
+
+
+def test_chooser_probes_a_stale_head_once(clock):
+    """The class's rate of the head is a guess: on the 9B one measured in a
+    slowed-down request read 2.45 tok / 106 ms against the head's 1.70 / 37
+    and kept English and Russian prose on DFlash (1.6-2.1 tok / 60 ms) for
+    whole requests. A head not timed in the request is probed once, after
+    WAIT rounds of the current arm (PROBE + 1 rounds, no shadow drafts),
+    and keeps the arm when it beats it; where DFlash leads (code) the probe
+    is a measurement: DFlash is taken back at once, with no trial."""
+    clock.add("dflash", 60.0)
+    clock.arm = (2.45, 106.0, clock.g)
+
+    def request(head, dfl, n=120):
+        c = worker.Chooser(("dflash", "mtp"), mtp=object())
+        took, t, prev, probe = [], 0.0, None, []
+        for _ in range(n):
+            k = c.pick(now=t)
+            sh = c.shadows()
+            took.append(k)
+            probe.append(c.probe)
+            tok = head if k == "mtp" else dfl
+            c.done(tok - 1, 1 if k == "mtp" else 7, shadows=sh)
+            for x in sh:
+                c.sample(x, dfl - 1, 7)
+            if k == "mtp" and prev == k:
+                c.timed("mtp", head, 37.0)
+            t += 37.0 if k == "mtp" else 60.0
+            prev = k
+        return c, took, probe
+
+    c, took, probe = request(head=1.7, dfl=2.0)          # prose: 0.046 tok / ms against 0.033
+    W, P = c.WAIT, c.PROBE
+    assert took[:W] == ["dflash"] * W and took[W:W + P + 1] == ["mtp"] * (P + 1)
+    assert probe[W:W + P + 1] == [True] * (P + 1)
+    assert took[W + P + 1:] == ["mtp"] * (len(took) - W - P - 1) and c.switches == 1
+    assert clock.arm[1] == pytest.approx(37.0)           # the class's rate: this request's own
+    clock.arm = (1.2, 37.0, clock.g)                     # (a prose guess) on code: DFlash 4.9 a round
+    c, took, probe = request(head=2.5, dfl=4.9)
+    assert took[W:W + P + 1] == ["mtp"] * (P + 1) and took[W + P + 1:] == ["dflash"] * (len(took) - W - P - 1)
+    assert c.switches == 2 and sum(probe) == P + P + 1   # (the start's and the head's) once a request
+
+
+def test_chooser_lucky_shadows_do_not_switch(clock):
+    """DFlash on prose keeps 0-1 drafts and now and then 6 (9B English under
+    sampling: 1.9 tok / 91 ms against the head's 1.6 / 52): a switch on 2.5
+    recent shadow samples (until 2026-11-18) followed a lucky one, 3 switches
+    a request and up to 31 DFlash rounds. A drafter has to show its gain by
+    one standard error of its tokens per round; the head needs none."""
+    import random
+    rounds, switches = [], []
+    for seed in range(50):
+        rng = random.Random(seed)
+        ck = worker.Clock()
+        ck.add("dflash", 91.0)
+        ck.arm = (1.6, 52.0, ck.g)
+        c = worker.Chooser(("dflash", "mtp"), mtp=object(), clock=ck)
+        t, prev, n, took = 0.0, None, 0, []
+        while n < 256:
+            k = c.pick(now=t)
+            sh = c.shadows()
+            took.append(k)
+            a, h = rng.choice([0, 0, 0, 0, 1, 1, 6]), 1 + (rng.random() < 0.6)
+            c.done(a if k == "dflash" else h - 1, 7 if k == "dflash" else 1, shadows=sh)
+            for x in sh:
+                c.sample(x, rng.choice([0, 0, 0, 0, 1, 1, 6]), 7)
+            if k == "mtp" and prev == k:
+                c.timed("mtp", h, 52.0)
+            n += a + 1 if k == "dflash" else h
+            t += 91.0 if k == "dflash" else 52.0
+            prev = k
+        rounds.append(took.count("dflash"))
+        switches.append(c.switches)
+    rounds.sort()
+    assert sum(switches) / 50 < 2.0 and rounds[45] <= 16    # (the old rule: 3.0, 21)
 
 
 def test_chooser_shadows_cadence(clock):
@@ -329,8 +430,9 @@ def test_chooser_noisy_drafter_keeps_its_rounds(clock):
 
 def test_chooser_switches_on_shadow_samples(clock):
     """DFlash wins by its shadow drafts alone (no round spent on it), and
-    loses again to the head when the text changes; a single good draft of
-    it starts a trial (drafted every round), not a switch."""
+    loses again to the head when the text changes; a good draft of it
+    starts a trial (drafted every round) until its gain is shown by one
+    standard error (here 2x the head's, the old samples aged out: at once)."""
     clock.add("dflash", 180.0)
     c = worker.Chooser(("dflash", "mtp"), mtp=object())
     t, took, drafted = 0.0, [], []
@@ -357,7 +459,7 @@ def test_chooser_switches_on_shadow_samples(clock):
     first = took.index("dflash")
     assert took[-1] == "dflash" and first - i < 64       # (the next far draft, then the trial)
     j = i + drafted[i:].index(True)
-    assert drafted[j:first] == [True] * (first - j) and 2 <= first - j <= 4
+    assert drafted[j:first] == [True] * (first - j) and 1 <= first - j <= 4
     go(40, 0)                                            # 1 tok / 180 ms: the head again
     assert took[-1] == "mtp" and took[-10:].count("dflash") == 0
     assert c.switches == 2

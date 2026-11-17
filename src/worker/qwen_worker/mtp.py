@@ -96,27 +96,40 @@ CLOCK = Clock()
 
 class Avg:
     """The mean of samples weighted exp(-age / tau) (age in ms) with a prior
-    worth `n` samples, which ages like one. `e`: the real samples' weight
+    worth `n` samples, which ages like one from the first call on (until
+    2026-11-18 from t = 0: with `now` in perf_counter ms the prior was gone at
+    the first sample, and DFlash's first draft of a request was its rate).
+    The prior is a guess: it counts as samples spread as widely as its mean
+    (se() of the prior alone: 1 / sqrt(n)). `e`: the real samples' weight
     (how much the mean knows about now)."""
 
-    __slots__ = ("h", "w", "e", "t")
+    __slots__ = ("h", "q", "w", "e", "t")
 
     def __init__(self, prior, n):
-        self.h, self.w, self.e, self.t = prior * float(n), float(n), 0.0, 0.0
+        self.h, self.q, self.w, self.e, self.t = prior * float(n), 2.0 * prior * prior * n, float(n), 0.0, None
 
     def age(self, t, tau):
-        if t > self.t:
+        if self.t is None:
+            self.t = t
+        elif t > self.t:
             d = max(1e-6, math.exp(-(t - self.t) / tau))
-            self.h, self.w, self.e, self.t = self.h * d, self.w * d, self.e * d, t
+            self.h, self.q, self.w, self.e, self.t = self.h * d, self.q * d, self.w * d, self.e * d, t
         return self.e
 
     def add(self, x, t, tau):
         self.age(t, tau)
-        self.h, self.w, self.e = self.h + x, self.w + 1.0, self.e + 1.0
+        self.h, self.q, self.w, self.e = self.h + x, self.q + x * x, self.w + 1.0, self.e + 1.0
 
     @property
     def mean(self):
         return self.h / self.w
+
+    def se(self):
+        """The mean's standard error relative to it (the weights as counts)."""
+        m = self.h / self.w
+        if m <= 0.0:
+            return float("inf")
+        return math.sqrt(max(0.0, self.q / self.w - m * m) / self.w) / m
 
 
 class MTPDraft:
@@ -525,14 +538,14 @@ class Chooser:
 
     The head's arm is measured as it runs: tokens over wall time of its
     steady rounds, decayed over TAU ms, scaled by the Clock's drift since
-    its last sample when it is not the current arm. It is the start and the
-    default arm: it needs no evidence to be taken back, is never probed and
-    never shadow-drafted (its gate already reads the head's confidence every
-    round). The others: wall time per round from the request class's Clock
-    (process-wide, steady rounds only: _spec leaves out a round after a
-    switch, whose drafter catches up on the positions it missed, and rounds
-    with shadow drafts); tokens per round (1 + accepted drafts) as means over
-    the last TAU ms (Avg), plain exactly 1.
+    its last sample when it is not the current arm. It is the default arm:
+    taken on its rate alone, never shadow-drafted (its gate already reads
+    the head's confidence every round). The others: wall time per round from
+    the request class's Clock (process-wide, steady rounds only: _spec leaves
+    out a round after a switch, whose drafter catches up on the positions it
+    missed, and rounds with shadow drafts); tokens per round (1 + accepted
+    drafts) as means over the last TAU ms (Avg, from a prior worth PRIOR
+    rounds), plain exactly 1.
 
     A drafter that is not taken is still sampled: shadows() names the ones
     to draft this round WITHOUT verifying; their drafts are scored against
@@ -540,33 +553,43 @@ class Chooser:
     verify would have kept, at the cost of the draft alone (27B: a DFlash
     block ~17 ms against a 110-180 ms round). A drafter is drafted every
     round until it has WARM drafts and while it looks better than the
-    current arm without the samples to say so (below NEED: a trial); else as
-    often as its drafts cost NEAR of the time (an arm within CLOSE of the
-    current one's rate) or FAR.
+    current arm without having shown it (a trial); else as often as its
+    drafts cost NEAR of the time (an arm within CLOSE of the current one's
+    rate) or FAR.
 
-    The head's arm is the first one until it is measured in the request's
-    class (Clock.arm: its rate in the class's last request, the weight of
-    HEAD_PRIOR rounds in the next one, decayed from the request's first
-    sample on - a head left after 4 unlucky rounds is never sampled again,
-    and with the prior gone at its first sample short English prose stayed on
-    DFlash 11 % behind it); with that known a request starts on the
-    first arm of START it has - DFlash: where it leads (code) no round is
-    spent finding that out, where it loses its own first rounds say so and
-    the head's arm, which needs no evidence, takes over. The current arm is
-    left only for one whose rate is MARGIN higher and, a drafter other than
-    the head, known from >= NEED recent samples. An arm other than the head
-    never timed in this class of requests is taken PROBE rounds first."""
+    The current arm is left for the head when the head's rate is MARGIN
+    higher; for a drafter only when its rate less one standard error of its
+    tokens per round is (Avg.se: DFlash's rounds spread with a CV of
+    0.5-0.65; a switch on 2.5 samples, as until 2026-11-18, followed a lucky
+    draft on prose and an unlucky one on code: 7-9 switches a request).
+
+    The head's arm starts a request from the class's last rate (Clock.arm),
+    a guess worth PRIOR rounds; with that known a request starts on the
+    first arm of START it has, PROBE rounds (DFlash: where it leads, code,
+    no round is spent finding that out; where it loses its own first rounds
+    say so and the head takes over; on the 9B 43 % of code rounds keep 0-1
+    drafts, and one such first round sent the request to the head). The guess stands only until the request has timed
+    PROBE rounds of the head: a carried rate was 2x low on the 9B (measured
+    in a slowed-down request, rescaled by the Clock's drift only in part)
+    and kept two prose requests on DFlash 22-40 % behind the head. So a
+    head not timed in this request is probed once, after WAIT rounds of the
+    current arm: PROBE + 1 rounds (the first one after the switch is not
+    timed), after which the arm left is taken back unless the head beats it
+    by MARGIN (a probe is a measurement, not a switch; where DFlash leads,
+    code, it costs ~3 head rounds a request). The first request of a class
+    starts on the head. An arm other than the head never timed in this class
+    of requests is taken PROBE rounds first."""
 
     TAU = 2500.0
-    PRIOR = 2
-    HEAD_PRIOR = 8                              # rounds: the weight of the class's last rate of the head's arm
+    PRIOR = 2                                   # rounds: the weight of an arm's prior (DFlash's, the head's class rate)
     PRIORS = {"dflash": 3.0}
     START = ("dflash", "mtp", "plain")
     MARGIN = 0.02                               # (the gate allows 3 % below the best arm)
-    WARM, NEED = 3, 2.5
+    WARM = 3
     NEAR, FAR, CLOSE = 0.01, 0.004, 0.8
     COST = {"dflash": 0.10}                     # a shadow draft, of the arm's round time
     PROBE = 3
+    WAIT = 8                                    # rounds of the current arm before the head's probe
     BURST, SHORT = 8, 2
 
     def __init__(self, kinds, mtp=None, clock=None, priors=None):
@@ -576,10 +599,11 @@ class Chooser:
         self.clock = clock if clock is not None else CLOCK
         pri = dict(self.PRIORS, **(priors or {}))
         self.tok = {k: Avg(pri.get(k, 2.0), self.PRIOR) for k in kinds}
-        self.m = [0.0, 0.0, 0.0, 0.0, 1.0]      # the head's arm: decayed tokens, ms, rounds; t; Clock g
-        if self.head and self.clock.arm is not None:
-            tok, ms, g = self.clock.arm
-            self.m = [tok * self.HEAD_PRIOR, ms * self.HEAD_PRIOR, float(self.HEAD_PRIOR), None, g]
+        self.m = [0.0, 0.0, 0.0, None, 1.0]     # the head's arm in this request: decayed tokens, ms, rounds; t; Clock g
+        self.guess = self.clock.arm if self.head else None  # (tokens, ms per round, g): the class's last rate
+        self.own = 0                            # the head's timed rounds in this request
+        self.back = None                        # the arm a probe of the head left
+        self.tried = False                      # the head probed in this request
         self.n = {k: 0 for k in kinds}          # rounds taken
         self.got = {k: 0 for k in kinds}        # tokens of those rounds
         self.shadowed = {k: 0 for k in kinds}   # shadow drafts
@@ -594,30 +618,41 @@ class Chooser:
         if not (self.head and k == "mtp") or ms <= 0.0:
             return
         m = self.m
-        if m[3] is None:                        # the class's prior: it ages from this request's first sample
-            m[3] = self.t
-        d = math.exp(-max(0.0, self.t - m[3]) / self.TAU)
+        d = 1.0 if m[3] is None else math.exp(-max(0.0, self.t - m[3]) / self.TAU)
         m[0], m[1], m[2] = m[0] * d + tokens, m[1] * d + ms, m[2] * d + 1.0
-        m[3], m[4] = max(m[3], self.t), self.clock.g
-        self.clock.arm = (m[0] / m[2], m[1] / m[2], m[4])
+        m[3], m[4] = self.t if m[3] is None else max(m[3], self.t), self.clock.g
+        self.own += 1
+        tok, per = self.expect("mtp")
+        self.clock.arm = (tok, per, self.clock.g)
 
     def expect(self, k):
         """(tokens per round, ms per round or None: never timed) of arm k."""
         if k == "plain":
             return 1.0, self.clock.ms(k)
         if k == "mtp" and self.head:
-            m = self.m
-            if m[2] <= 0.0:
+            m, g, tok, ms, n = self.m, self.clock.g, 0.0, 0.0, 0.0
+            if m[2] > 0.0:
+                tok, ms, n = m[0], m[1] * g / m[4], m[2]
+            if self.guess is not None and self.own < self.PROBE:
+                t0, ms0, g0 = self.guess
+                tok, ms, n = tok + t0 * self.PRIOR, ms + ms0 * g / g0 * self.PRIOR, n + self.PRIOR
+            if n <= 0.0:
                 return 1.0, None
-            return m[0] / m[2], m[1] / m[2] * self.clock.g / m[4]
+            return tok / n, ms / n
         return self.tok[k].mean, self.clock.ms(k)
 
-    def evidence(self, k):
-        """The weight of arm k's recent samples (a plain step and the head's
-        arm need none)."""
+    def se(self, k):
+        """The relative standard error of arm k's tokens per round (0: a plain
+        step, and the head's arm, which needs no evidence)."""
         if k == "plain" or (k == "mtp" and self.head):
-            return float("inf")
-        return self.tok[k].age(self.t, self.TAU)
+            return 0.0
+        self.tok[k].age(self.t, self.TAU)
+        return self.tok[k].se()
+
+    def shown(self, k, cur):
+        """Has arm k shown (by one standard error) that it beats `cur` by MARGIN?"""
+        r = self.r
+        return r[k] * (1.0 - self.se(k)) > r[cur] * (1.0 + self.MARGIN)
 
     def pick(self, force=None, now=None):
         """The arm of the next round. `now`: ms, any origin (the samples'
@@ -641,12 +676,18 @@ class Chooser:
                 k = "mtp"                       # the head's arm until it is measured
             else:
                 r = self.r = {k: t / ms for k, (t, ms) in ex.items()}
-                k = self.cur
-                if k is None:
+                k, back, self.back = self.cur, self.back, None
+                if k is None:                   # its first PROBE rounds: a measurement
                     k = next((x for x in self.START if x in self.kinds), self.kinds[0])
+                    self.left, self.probe, self.r = self.PROBE - 1, True, None
+                elif back is not None:          # a probe of the head ended: a measurement
+                    k = "mtp" if r["mtp"] > r[back] * (1.0 + self.MARGIN) else back
+                elif self.head and k != "mtp" and not (self.own or self.tried) and self.n[k] >= self.WAIT:
+                    k, self.back, self.left, self.probe, self.tried = "mtp", k, self.PROBE, True, True
+                    self.r = None               # (no shadow drafts: its rounds are timed)
                 else:
-                    ok = [x for x in self.kinds if x != k and r[x] > r[k] * (1.0 + self.MARGIN)
-                          and self.evidence(x) >= self.NEED]
+                    ok = [x for x in self.kinds if x != k and (
+                        r[x] > r[k] * (1.0 + self.MARGIN) if self.se(x) == 0.0 else self.shown(x, k))]
                     if ok:
                         k = max(ok, key=r.get)
         if was is not None and k != was:
@@ -667,8 +708,7 @@ class Chooser:
             if self.n[k] + self.shadowed[k] < self.WARM:
                 hot = True
             else:
-                hot = (r[k] > r[self.cur] * (1.0 + self.MARGIN)
-                       and self.evidence(k) + self.pend[k] < self.NEED)
+                hot = r[k] > r[self.cur] * (1.0 + self.MARGIN) and not self.shown(k, self.cur)
             if hot:
                 self.hot = True
                 out.append(k)
