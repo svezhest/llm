@@ -1,5 +1,5 @@
 {
- "_doc": "Cells per plan: prompts = glob over manifest ids, modes greedy/sample, max_tokens; rounds = passes over the cells in one session; cold_each_round = a new Session tag per round (every pass a cold prefill), else the same prompt again (a prefix-cache hit from round 2 on); turn2 = a follow-up turn on the answer (TTFT through the prompt cache).",
+ "_doc": "Cells per plan: prompts = glob over manifest ids, modes greedy/sample, max_tokens; rounds = passes over the cells in one session; cold_each_round = a new Session tag per round (every pass a cold prefill), else the same prompt again (a prefix-cache hit from round 2 on); turn2 = a follow-up turn on the answer (TTFT through the prompt cache). headline2 = headline with the classes interleaved (code, en, ru, code, ...): a session slows down as the machine warms up (its first minutes run up to 1.5x faster), so in headline's order code gets the cool minutes and prose the warm ones.",
  "smoke": {"rounds": 1, "cells": [
   {"prompts": "code-2k-0", "modes": ["greedy"], "max_tokens": 64, "turn2": true, "turn2_max_tokens": 16},
   {"prompts": "ru-2k-0", "modes": ["greedy"], "max_tokens": 64},
@@ -9,6 +9,18 @@
   {"prompts": "code-2k-*", "modes": ["greedy", "sample"], "max_tokens": 256},
   {"prompts": "en-2k-*", "modes": ["greedy", "sample"], "max_tokens": 256},
   {"prompts": "ru-2k-*", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "code-2k-0", "modes": ["greedy"], "max_tokens": 1024}
+ ]},
+ "headline2": {"rounds": 1, "cells": [
+  {"prompts": "code-2k-0", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "en-2k-0", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "ru-2k-0", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "code-2k-1", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "en-2k-1", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "ru-2k-1", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "code-2k-2", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "en-2k-2", "modes": ["greedy", "sample"], "max_tokens": 256},
+  {"prompts": "ru-2k-2", "modes": ["greedy", "sample"], "max_tokens": 256},
   {"prompts": "code-2k-0", "modes": ["greedy"], "max_tokens": 1024}
  ]},
  "ctx": {"rounds": 2, "cells": [
