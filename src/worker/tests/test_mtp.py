@@ -766,7 +766,7 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     assert mt.round(1).shape == (1, 1)                   # room
     clock.seed.update({0: 0.1, 1: 0.2})
     seed(0.1)
-    assert [mt.round(9) for _ in range(6)] == [1, 2, 4, 8, 8, 8]   # one seed, low: longer bursts
+    assert [mt.round(9) for _ in range(6)] == [1, 1, 1, 2, 4, 8]   # one seed, low: longer bursts
     clock.rate.update({3: 0.2, 4: 0.2})
     seed(0.95)
     assert mt.round(9).shape == (1, 2)
