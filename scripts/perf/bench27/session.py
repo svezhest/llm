@@ -13,7 +13,7 @@ Run it with the worker venv's python (stdlib otherwise): its `tokenizers` counts
 each stream's first chunk (bench_decode.decode_tps); under a plain python3 that count is 1.
 
 Systems (`--list`): ours-plain / ours-dflash (worker + gateway of --code, the 4-bit),
-ours-oq4e-plain / -dflash, mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
+ours-oq4e-plain / -dflash / -mtp / -auto (QWEN_DRAFT=auto), mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
 from the worker venv), llama-q4_0 / llama-q4kxl / llama-q4_0-mtp / llama-q4_0-dflash
 (llama-server), llama-bench-q4_0 / -q4kxl, ppl-mlx-4bit / ppl-mlx-oq4e / ppl-llama-q4_0 /
 ppl-llama-q4kxl (perplexity). --env adds/overrides process env (ours: the worker's);
@@ -78,7 +78,9 @@ def ctx_for(plan_name):
 def ours(ctx, model_dir, draft):
     w = ctx["weights"]
     env = dict(OURS_ENV, QWEN_MODEL=os.path.join(w, ctx["set"].get("model", model_dir)))
-    if draft == "mtp":                           # the target's own MTP head (qwen_worker/mtp.py)
+    if draft == "auto":                          # every drafter found next to the model dir, chosen per round
+        env.update(QWEN_DRAFT="auto")
+    elif draft == "mtp":                         # the target's own MTP head (qwen_worker/mtp.py)
         env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-mtp"), QWEN_MTP_K="0")
     elif draft:
         env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-dflash2"), QWEN_DRAFT_SAMPLING="1")
@@ -185,6 +187,7 @@ SYSTEMS = {
     "ours-oq4e-plain": lambda c: ours(c, "qwen38-27b-mlx-oq4e", False),
     "ours-oq4e-dflash": lambda c: ours(c, "qwen38-27b-mlx-oq4e", True),
     "ours-oq4e-mtp": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "mtp"),
+    "ours-oq4e-auto": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "auto"),
     "mlx-vlm": lambda c: mlx_vlm(c, False),
     "mlx-vlm-dflash": lambda c: mlx_vlm(c, True),
     "llama-q4_0": lambda c: llama(c, "q4_0"),
