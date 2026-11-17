@@ -39,12 +39,12 @@ class Oracle(worker.MTPDraft):
         super().__init__(model, lm)
         self.full, self.wrong, self.script, self.zero = full, wrong, script, False
 
-    def want(self, known, k, T):
+    def depth(self, c1, T, top):
         if self.zero:
-            return False
+            return 0
         if self.script is None:
-            return super().want(known, k, T)
-        return k < self.script[sum(self.ks) % len(self.script)]
+            return super().depth(c1, T, top)
+        return min(top, self.script[sum(self.ks) % len(self.script)])
 
     def round(self, room):
         d = super().round(room)
@@ -699,20 +699,34 @@ def test_prompt_cache_context(dense, spec, monkeypatch):
 
 
 def test_gate_draft_count(dense, monkeypatch, clock):
-    """The gate (MTPDraft.round / want): no draft while (1 + c1) / T(1) <=
-    1 / T(0); drafts added while E / T(k) rises, a draft's confidence read
-    once the next one is queued (the last one read predicts the rest); k = 0
-    rounds in a row lengthen the plain bursts (BURSTS), a drafted round
-    resets them; an unmeasured T scaled by 1 + R * k from the nearest
-    measured k; QWEN_MTP_KMAX the ceiling."""
+    """The gate (MTPDraft.round / depth): the draft count with the most
+    expected tokens per ms, E(k) / T(k), E from the seed's confidence and the
+    class's keep rates of the chained drafts (Clock.rate, moved by record());
+    every PROBE-th drafting round takes all the room; k = 0 rounds in a row
+    lengthen the plain bursts (BURSTS), a drafted round resets them; an
+    unmeasured T scaled by 1 + R * k from the nearest measured k;
+    QWEN_MTP_KMAX the ceiling."""
     monkeypatch.setattr(worker, "MTP_K", 0)
+    monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
     T = [100.0, 137.0, 176.0, 193.0, 210.0]              # the 27B: verify 1.29 / 1.6 / 1.7 / 1.8 + ~7 ms a draft
     for k, ms in enumerate(T):
         clock.add(worker.MTPDraft.kind_of(k), ms)
     mt = worker.MTPDraft(head(dense), dense)
     assert [mt._ms(k) for k in range(5)] == T
-    assert not mt.want([0.35], 0, T) and mt.want([0.4], 0, T)        # 1.37 / 137 vs 1 / 100
-    assert mt.want([0.9], 1, T) and not mt.want([0.6], 1, T)        # 2.71 / 176 > 1.9 / 137
+    assert mt.depth(0.35, T, 4) == 0 and mt.depth(0.4, T, 4) == 1    # 1.35 / 137 < 1 / 100 < 1.4 / 137
+    assert mt.depth(0.95, T, 4) == 1                     # rates 0.5: 2.43 / 176 < 1.95 / 137
+    clock.rate.update({2: 0.9, 3: 0.9, 4: 0.9})
+    assert mt.depth(0.95, T, 4) == 4 and mt.depth(0.95, T, 2) == 2
+    clock.rate.update({3: 0.2, 4: 0.2})
+    assert mt.depth(0.95, T, 4) == 2                     # 2.81 / 176 > 2.98 / 193 > 3.01 / 210
+    clock.rate.update({2: 0.5})
+    mt.record(1, 4)                                      # depth 2 reached and lost; 3, 4 not reached
+    assert clock.rate == {2: pytest.approx(0.4), 3: 0.2, 4: 0.2}
+    mt.record(3, 3)
+    assert clock.rate == {2: pytest.approx(0.52), 3: pytest.approx(0.36), 4: 0.2}
+    mt.record(0, 2)
+    assert clock.rate[2] == pytest.approx(0.52)
+    assert mt.nround == 5                                # (the drafting depth() calls above)
     confs = []
     real = worker.MTPDraft._head
 
@@ -720,34 +734,41 @@ def test_gate_draft_count(dense, monkeypatch, clock):
         return real(self, h)[0], mx.array([[confs.pop(0)]] * h.shape[1], dtype=mx.float32).reshape(1, -1)
     monkeypatch.setattr(worker.MTPDraft, "_head", scripted)
     H = COMMON["hidden_size"]
+    mt.fresh()
     mt.start(0)
     at = [0]
 
     def seed(c, n=1):                                    # one more position and its successor
         mt.round_end(0, None)                            # (the last round's chained entries go)
-        confs[:] = [c] + confs
+        confs[:] = [c] + [0.0] * 8                       # (a chained draft's own confidence: not used)
         mt.push(mx.random.normal((1, n, H)))
         mt.emit_ids(range(at[0] + 1, at[0] + n + 1))
         at[0] += n
 
+    clock.rate.update({2: 0.9, 3: 0.9, 4: 0.9})
     seed(0.95, 4)
-    confs += [0.95] * 3
     d = mt.round(9)
-    assert d.shape == (1, 4) and mt.appended == 3 and not confs     # KMAX
-    seed(0.9)
-    confs += [0.1, 0.5]                                  # draft 2's confidence read with draft 3 queued
-    assert mt.round(9).shape == (1, 3) and confs == []
+    assert d.shape == (1, 4) and mt.appended == 3 and len(confs) == 5    # KMAX
     seed(0.95)
-    confs += [0.95] * 3
     assert mt.round(1).shape == (1, 1)                   # room
     seed(0.1)
     assert [mt.round(9) for _ in range(6)] == [1, 2, 4, 8, 8, 8]   # one seed, low: longer bursts
+    clock.rate.update({3: 0.2, 4: 0.2})
     seed(0.95)
-    confs += [0.95] * 3
-    assert mt.round(9).shape == (1, 4)
+    assert mt.round(9).shape == (1, 2)
     seed(0.2)
     assert mt.round(9) == 1                              # reset by the drafted round
-    assert mt.ks == [7, 1, 0, 1, 2] and mt.stats()["k"] == mt.ks
+    assert mt.ks == [7, 1, 1, 0, 1] and mt.stats()["k"] == mt.ks
+    monkeypatch.setattr(worker.MTPDraft, "PROBE", 2)     # every 2nd drafting round: all the room
+    mt.fresh()
+    clock.rate.clear()
+    seed(0.95)
+    assert mt.round(9).shape == (1, 1)
+    seed(0.95)
+    assert mt.round(9).shape == (1, 4)
+    seed(0.95)
+    assert mt.round(9).shape == (1, 1)
+    monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
     mt.clock = worker.Clock({("mtp", 1): 66.0})
     assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * mt.R) / (1 + mt.R))
     assert mt._ms(0) == pytest.approx(66.0 / (1 + mt.R))
@@ -757,7 +778,6 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     mt.fresh()
     mt.clock = worker.Clock({worker.MTPDraft.kind_of(k): 100.0 for k in range(8)})
     seed(0.5)
-    confs += [0.5] * 6
     assert mt.KMAX == 7 and mt.round(9).shape == (1, 7)
 
 
@@ -815,7 +835,7 @@ def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     its probes and DFlash's shadow drafts - == the head alone == plain
     greedy, the head's own confidences deciding (the random head's are
     0.006..0.014: the Clock's times set, and kept, so that about half of its
-    seeds take a draft and some a second one)."""
+    seeds take a draft and some a second one; every PROBE-th round all four)."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker.Clock, "add", lambda self, kind, ms: None)
@@ -823,7 +843,7 @@ def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     for ids in prompts([25, 40, 7], 37):
         ref = plain(dense, ids, 40)
         for both in (False, True):
-            ck = worker.Clock({worker.MTPDraft.kind_of(k): (100.0, 100.9, 100.905, 101.0, 102.0)[k]
+            ck = worker.Clock({worker.MTPDraft.kind_of(k): (100.0, 100.9, 101.5, 110.0, 120.0)[k]
                                for k in range(5)})
             monkeypatch.setattr(worker, "CLOCK", ck)
             mt = Oracle(head(dense), dense, ids + ref[0])
