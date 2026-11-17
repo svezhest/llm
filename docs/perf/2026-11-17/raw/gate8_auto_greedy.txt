@@ -1,0 +1,100 @@
+loaded in 13 s; active 17.86 GB; dflash DFlash2DraftModel mtp MTPDraft; DRAFT_BLOCK 8 VERIFY_MR True
+warm code-2k-0 plain: n=64 tps=18.90 arms=
+warm code-2k-0 dflash: n=64 tps=32.93 arms={'dflash': [15, 63]}
+warm code-2k-0 mtp1+q: n=64 tps=24.66 arms={'mtp': [32, 63]}
+warm code-2k-0 mtp0+q: n=64 tps=34.08 arms={'mtp': [18, 63]}
+warm code-2k-0 auto: n=64 tps=31.61 arms={'mtp': [14, 60], 'lookup': [2, 3]}
+r0 code-2k-0  plain   n=256 tps= 17.80 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 code-2k-0  dflash  n=256 tps= 36.26 tok/round=4.81 round_ms= 132.7 dflash=53r/55.2% mtp=0r/ 0.0% plain=0 arms={'dflash': [53, 255]} shadows= switches=
+r0 code-2k-0  mtp1+q  n=256 tps= 22.52 tok/round=1.95 round_ms=  86.4 dflash=0r/ 0.0% mtp=131r/95.4% k=[0, 131, 0, 0, 0] acc=[6, 125] burst_tok=0 dropped=0 plain=0 arms={'mtp': [131, 255]} shadows= switches=
+r0 code-2k-0  mtp0+q  n=256 tps= 29.14 tok/round=3.92 round_ms= 134.7 dflash=0r/ 0.0% mtp=65r/73.1% k=[0, 0, 0, 0, 65] acc=[8, 7, 4, 9, 37] burst_tok=0 dropped=0 plain=0 arms={'mtp': [65, 255]} shadows= switches=
+r0 code-2k-0  auto    n=256 tps= 31.00 tok/round=4.55 round_ms= 146.9 dflash=36r/59.0% mtp=20r/63.8% k=[0, 0, 0, 0, 20] acc=[3, 2, 4, 3, 8] burst_tok=0 dropped=0 plain=0 arms={'dflash': [36, 182], 'mtp': [20, 71], 'lookup': [1, 2]} shadows={'dflash': 1, 'mtp': 0} switches=6
+r0 en-2k-0    auto    n=256 tps= 20.58 tok/round=2.52 round_ms= 122.7 dflash=24r/33.1% mtp=77r/56.6% k=[0, 42, 0, 0, 35] acc=[11, 45, 11, 4, 6] burst_tok=0 dropped=0 plain=0 arms={'dflash': [24, 75], 'mtp': [77, 180]} shadows={'dflash': 4, 'mtp': 0} switches=8
+r0 en-2k-0    mtp0+q  n=256 tps= 20.76 tok/round=2.30 round_ms= 110.7 dflash=0r/ 0.0% mtp=111r/57.8% k=[0, 65, 0, 0, 46] acc=[20, 64, 11, 6, 10] burst_tok=0 dropped=0 plain=0 arms={'mtp': [111, 255]} shadows= switches=
+r0 en-2k-0    mtp1+q  n=256 tps= 20.23 tok/round=1.82 round_ms=  90.1 dflash=0r/ 0.0% mtp=140r/82.1% k=[0, 140, 0, 0, 0] acc=[25, 115] burst_tok=0 dropped=0 plain=0 arms={'mtp': [140, 255]} shadows= switches=
+r0 en-2k-0    dflash  n=256 tps= 21.71 tok/round=3.07 round_ms= 141.5 dflash=83r/30.4% mtp=0r/ 0.0% plain=0 arms={'dflash': [83, 255]} shadows= switches=
+r0 en-2k-0    plain   n=256 tps= 16.01 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 ru-2k-0    plain   n=256 tps= 16.08 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 ru-2k-0    dflash  n=256 tps= 13.51 tok/round=1.89 round_ms= 139.8 dflash=135r/12.9% mtp=0r/ 0.0% plain=0 arms={'dflash': [135, 255]} shadows= switches=
+r0 ru-2k-0    mtp1+q  n=256 tps= 20.02 tok/round=1.78 round_ms=  89.1 dflash=0r/ 0.0% mtp=143r/79.0% k=[0, 143, 0, 0, 0] acc=[30, 113] burst_tok=0 dropped=0 plain=0 arms={'mtp': [143, 255]} shadows= switches=
+r0 ru-2k-0    mtp0+q  n=256 tps= 19.78 tok/round=1.80 round_ms=  90.8 dflash=0r/ 0.0% mtp=142r/69.9% k=[0, 135, 0, 0, 7] acc=[31, 109, 1, 1, 0] burst_tok=0 dropped=0 plain=0 arms={'mtp': [142, 255]} shadows= switches=
+r0 ru-2k-0    auto    n=256 tps= 19.29 tok/round=1.86 round_ms=  96.5 dflash=7r/22.4% mtp=130r/75.4% k=[0, 126, 0, 0, 4] acc=[23, 107, 0, 0, 0] burst_tok=0 dropped=0 plain=0 arms={'dflash': [7, 18], 'mtp': [130, 236], 'lookup': [1, 1]} shadows={'dflash': 5, 'mtp': 0} switches=3
+r0 short-en   auto    n=256 tps= 18.28 tok/round=1.75 round_ms=  95.5 dflash=5r/ 2.9% mtp=140r/67.1% k=[1, 136, 0, 0, 4] acc=[39, 100, 1, 0, 0] burst_tok=8 dropped=0 plain=8 arms={'dflash': [5, 6], 'mtp': [141, 249]} shadows={'dflash': 10, 'mtp': 0} switches=7
+r0 short-en   mtp0+q  n=256 tps= 18.91 tok/round=1.75 round_ms=  92.4 dflash=0r/ 0.0% mtp=145r/65.6% k=[1, 141, 0, 0, 4] acc=[42, 103, 0, 0, 0] burst_tok=8 dropped=0 plain=8 arms={'mtp': [146, 255]} shadows= switches=
+r0 short-en   mtp1+q  n=256 tps= 19.74 tok/round=1.73 round_ms=  87.9 dflash=0r/ 0.0% mtp=147r/73.5% k=[0, 147, 0, 0, 0] acc=[39, 108] burst_tok=0 dropped=0 plain=0 arms={'mtp': [147, 255]} shadows= switches=
+r0 short-en   dflash  n=256 tps= 17.29 tok/round=2.34 round_ms= 135.3 dflash=109r/19.3% mtp=0r/ 0.0% plain=0 arms={'dflash': [109, 255]} shadows= switches=
+r0 short-en   plain   n=256 tps= 16.24 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 short-ru   plain   n=256 tps= 16.18 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 short-ru   dflash  n=256 tps= 12.08 tok/round=1.66 round_ms= 137.1 dflash=154r/ 9.5% mtp=0r/ 0.0% plain=0 arms={'dflash': [154, 255]} shadows= switches=
+r0 short-ru   mtp1+q  n=256 tps= 19.17 tok/round=1.72 round_ms=  89.9 dflash=0r/ 0.0% mtp=148r/72.3% k=[0, 148, 0, 0, 0] acc=[41, 107] burst_tok=0 dropped=0 plain=0 arms={'mtp': [148, 255]} shadows= switches=
+r0 short-ru   mtp0+q  n=256 tps= 18.46 tok/round=1.88 round_ms= 101.6 dflash=0r/ 0.0% mtp=134r/66.4% k=[2, 130, 0, 0, 4] acc=[38, 95, 1, 0, 0] burst_tok=24 dropped=0 plain=24 arms={'mtp': [136, 255]} shadows= switches=
+r0 short-ru   auto    n=256 tps= 17.43 tok/round=2.12 round_ms= 121.9 dflash=1r/ 0.0% mtp=116r/64.1% k=[3, 112, 0, 0, 4] acc=[36, 79, 0, 1, 0] burst_tok=56 dropped=0 plain=56 arms={'dflash': [1, 1], 'mtp': [119, 254]} shadows={'dflash': 6, 'mtp': 0} switches=1
+r1 code-2k-0  plain   n=256 tps= 15.26 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r1 code-2k-0  auto    n=256 tps= 32.61 tok/round=4.90 round_ms= 150.4 dflash=52r/56.2% mtp=0r/ 0.0% k=[0, 0, 0, 0, 0] acc=[0] burst_tok=0 dropped=0 plain=0 arms={'dflash': [52, 254], 'lookup': [1, 1]} shadows={'dflash': 0, 'mtp': 0} switches=0
+r1 code-2k-0  mtp0+q  n=256 tps= 26.67 tok/round=3.45 round_ms= 129.2 dflash=0r/ 0.0% mtp=74r/73.0% k=[0, 16, 0, 0, 58] acc=[9, 21, 4, 8, 32] burst_tok=0 dropped=0 plain=0 arms={'mtp': [74, 255]} shadows= switches=
+r1 code-2k-0  mtp1+q  n=256 tps= 21.26 tok/round=1.95 round_ms=  91.6 dflash=0r/ 0.0% mtp=131r/95.4% k=[0, 131, 0, 0, 0] acc=[6, 125] burst_tok=0 dropped=0 plain=0 arms={'mtp': [131, 255]} shadows= switches=
+r1 code-2k-0  dflash  n=256 tps= 32.86 tok/round=4.81 round_ms= 146.4 dflash=53r/55.2% mtp=0r/ 0.0% plain=0 arms={'dflash': [53, 255]} shadows= switches=
+r1 en-2k-0    dflash  n=256 tps= 21.43 tok/round=3.07 round_ms= 143.3 dflash=83r/30.4% mtp=0r/ 0.0% plain=0 arms={'dflash': [83, 255]} shadows= switches=
+r1 en-2k-0    mtp1+q  n=256 tps= 20.20 tok/round=1.82 round_ms=  90.2 dflash=0r/ 0.0% mtp=140r/82.1% k=[0, 140, 0, 0, 0] acc=[25, 115] burst_tok=0 dropped=0 plain=0 arms={'mtp': [140, 255]} shadows= switches=
+r1 en-2k-0    mtp0+q  n=256 tps= 21.71 tok/round=2.52 round_ms= 116.3 dflash=0r/ 0.0% mtp=101r/56.6% k=[0, 44, 0, 0, 57] acc=[18, 47, 13, 11, 12] burst_tok=0 dropped=0 plain=0 arms={'mtp': [101, 255]} shadows= switches=
+r1 en-2k-0    auto    n=256 tps= 21.78 tok/round=3.07 round_ms= 141.1 dflash=83r/30.4% mtp=0r/ 0.0% k=[0, 0, 0, 0, 0] acc=[0] burst_tok=0 dropped=0 plain=0 arms={'dflash': [83, 255]} shadows={'dflash': 0, 'mtp': 0} switches=0
+r1 en-2k-0    plain   n=256 tps= 15.84 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r1 ru-2k-0    plain   n=256 tps= 15.91 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r1 ru-2k-0    auto    n=256 tps= 19.07 tok/round=1.85 round_ms=  96.9 dflash=9r/20.6% mtp=129r/73.8% k=[0, 125, 0, 0, 4] acc=[26, 102, 1, 0, 0] burst_tok=0 dropped=0 plain=0 arms={'dflash': [9, 22], 'mtp': [129, 232], 'lookup': [1, 1]} shadows={'dflash': 3, 'mtp': 0} switches=3
+r1 ru-2k-0    mtp0+q  n=256 tps= 19.80 tok/round=1.80 round_ms=  90.7 dflash=0r/ 0.0% mtp=142r/71.2% k=[0, 136, 0, 0, 6] acc=[31, 109, 1, 1, 0] burst_tok=0 dropped=0 plain=0 arms={'mtp': [142, 255]} shadows= switches=
+r1 ru-2k-0    mtp1+q  n=256 tps= 19.99 tok/round=1.78 round_ms=  89.2 dflash=0r/ 0.0% mtp=143r/79.0% k=[0, 143, 0, 0, 0] acc=[30, 113] burst_tok=0 dropped=0 plain=0 arms={'mtp': [143, 255]} shadows= switches=
+r1 ru-2k-0    dflash  n=256 tps= 13.36 tok/round=1.89 round_ms= 141.4 dflash=135r/12.9% mtp=0r/ 0.0% plain=0 arms={'dflash': [135, 255]} shadows= switches=
+r1 short-en   dflash  n=256 tps= 17.15 tok/round=2.34 round_ms= 136.4 dflash=109r/19.3% mtp=0r/ 0.0% plain=0 arms={'dflash': [109, 255]} shadows= switches=
+r1 short-en   mtp1+q  n=256 tps= 19.77 tok/round=1.73 round_ms=  87.8 dflash=0r/ 0.0% mtp=147r/73.5% k=[0, 147, 0, 0, 0] acc=[39, 108] burst_tok=0 dropped=0 plain=0 arms={'mtp': [147, 255]} shadows= switches=
+r1 short-en   mtp0+q  n=256 tps= 18.88 tok/round=1.75 round_ms=  92.5 dflash=0r/ 0.0% mtp=145r/65.6% k=[1, 141, 0, 0, 4] acc=[42, 103, 0, 0, 0] burst_tok=8 dropped=0 plain=8 arms={'mtp': [146, 255]} shadows= switches=
+r1 short-en   auto    n=256 tps= 18.39 tok/round=1.78 round_ms=  97.0 dflash=5r/ 5.7% mtp=137r/65.0% k=[1, 129, 0, 1, 7] acc=[40, 93, 2, 1, 1] burst_tok=8 dropped=0 plain=8 arms={'dflash': [5, 7], 'mtp': [138, 248]} shadows={'dflash': 10, 'mtp': 0} switches=5
+r1 short-en   plain   n=256 tps= 16.12 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r1 short-ru   plain   n=256 tps= 16.18 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r1 short-ru   auto    n=256 tps= 17.69 tok/round=2.16 round_ms= 122.2 dflash=1r/ 0.0% mtp=114r/64.6% k=[3, 108, 0, 2, 4] acc=[33, 79, 1, 1, 0] burst_tok=56 dropped=0 plain=56 arms={'dflash': [1, 1], 'mtp': [117, 254]} shadows={'dflash': 5, 'mtp': 0} switches=1
+r1 short-ru   mtp0+q  n=256 tps= 18.56 tok/round=1.88 round_ms= 101.0 dflash=0r/ 0.0% mtp=134r/66.4% k=[2, 130, 0, 0, 4] acc=[38, 95, 1, 0, 0] burst_tok=24 dropped=0 plain=24 arms={'mtp': [136, 255]} shadows= switches=
+r1 short-ru   mtp1+q  n=256 tps= 19.24 tok/round=1.72 round_ms=  89.6 dflash=0r/ 0.0% mtp=148r/72.3% k=[0, 148, 0, 0, 0] acc=[41, 107] burst_tok=0 dropped=0 plain=0 arms={'mtp': [148, 255]} shadows= switches=
+r1 short-ru   dflash  n=256 tps= 11.91 tok/round=1.66 round_ms= 139.0 dflash=154r/ 9.5% mtp=0r/ 0.0% plain=0 arms={'dflash': [154, 255]} shadows= switches=
+
+== median decode tok/s per prompt (median over rounds) ==
+plain   code-2k-0  16.53 en-2k-0  15.92 ru-2k-0  15.99 short-en  16.18 short-ru  16.18 | tok/round 0.00 round    0.0 ms mtp acc  0.0% dfl acc  0.0% mtp share 0.00 == plain 10/10
+dflash  code-2k-0  34.56 en-2k-0  21.57 ru-2k-0  13.43 short-en  17.22 short-ru  12.00 | tok/round 2.34 round  139.4 ms mtp acc  0.0% dfl acc 19.3% mtp share 0.00 == plain 6/10
+mtp1+q  code-2k-0  21.89 en-2k-0  20.21 ru-2k-0  20.00 short-en  19.75 short-ru  19.20 | tok/round 1.78 round   89.4 ms mtp acc 79.0% dfl acc  0.0% mtp share 1.00 == plain 4/10 | gate k [0, 1418, 0, 0, 0] accepted [282, 1136] burst tokens 0/2550 dropped 0
+mtp0+q  code-2k-0  27.90 en-2k-0  21.23 ru-2k-0  19.79 short-en  18.90 short-ru  18.51 | tok/round 1.88 round  101.3 ms mtp acc 66.4% dfl acc  0.0% mtp share 1.00 == plain 6/10 | gate k [6, 938, 0, 0, 255] accepted [277, 753, 36, 36, 91] burst tokens 64/2550 dropped 0
+auto    code-2k-0  31.81 en-2k-0  21.18 ru-2k-0  19.18 short-en  18.33 short-ru  17.56 | tok/round 2.14 round  122.0 ms mtp acc 64.8% dfl acc 21.5% mtp share 0.94 == plain 6/10 | gate k [8, 778, 0, 3, 82] accepted [211, 607, 20, 10, 15] burst tokens 128/2550 dropped 0
+peak 19.33 GB, active 17.87 GB
+wrote $PERF_OUT/mtp/gate_auto_greedy.json
+| cell | dflash tok/s | x plain | mtp1+q tok/s | x plain | mtp0+q tok/s | x plain | auto tok/s | x plain | plain tok/s | pairs | auto / best | |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| code-2k-0 | 34.6 | 2.10 | 21.9 | 1.33 | 27.9 | 1.69 | 31.8 | 1.94 | 16.5 | 2 | 0.926 of dflash | MISS |
+| en-2k-0 | 21.6 | 1.35 | 20.2 | 1.27 | 21.2 | 1.33 | 21.2 | 1.33 | 15.9 | 2 | 0.982 of dflash | pass |
+| ru-2k-0 | 13.4 | 0.84 | 20.0 | 1.25 | 19.8 | 1.24 | 19.2 | 1.20 | 16.0 | 2 | 0.959 of mtp1+q | MISS |
+| short-en | 17.2 | 1.06 | 19.8 | 1.22 | 18.9 | 1.17 | 18.3 | 1.13 | 16.2 | 2 | 0.928 of mtp1+q | MISS |
+| short-ru | 12.0 | 0.74 | 19.2 | 1.19 | 18.5 | 1.14 | 17.6 | 1.09 | 16.2 | 2 | 0.914 of mtp1+q | MISS |
+
+1 of 5 cells pass; below 0.97: code-2k-0, ru-2k-0, short-en, short-ru
+
+| cell | requests | rounds: dflash / mtp / plain / lookup | tokens: dflash / mtp / plain / lookup | shadow drafts per request (dflash / mtp) | switches |
+|---|---|---|---|---|---|
+| code-2k-0 | 2 | 80 % / 18 % / 0 % / 2 % | 85 % / 14 % / 0 % / 1 % | 0 / 0 | 3 |
+| en-2k-0 | 2 | 58 % / 42 % / 0 % / 0 % | 65 % / 35 % / 0 % / 0 % | 2 / 0 | 4 |
+| ru-2k-0 | 2 | 6 % / 94 % / 0 % / 1 % | 8 % / 92 % / 0 % / 0 % | 4 / 0 | 3 |
+| short-en | 2 | 3 % / 97 % / 0 % / 0 % | 3 % / 97 % / 0 % / 0 % | 10 / 0 | 6 |
+| short-ru | 2 | 1 % / 99 % / 0 % / 0 % | 0 % / 100 % / 0 % / 0 % | 6 / 0 | 1 |
+
+| cell | variant | requests | rounds by k (0 = burst) | rounds by accepted drafts | burst tokens | dropped |
+|---|---|---|---|---|---|---|
+| code-2k-0 | mtp1+q | 2 | [0, 262, 0, 0, 0] | [12, 250] | 0 % | 0 |
+| code-2k-0 | mtp0+q | 2 | [0, 16, 0, 0, 123] | [17, 28, 8, 17, 69] | 0 % | 0 |
+| code-2k-0 | auto | 2 | [0, 0, 0, 0, 20] | [3, 2, 4, 3, 8] | 0 % | 0 |
+| en-2k-0 | mtp1+q | 2 | [0, 280, 0, 0, 0] | [50, 230] | 0 % | 0 |
+| en-2k-0 | mtp0+q | 2 | [0, 109, 0, 0, 103] | [38, 111, 24, 17, 22] | 0 % | 0 |
+| en-2k-0 | auto | 2 | [0, 42, 0, 0, 35] | [11, 45, 11, 4, 6] | 0 % | 0 |
+| ru-2k-0 | mtp1+q | 2 | [0, 286, 0, 0, 0] | [60, 226] | 0 % | 0 |
+| ru-2k-0 | mtp0+q | 2 | [0, 271, 0, 0, 13] | [62, 218, 2, 2, 0] | 0 % | 0 |
+| ru-2k-0 | auto | 2 | [0, 251, 0, 0, 8] | [49, 209, 1, 0, 0] | 0 % | 0 |
+| short-en | mtp1+q | 2 | [0, 294, 0, 0, 0] | [78, 216] | 0 % | 0 |
+| short-en | mtp0+q | 2 | [2, 282, 0, 0, 8] | [84, 206, 0, 0, 0] | 3 % | 0 |
+| short-en | auto | 2 | [2, 265, 0, 1, 11] | [79, 193, 3, 1, 1] | 3 % | 0 |
+| short-ru | mtp1+q | 2 | [0, 296, 0, 0, 0] | [82, 214] | 0 % | 0 |
+| short-ru | mtp0+q | 2 | [4, 260, 0, 0, 8] | [76, 190, 2, 0, 0] | 9 % | 0 |
+| short-ru | auto | 2 | [6, 220, 0, 2, 8] | [69, 158, 1, 2, 0] | 22 % | 0 |

@@ -18,37 +18,41 @@ plain path under speculation (`pplain`) ≥ 0.97 × plain.
 
 ## Result
 
-Greedy, the last run on this commit series (gate 7, [M], tok/s, medians of 2 requests):
+Greedy, the rule as shipped (run 8, [M], tok/s, medians of 2 requests):
 
 | cell | plain | DFlash | MTP, 1 draft | MTP, gated | `auto` | `auto` × plain | `auto` / best |
 |---|---|---|---|---|---|---|---|
-| code 2K | 17.4 | 37.0 | 24.0 | 30.9 | 35.9 | 2.07 | 0.973 pass |
-| English 2K | 16.6 | 22.7 | 21.4 | 22.3 | 23.0 | 1.39 | 1.013 pass |
-| Russian 2K | 16.5 | 13.8 | 20.5 | 20.3 | 19.3 | 1.17 | 0.944 |
-| short English | 16.6 | 17.6 | 20.0 | 19.3 | 17.8 | 1.07 | 0.891 |
-| short Russian | 16.6 | 12.3 | 19.7 | 18.7 | 17.8 | 1.07 | 0.906 |
+| code 2K | 16.5 | 34.6 | 21.9 | 27.9 | 31.8 | 1.94 | 0.926 |
+| English 2K | 15.9 | 21.6 | 20.2 | 21.2 | 21.2 | 1.33 | 0.982 pass |
+| Russian 2K | 16.0 | 13.4 | 20.0 | 19.8 | 19.2 | 1.20 | 0.959 |
+| short English | 16.2 | 17.2 | 19.8 | 18.9 | 18.3 | 1.13 | 0.928 |
+| short Russian | 16.2 | 12.0 | 19.2 | 18.5 | 17.6 | 1.09 | 0.914 |
 
-2 of 5 cells. `auto` is above plain in every cell and never takes the losing drafter for a
-whole answer on Russian (DFlash alone: ×0.74–0.83); it is 3–11 % under the best single
-setting on the three prose cells where the head wins. What that gap is made of [D]:
+1 of 5 cells at 0.97 (run 7: 2 of 5, code 0.973); every cell ≥ 0.91, and `auto` is above
+plain in every cell (×1.09–1.94) where DFlash alone is ×0.74–0.84 on Russian. What the
+gaps are made of [D]:
 
-- short English: the chooser stayed on DFlash for 97 % of the rounds. The class's rate of
-  the head's arm was lost at its first sample (the decay ran from time 0, not from the
-  request's first sample), four unlucky rounds read below DFlash, and an arm that is left
-  is not sampled again (DFlash is shadow-drafted while the head runs; the head is not while
-  DFlash runs). Fixed after this run (`HEAD_PRIOR`, see below); re-measured in gate 8.
-- Russian 2K: 7 % of the rounds are DFlash's at the start of the request (it starts on
-  DFlash, whose prior is 3 tokens a round), ~1 % shadow drafts, and probe rounds of all four
-  drafts (26 against the head alone's 14).
-- short Russian: the same + three bursts of plain steps per request (22 % of the tokens at
-  the plain rate, 16.6 against the head's 19.7).
+- code: only the first of the two requests (31.0 against DFlash's 36.3; the second 32.6
+  against 32.9, the same rounds). A request starts on DFlash, whose prior is 3 tokens a
+  round; when the head's arm in the class was last measured on code (here: by the `mtp0+q`
+  variant just before) its rate reads higher, the head takes 20 rounds, and DFlash's shadow
+  drafts take that long to show 4.8 tokens a round. In a session of `auto` requests only
+  (the benchmark matrix, [decode_27b_bench.md](decode_27b_bench.md)) five of six code
+  requests gave the head 0–6 rounds; the sixth stayed on it where it drafted as well as
+  DFlash (3.4 tokens a round both, the head's round shorter).
+- Russian 2K: 6 % of the rounds are DFlash's at the start of the request (its prior
+  again), ~1 % shadow drafts.
+- short prose: the gated head itself is 4–5 % under one fixed draft (probe rounds of all
+  four drafts, 4 per request at +45 ms; on short Russian 2–3 bursts of plain steps per
+  request at 16.2 tok/s against the head's 19.2), and `auto` 3–5 % under the gated head
+  (DFlash's first rounds, shadow drafts, one more burst).
 
-Sampling (T 0.6) and the floor were measured on the first commit of the series only
-(gate 2, below): 3 of 5 and 3 of 4 (the miss: 0.969). Two requests per cell do not resolve
-3 % under sampling: the same variant differs by +14 % / −21 % between two runs of a cell
-(another trajectory, another text).
+Sampling (T 0.6) and the floor were measured on the first commit of the series (run 2,
+below): 3 of 5 and 3 of 4 (the miss: 0.969); their runs on the final rule are queued.
+Two requests per cell do not resolve 3 % under sampling: the same variant differs by
++14 % / −21 % between two runs of a cell (another trajectory, another text).
 
-## The six defects, in the order the gate found them
+## The defects, in the order the gate found them
 
 Each row is one commit and the gate run that measured the one before it. `auto / best` per
 cell: code, English, Russian, short English, short Russian (greedy). The machine's speed
@@ -64,6 +68,7 @@ run compare.
 | 5 | the chooser is right in steady state (code and English all DFlash from the 2nd request); bursts of 2 / 4 / 8 plain steps after one unlikely seed skip the sure tokens after it (short Russian: 53 burst rounds) | 0.92 0.99 0.92 0.89 0.82 | bursts 1, 1, 1, 2, 4, 8 |
 | 6 | a single plain step between two rounds costs about a 1-draft round (no step-ahead, the head's catch-up); probes of all four drafts every 8th round cost 6 % | 0.91 0.98 0.91 0.91 0.93 | the rule picks among 1..`KMAX` only; plain steps only as a burst of 8 / 16 / 32 after 4 rounds in a row that kept nothing; probe interval doubles (8 … 64) while probes keep ≤ 1 draft |
 | 7 | the gated head ≥ one fixed draft on code (+29 %) and English (+4 %), 0.99 / 0.965 / 0.95 on Russian / short prose; `auto` stuck on DFlash on short English | 0.97 1.01 0.94 0.89 0.91 | the head's arm keeps its class rate with the weight of 8 rounds, aged from the request's first sample; probes reset only at ≥ 3 kept |
+| 8 | short English back on the head (97 % of the rounds); steady-state code and English equal DFlash alone within 1 %; the first code request of a class still detours through the head | 0.93 0.98 0.96 0.93 0.91 | — (open: a class prior for DFlash's tokens per round) |
 
 Per-run tables (speeds, arms' shares, rounds by k and by accepted drafts, the Clock):
 `raw/gate<N>_auto_greedy.{txt,json}`, `raw/gate2_auto_sampling.*`, `raw/gate2_floor_auto.*`.
@@ -78,6 +83,7 @@ quantity the fixes of runs 3–6 moved [M]:
 | 5 | 1.30 | 1.02 | 0.96 | 0.91 | 0.87 |
 | 6 | 1.27 | 1.03 | 0.97 | 0.96 | 0.91 |
 | 7 | 1.29 | 1.04 | 0.99 | 0.965 | 0.95 |
+| 8 | 1.27 | 1.05 | 0.99 | 0.955 | 0.96 |
 
 ## What a verify block costs (the physics under the rule)
 
@@ -126,6 +132,9 @@ inside `auto` (×2.07–2.13).
 
 - Sampling and the floor on the final commit; q8 KV and long context (the matrix's
   `ctx` plan runs `auto` there).
+- DFlash's tokens per round start every request at a fixed prior (3.0): a class prior, as
+  the head's arm has, would spare the first code request its detour and Russian prose its
+  first DFlash rounds.
 - The head is not sampled while DFlash runs; a shadow of its first draft would need the
   head's catch-up every round (not free). Until then the class prior carries it.
 - Requests of one class mix code and prose: the per-class keep rates follow the last
