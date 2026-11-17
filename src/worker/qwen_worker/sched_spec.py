@@ -16,6 +16,32 @@ from .kernels import _verify_head
 from .mtp import CLOCK, Chooser, Shadows
 from .rprof import RoundProf
 
+# A round's reads wait for what they read only (not a QWEN_ knob: tools flip it
+# between requests for an in-process A/B, ab_mtp.py's "+seq"): the head's
+# verify forward is queued as an eval of its own after the target's, and the
+# walk / shadow drafts are read from the arrays as queued, so the host's work
+# after the walk (commit, emits, the tick, the next round's graphs) runs while
+# the GPU still computes the head's verify. Off: one eval for both, read
+# through a reshape (a new op: it waits for everything queued before it).
+ROUND_OVERLAP = True
+
+
+def _queued_row(a):
+    """The tokens of a (1, n) (or (n,)) array as queued: tolist() of the array
+    itself - no new op, so the read waits for the eval that queued it only
+    (decode.md: a new op on a step's outputs waits for all queued work)."""
+    t = a.tolist()
+    return t[0] if a.ndim == 2 else t
+
+
+def _queued_walk(drafts, targets, budget):
+    """mlx-vlm 0.7.6 `_speculative_walk` on the arrays as queued (_queued_row): the
+    accepted drafts (up to the first mismatch with the target's token), then
+    the target's own token there; at most `budget` tokens."""
+    d, t = _queued_row(drafts)[:drafts.shape[-1]], _queued_row(targets)
+    accepted = next((i for i, (x, y) in enumerate(zip(d, t)) if x != y), len(d))
+    return accepted, (d[:accepted] + t[accepted:accepted + 1])[:budget]
+
 
 def _budget_cut(think, new, stopping):
     """DFlash with a thinking budget: the index in `new` (a round's tokens:
@@ -712,7 +738,7 @@ class _SpecMixin:
                     # the head's round with no draft (its catch-up: pburst)
                     def before():
                         for x, d in sdrafts:
-                            shadow.add(x, d.reshape(-1).tolist())
+                            shadow.add(x, _queued_row(d) if ROUND_OVERLAP else d.reshape(-1).tolist())
                     b, stopped, new, f, cached = pburst(b, steps, before)
                     k = len(new)
                     use(kind, k)
@@ -762,10 +788,13 @@ class _SpecMixin:
                     try:
                         # the verify forward opens a cache transaction (out.gdn_states)
                         # that must be committed every round, or aborted
+                        cp = prof is not None and prof.cprof(True)  # QWEN_SPEC_PROF=3: Python's profile of the build
                         out = lm(fed, cache=cache, capture_layer_ids=layers if layers is not None else [],
                                  speculative_verify=True, return_hidden=fin)
                         txn = out.gdn_states
                         if prof is not None:
+                            if cp:
+                                prof.cprof(False)
                             prof.lap("vgraph")
                         hidden = mx.concatenate(out.hidden_states, axis=-1) if layers is not None else None
                         targets = pick(out.logits, fed[0])
@@ -774,10 +803,18 @@ class _SpecMixin:
                         ahead = mt.verify(hidden[..., -H:], targets) if mine else []
                         if prof is not None:
                             prof.queued("pick")         # (the sampler's and the head's graphs)
-                        mx.async_eval(targets, hidden, *ahead)
+                        if ROUND_OVERLAP and ahead:
+                            # the head's verify as an eval of its own: the walk below
+                            # waits for the target's work only (_queued_row), the head's runs
+                            # on behind the host's work after it
+                            mx.async_eval(targets, hidden)
+                            mx.async_eval(*ahead)
+                        else:
+                            mx.async_eval(targets, hidden, *ahead)
                         if prof is not None:
                             prof.lap("submit")
-                        accepted, new = _speculative_walk(drafts, targets, max_tokens - n)
+                        accepted, new = (_queued_walk if ROUND_OVERLAP else _speculative_walk)(
+                            drafts, targets, max_tokens - n)
                         if prof is not None:
                             prof.wait("walk", main=True)
                             if prof.probe():        # QWEN_SPEC_PROF=2: the work queued behind targets
@@ -792,14 +829,20 @@ class _SpecMixin:
                                 # token leave the cache with the commit
                                 accepted, new = cut + 1, new[:cut + 1]
                         commit_speculative_round(lm, cache, txn, accepted, bs)
+                        if prof is not None:
+                            prof.lap("commit")
                         if accepted + 1 < bs:       # the kept state is a view of the block's
                             _own_states(cache)
+                            if prof is not None:
+                                prof.lap("own")
                     except BaseException:
+                        if prof is not None:
+                            prof.cprof(False)
                         abort_speculative_round(txn)
                         raise
                     requant()                   # (outside the transaction: offset >= start)
                 if prof is not None:
-                    prof.lap("commit")
+                    prof.lap("requant")
                 if look is None and bs > 1:
                     if kind == "mtp":
                         mt.record(hit, bs - 1)
@@ -812,7 +855,7 @@ class _SpecMixin:
                 full = kind != "dflash" or bs == block_total
                 if look is None and pick_kind is not None:
                     pick_kind.done(hit, bs - 1, full, [x for x, _ in sdrafts])
-                    sdrafts = [(x, d.reshape(-1).tolist()) for x, d in sdrafts]
+                    sdrafts = [(x, _queued_row(d) if ROUND_OVERLAP else d.reshape(-1).tolist()) for x, d in sdrafts]
                     for x, d in sdrafts:
                         shadow.add(x, d)
                 arm = kind if look is None else None

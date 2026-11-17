@@ -29,7 +29,11 @@ start, its spans in phases:
            behind its targets (the head's verify forward) runs into `post`;
            QWEN_SPEC_PROF=2 measures that `tail` in every PROBE-th round
            (a sync right after the walk; those rounds are left out of the
-           other spans' statistics)
+           other spans' statistics). QWEN_SPEC_PROF=3: also Python's
+           profiler (cProfile) over every CPROF-th verify graph build
+           (`cprof` in the summary: the top functions, ms per build; those
+           rounds left out too; on Python 3.12 the profiler may also count
+           other threads' calls in the window)
 
 `cpu_*`: the thread's CPU time in the host phases (less than the wall: the
 thread was descheduled or waited for the GIL, e.g. behind a stream handler).
@@ -45,11 +49,12 @@ import time
 
 class RoundProf:
     PROBE = 8                           # QWEN_SPEC_PROF=2: every PROBE-th main sync measures the tail
+    CPROF = 16                          # QWEN_SPEC_PROF=3: every CPROF-th verify build under cProfile
     SPANS = ("pre", "build", "wait", "other", "post", "between")
     FIELDS = ("wall", "pre", "build", "wait", "other", "post", "between", "gpu", "exposed",
               "cpu_pre", "cpu_build", "cpu_post", "cpu_between", "tokens")
 
-    __slots__ = ("level", "recs", "r", "t", "c", "prev", "t_end", "c_end", "nsync")
+    __slots__ = ("level", "recs", "r", "t", "c", "prev", "t_end", "c_end", "nsync", "nbuild", "cp", "ncp")
     _on = None                          # (the profile whose record is open, its thread) for the gc callback
     _gc_t0 = None
 
@@ -60,6 +65,8 @@ class RoundProf:
         self.prev = None                # ended, waiting for the next start
         self.t = self.c = self.t_end = self.c_end = 0.0
         self.nsync = 0
+        self.nbuild = self.ncp = 0
+        self.cp = None                  # cProfile.Profile (level 3)
 
     # ---- marks ----
 
@@ -139,8 +146,41 @@ class RoundProf:
         if self.level < 2 or r is None:
             return False
         self.nsync += 1
-        r["probe"] = self.nsync % self.PROBE == 0
-        return r["probe"]
+        on = self.nsync % self.PROBE == 0
+        r["probe"] = r["probe"] or on
+        return on
+
+    def cprof(self, on):
+        """QWEN_SPEC_PROF=3: on -> is this verify build profiled (every
+        CPROF-th; the record then counts as a probe); off: stop."""
+        if not on:
+            if self.cp is not None:
+                self.cp.disable()
+            return False
+        if self.level < 3 or self.r is None:
+            return False
+        self.nbuild += 1
+        if self.nbuild % self.CPROF:
+            return False
+        if self.cp is None:
+            import cProfile
+            self.cp = cProfile.Profile()
+        self.r["probe"] = True
+        self.ncp += 1
+        self.cp.enable()
+        return True
+
+    def cprof_top(self, n=40):
+        """[(function, calls, own ms, cumulative ms)] per profiled build, by own time."""
+        if self.cp is None or not self.ncp:
+            return []
+        import os
+        import pstats
+        st = pstats.Stats(self.cp).stats
+        rows = [(f"{os.path.basename(f)}:{line}({fn})", nc / self.ncp, 1000.0 * tt / self.ncp,
+                 1000.0 * ct / self.ncp) for (f, line, fn), (cc, nc, tt, ct, _) in st.items()]
+        rows.sort(key=lambda x: -x[2])
+        return [[a, round(b, 2), round(c, 4), round(d, 4)] for a, b, c, d in rows[:n]]
 
     def end(self, key, tokens, steps=1):
         """The record ends (before the yield): `key` its kind ("mtp1",
@@ -201,7 +241,7 @@ class RoundProf:
         out = {}
         for key, rs in sorted(by.items()):
             main = [(f, laps) for p, f, laps in rs if not p]
-            tails = [laps.get("tail", 0.0) for p, f, laps in rs if p]
+            tails = [laps["tail"] for p, f, laps in rs if p and "tail" in laps]
             d = {k: cls.stats([f[k] for f, _ in main]) for k in cls.FIELDS} if main else {}
             names = sorted({n for _, laps in main for n in laps})
             d["laps"] = {n: round(sum(laps.get(n, 0.0) for _, laps in main) / len(main), 3)
@@ -213,4 +253,7 @@ class RoundProf:
 
     def summary(self, skip=1):
         raw = self.raw(skip)
-        return dict(keys=self.aggregate(raw), raw=raw)
+        out = dict(keys=self.aggregate(raw), raw=raw)
+        if self.ncp:
+            out["cprof"] = dict(builds=self.ncp, top=self.cprof_top())
+        return out

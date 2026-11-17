@@ -22,6 +22,11 @@ Variants (comma separated):
   <v>+h        the MTP head of --alt-head instead of the loaded one (two heads, one target, one process)
   <v>+q        verify blocks of 2..N tokens through mrqmv (load with QWEN_VERIFY_QMV=N; without
                +q the variant runs with it off)
+  <v>+m2       mrqmm from 2 rows (its MIN_ROWS 3 -> 2 for the variant): without +q the 2-token
+               verify blocks (and the head's lm_head over them) take it instead of mlx-vlm's
+               exact kernels (with +q mrqmv takes them first); batched-decode numerics class
+  <v>+seq      the round's reads as before sched_spec.ROUND_OVERLAP (one eval for the target's and
+               the head's verify, read through a reshape: the walk waits for both)
 Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tokens of
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
 scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts),
@@ -32,9 +37,10 @@ decode tok/s = (n - 1) / (t_last - t_first), rounds (bursts included), tokens pe
 accepted drafts per round per drafter, the rounds and tokens per arm (spec_stats["arms"]); the
 head's gate (spec_stats["mtp"]): rounds by draft count k (0: a plain burst), by accepted drafts,
 tokens of the plain bursts, drafts computed and dropped. The gate's tables: gate_table.py.
---prof 1|2 (QWEN_SPEC_PROF, qwen_worker/rprof.py): each request's rounds and plain-loop steps
+--prof 1|2|3 (QWEN_SPEC_PROF, qwen_worker/rprof.py): each request's rounds and plain-loop steps
 split into host before / after the sync, the sync, the scheduler's tick (2: + the GPU work left
-after every 8th walk), per request in the JSON ("prof"); pooled tables: round_table.py.
+after every 8th walk; 3: + cProfile over every 16th verify graph build), per request in the JSON
+("prof"); pooled tables: round_table.py.
 
   cd src/worker && QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1 \\
     QWEN_KV_BITS=0 QWEN_MAX_BATCH=1 QWEN_WIRED_LIMIT_GB=27 QWEN_PRESENCE_PENALTY=0 \\
@@ -116,6 +122,8 @@ def qmv_bits(only4):
 
 
 QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
+MRQ = sys.modules.get("mrqmm")          # (+m2: its row floor)
+MIN0 = MRQ.MIN_ROWS if MRQ is not None else None
 
 
 def set_variant(v, sampling=False):
@@ -132,6 +140,11 @@ def set_variant(v, sampling=False):
     W.SPEC_PLAIN = "p" in flags
     W.SPEC_TRACE = a.trace
     W.SPEC_PROF = a.prof
+    W.ROUND_OVERLAP = "seq" not in flags
+    if MRQ is not None:
+        MRQ.MIN_ROWS = 2 if "m2" in flags else MIN0
+    elif "m2" in flags:
+        raise SystemExit(f"{v}+m2: mrqmm not installed")
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
     W.VERIFY_QMV = QMV0 if ("q" in flags or "q4" in flags) else 0

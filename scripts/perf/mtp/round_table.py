@@ -73,6 +73,18 @@ def table(rows, title, out):
     for key in sorted(lapnames, key=order):
         out.append(f"  {key:7s} " + " ".join(f"{n} {v:.2f}" for n, v in
                                               sorted(lapnames[key].items(), key=lambda x: -x[1]) if v >= 0.005))
+    cps = [(o["prof"]["cprof"]["builds"], o["prof"]["cprof"]["top"]) for o in rows
+           if (o.get("prof") or {}).get("cprof")]
+    if cps:                                     # QWEN_SPEC_PROF=3: the verify build under cProfile
+        nb, fn = sum(b for b, _ in cps), {}
+        for b, top in cps:
+            for name, calls, own, cum in top:
+                f = fn.setdefault(name, [0.0, 0.0, 0.0])
+                f[0], f[1], f[2] = f[0] + calls * b, f[1] + own * b, f[2] + cum * b
+        tot = sum(f[1] for f in fn.values()) / nb
+        out.append(f"verify build under cProfile ({nb} builds; own ms per build, of the listed {tot:.2f}):")
+        for name, f in sorted(fn.items(), key=lambda x: -x[1][1])[:25]:
+            out.append(f"  {f[1] / nb:7.3f} own {f[2] / nb:7.3f} cum {f[0] / nb:7.1f} calls  {name}")
 
 
 def main():
