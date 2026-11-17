@@ -1,7 +1,7 @@
 """The MTP head as a speculative drafter (qwen_worker/mtp.py) on the tiny random
 model (CPU): a real mlx-vlm Qwen3_5MTPDraftModel (random weights) bound to the
 tiny target. Greedy output == the plain loop's for every draft count and for
-the confidence gate (k = 0 rounds: plain bursts), with the head's own drafts
+the gate (k = 0 rounds: plain bursts), with the head's own drafts
 (random: nearly all rejected) and with an oracle that proposes the known
 answer (accepted prefixes, rejections); the head's KV cache after a request
 == the head run once over every (target hidden, next token) pair (no chained
@@ -29,8 +29,8 @@ def head(lm):
 
 
 class Oracle(worker.MTPDraft):
-    """The real head (its cache, chained entries, the gate's confidence
-    reads) but the drafts are the known answer `full` (prompt + plain
+    """The real head (its cache, chained entries, the gate's statistics)
+    but the drafts are the known answer `full` (prompt + plain
     answer), the last one wrong every other round. `script`: the gate's draft
     counts in turn (0: a round with no draft); `zero` (forced arms): the next
     rounds take none."""
@@ -39,11 +39,11 @@ class Oracle(worker.MTPDraft):
         super().__init__(model, lm)
         self.full, self.wrong, self.script, self.zero = full, wrong, script, False
 
-    def depth(self, c1, T, top):
+    def depth(self, top):
         if self.zero:
             return 0
         if self.script is None:
-            return super().depth(c1, T, top)
+            return super().depth(top)
         return min(top, self.script[sum(self.ks) % len(self.script)])
 
     def round(self, room):
@@ -98,8 +98,8 @@ def real_entries(dense, mt, full, least, exact=False):
 
 @pytest.mark.parametrize("k", [0, 1, 2, 3, 4])
 def test_own_drafts_exact(dense, spec, monkeypatch, k):
-    """The head's own drafts (random weights), k per round or (0) gated by
-    their confidence: plain greedy's answer."""
+    """The head's own drafts (random weights), k per round or (0) by the
+    gate: plain greedy's answer."""
     monkeypatch.setattr(worker, "MTP_K", k)
     for ids in prompts([25, 3, 40], 30):
         ref = plain(dense, ids, 24)
@@ -107,7 +107,7 @@ def test_own_drafts_exact(dense, spec, monkeypatch, k):
         assert with_mtp(dense, ids, 24, mt) == ref
         if k:
             assert mt.accept_lens and max(mt.draft_lens) == k   # (the last round: cut to max_tokens)
-        else:                                            # random confidences: mostly plain bursts
+        else:                                            # random drafts: mostly plain bursts
             assert mt.burst_tokens > 0 and mt.dropped == 0
 
 
@@ -169,10 +169,20 @@ def test_hybrid_exact_takes_both(dense, spec, monkeypatch):
 
 def test_clock_follows_the_drift(clock):
     """A kind that is not measured follows the machine's drift measured on
-    the others; a pause is clamped."""
-    clock.add("dflash", 180.0)
-    clock.add("plain", 80.0)
+    the others; a pause is clamped. A kind's first NEW samples set its time
+    by their median (one slow first round is not its price) and leave the
+    drift alone."""
+    for ms in (180.0, 250.0, 175.0):
+        clock.add("dflash", ms)
+    for ms in (80.0, 40.0, 80.0):
+        clock.add("plain", ms)
     assert clock.ms("dflash") == 180.0 and clock.ms("plain") == 80.0 and clock.ms(("mtp", 1)) is None
+    assert clock.g == 1.0
+    clock.add(("mtp", 3), 117.0)                         # (the 9B: a first 3-draft round at 117 ms)
+    assert clock.ms(("mtp", 3)) == 117.0
+    clock.add(("mtp", 3), 73.0)
+    clock.add(("mtp", 3), 75.0)
+    assert clock.ms(("mtp", 3)) == 75.0 and clock.g == 1.0
     for _ in range(60):
         clock.add("plain", 104.0)                        # the machine 30 % slower
     assert clock.ms("plain") == pytest.approx(104.0, rel=0.01)
@@ -812,15 +822,19 @@ def test_prompt_cache_context(dense, spec, monkeypatch):
 
 
 def test_gate_draft_count(dense, monkeypatch, clock):
-    """The gate (MTPDraft.round / depth): the draft count (>= 1) with the
-    most expected tokens per ms, E(k) / T(k), E from the class's keep rates
-    of seeds of this confidence (Clock.seed) and of the chained drafts
-    (Clock.rate), both moved by record(); a probe round takes all the room
-    (every PROBE-th, rarer after probes that kept at most two drafts); LOW
-    rounds in a row with no draft kept (LOW_MAX = LOW: the run's length
-    fixed, need() below): a burst of plain steps, then one drafting round,
-    the bursts longer (BURSTS) until a draft is kept; an unmeasured T scaled
-    by 1 + R * k from the nearest measured k; QWEN_MTP_KMAX the ceiling."""
+    """The gate (MTPDraft.round / depth / best): one depth for the class,
+    the draft count (>= 1) with the most expected tokens per ms, E(k) /
+    T(k), E from the class's keep rate of each depth given the ones before
+    (Clock.rate, KEEP0 unmeasured), moved by record() (a request starts from
+    the class's values with the weight of PRIOR samples, an EMA of 1 / N
+    past N), kept until another depth is MARGIN better; a probe round takes
+    every other time all the room, the rounds between the other depths in
+    turn (every PROBE-th, twice as rarely after a probe that kept fewer than
+    two drafts more than the depth); LOW rounds in a row with no draft kept
+    (LOW_MAX = LOW: the run's length fixed, need() below): a burst of plain
+    steps, then one drafting round, the bursts longer (BURSTS) until a draft
+    is kept; an unmeasured T scaled by 1 + R * k from the nearest measured k;
+    QWEN_MTP_KMAX the ceiling."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
     monkeypatch.setattr(worker.MTPDraft, "LOW_MAX", worker.MTPDraft.LOW)
@@ -829,22 +843,38 @@ def test_gate_draft_count(dense, monkeypatch, clock):
         clock.add(worker.MTPDraft.kind_of(k), ms)
     mt = worker.MTPDraft(head(dense), dense)
     assert [mt._ms(k) for k in range(5)] == T
-    clock.seed[1] = 0.05
-    assert mt.depth(0.3, T, 4) == 1 and mt.bin == 1      # an unlikely seed: still one draft
-    mt.record(1, 1)
-    assert clock.seed[1] == pytest.approx(0.145) and mt.bin is None
-    assert mt.depth(0.95, T, 4) == 1                     # (bin 4 starts at 0.9) rates 0.5: 2.35 / 176 < 1.9 / 137
-    clock.rate.update({2: 0.9, 3: 0.9, 4: 0.9})
-    assert mt.depth(0.95, T, 4) == 4 and mt.depth(0.95, T, 2) == 2
-    clock.rate.update({3: 0.2, 4: 0.2})
-    assert mt.depth(0.95, T, 4) == 2                     # 2.81 / 176 > 2.98 / 193 > 3.01 / 210
-    clock.rate.update({2: 0.5})
-    mt.record(1, 4)                                      # depth 2 reached and lost; 3, 4 not reached
-    assert clock.rate == {2: pytest.approx(0.4), 3: 0.2, 4: 0.2}
-    mt.record(3, 3)
-    assert clock.rate == {2: pytest.approx(0.52), 3: pytest.approx(0.36), 4: 0.2}
-    mt.record(0, 2)
-    assert clock.rate[2] == pytest.approx(0.52)
+    k0 = mt.KEEP0
+    assert [mt.expect(k) for k in range(1, 5)] == pytest.approx([sum(k0 ** i for i in range(k + 1))
+                                                                 for k in range(1, 5)])
+    assert mt.depth(4) == 4 and mt.cur == 4             # unmeasured: 3.36 / 210 > 2.95 / 193 > ...
+    assert mt.depth(2) == 2 and mt.cur == 4             # (the room: not a change)
+    clock.rate.update({1: 0.6, 2: 0.45, 3: 0.4, 4: 0.3})  # prose: 1.6 / 137 > 1.87 / 176 > ...
+    mt.every = 64
+    assert mt.depth(4) == 1 and mt.cur == 1 and mt.every == mt.PROBE   # a change: probes again
+    clock.rate.update({2: 0.79, 3: 0.2})                 # depth 2 0.9 % better: not worth a change
+    assert mt.expect(2) / 176.0 > mt.expect(1) / 137.0 and mt.depth(4) == 1
+    clock.rate.update({2: 0.85})                         # 2.7 % better
+    assert mt.depth(4) == 2 and mt.cur == 2
+    # record(): the depths a round reached (the ones before kept), a running
+    # mean from the class's value worth PRIOR samples
+    mt.fresh()
+    clock.rate.clear()
+    w = 1.0 / (1 + mt.PRIOR)
+    mt.record(2, 4)                                      # depths 1, 2 kept, 3 reached and lost, 4 not reached
+    assert clock.rate == {1: pytest.approx(k0 + (1 - k0) * w), 2: pytest.approx(k0 + (1 - k0) * w),
+                          3: pytest.approx(k0 - k0 * w)}
+    r1 = clock.rate[1]
+    mt.record(0, 1)
+    assert clock.rate[1] == pytest.approx(r1 - r1 / (2 + mt.PRIOR)) and clock.rate[3] == pytest.approx(k0 - k0 * w)
+    for _ in range(3 * mt.N):
+        mt.record(1, 1)
+    r1 = clock.rate[1]
+    mt.record(0, 1)                                      # past N samples: an EMA of 1 / N
+    assert clock.rate[1] == pytest.approx(r1 - r1 / mt.N)
+    mt.fresh()                                           # the next request: the class's value, PRIOR samples
+    r1 = clock.rate[1]
+    mt.record(0, 1)
+    assert clock.rate[1] == pytest.approx(r1 - r1 * w)
     confs = []
     real = worker.MTPDraft._head
 
@@ -863,13 +893,13 @@ def test_gate_draft_count(dense, monkeypatch, clock):
         mt.emit_ids(range(at[0] + 1, at[0] + n + 1))
         at[0] += n
 
-    clock.rate.update({2: 0.9, 3: 0.9, 4: 0.9})
+    clock.rate.update({1: 0.9, 2: 0.9, 3: 0.9, 4: 0.9})
     seed(0.95, 4)
     d = mt.round(9)
     assert d.shape == (1, 4) and mt.appended == 3 and len(confs) == 5    # KMAX
     seed(0.95)
-    assert mt.round(1).shape == (1, 1)                   # room
-    clock.rate.update({3: 0.2, 4: 0.2})
+    assert mt.round(1).shape == (1, 1) and mt.cur == 4  # room
+    clock.rate.update({3: 0.2, 4: 0.2})                  # 2.71 / 176 > 2.87 / 193 > 2.90 / 210
     seed(0.95)
     assert mt.round(9).shape == (1, 2)
     mt.fresh()
@@ -888,15 +918,27 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     # LOW misses, then bursts 8, 16, 32 with one drafting round between; a kept draft ends them
     assert got == ["d"] * mt.LOW + [8, "d", 16, "d", 32, "d", 32, "d"] + ["d"] * mt.LOW + [8, "d", 16]
     assert mt.ks[0] == 6 and mt.stats()["k"] == mt.ks
-    monkeypatch.setattr(worker.MTPDraft, "PROBE", 2)     # every 2nd drafting round: all the room
+    monkeypatch.setattr(worker.MTPDraft, "PROBE", 2)     # every 2nd drafting round
+    best = worker.MTPDraft.best
+    monkeypatch.setattr(worker.MTPDraft, "best", lambda self, top: 1)     # (the class's depth: 1)
     mt.fresh()
-    clock.rate.clear()
     shapes = []
-    for kept in (1, 1, 1, 1, 1, 3, 1, 1, 1):             # probes: round 2, round 6 (4 rounds after a probe
-        seed(0.95)                                       # that kept one), round 8 (it kept three: back to 2)
+    for kept in (1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1):
+        seed(0.95)
         shapes.append(mt.round(9).shape[1])
-        mt.record(kept, shapes[-1])
-    assert shapes == [1, 4, 1, 1, 1, 4, 1, 4, 1] and mt.every == 4
+        mt.record(min(kept, shapes[-1]), shapes[-1])
+    # probes: round 2 all the room (it kept one: 4 rounds to the next), round 6 depth 3 (the other
+    # depths in turn; it kept three: back to 2), round 8 all, round 12 depth 2
+    assert shapes == [1, 4, 1, 1, 1, 3, 1, 4, 1, 1, 1, 2] and mt.every == 8
+    monkeypatch.setattr(worker.MTPDraft, "best", lambda self, top: top)  # (the class's depth: all)
+    mt.fresh()
+    shapes = []
+    for _ in range(6):
+        seed(0.95)
+        shapes.append(mt.round(9).shape[1])
+        mt.record(1, shapes[-1])
+    assert shapes == [4, 2, 4, 4, 4, 1]                  # the shallower depths in turn
+    monkeypatch.setattr(worker.MTPDraft, "best", best)
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
     mt.clock = worker.Clock({("mtp", 1): 66.0})
     assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * mt.R) / (1 + mt.R))
@@ -925,7 +967,7 @@ def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
     for k, ms in enumerate([100.0, 137.0, 176.0, 193.0, 210.0]):     # (one draft a round below)
         clock.add(worker.MTPDraft.kind_of(k), ms)
     mt = worker.MTPDraft(head(dense), dense)
-    assert clock.keep is None and mt.need() == mt.LOW               # SEED0 until measured
+    assert clock.keep is None and mt.need() == mt.LOW               # KEEP0 until measured
     for p, n in ((1.0, 4), (0.9, 4), (0.75, 4), (0.72, 5), (0.65, 6), (0.55, 7), (0.5, 8), (0.3, 8), (0.0, 8)):
         clock.keep = p
         assert mt.need() == n, p
@@ -933,7 +975,7 @@ def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
             assert (1 - p) ** n < mt.EPS <= (1 - p) ** (n - 1)
     clock.keep = None
     mt.record(1, 1)
-    assert clock.keep == pytest.approx(0.82)                         # SEED0 + B * (1 - SEED0)
+    assert clock.keep == pytest.approx(0.82)                         # KEEP0 + B * (1 - KEEP0)
     mt.record(0, 1)
     assert mt.run == 4 and clock.keep == pytest.approx(0.738)        # (the run tested at 0.82)
     for _ in range(mt.LOW - 1):
@@ -1044,9 +1086,9 @@ def test_gate_burst_catch_up_equals_per_step(dense, spec, monkeypatch):
 def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     """QWEN_DRAFT=auto's setup - DFlash + the gated head, the Chooser with
     its probes and DFlash's shadow drafts - == the head alone == plain
-    greedy, the head's own confidences deciding (the random head's are
-    0.006..0.014, a bin whose keep rate is set to 0: one draft a round, a
-    probe round all four; a burst after every round that keeps none)."""
+    greedy, the gate deciding (the class's first-draft keep rate set to 0:
+    one draft a round until the Oracle's kept drafts move it, a probe round
+    all four; a burst after every round that keeps none)."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker.Clock, "add", lambda self, kind, ms: None)
@@ -1061,7 +1103,7 @@ def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
         for both in (False, True):
             ck = worker.Clock({worker.MTPDraft.kind_of(k): (100.0, 100.9, 101.5, 110.0, 120.0)[k]
                                for k in range(5)})
-            ck.seed[0] = 0.0                             # (kept there: the Oracle's rounds)
+            ck.rate[1] = 0.0                             # (the class's depth: one draft)
             monkeypatch.setattr(worker, "CLOCK", ck)
             mt = Oracle(head(dense), dense, ids + ref[0])
             d = FakeDraft(ref[0]) if both else None
