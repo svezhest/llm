@@ -179,7 +179,7 @@ def test_off_is_the_old_path(monkeypatch):
     assert not s.fast
     for p in (0, 3, 6, 1000):
         keys = mx.array([worker._words(9, p + i) for i in range(3)], dtype=mx.uint32)
-        want = mx.argmax(worker._gumbel_rows(s.filtered(x), keys, worker._cols(512)), axis=-1)
+        want = mx.argmax(worker._gumbel(s.filtered(x), keys, worker._cols(512)), axis=-1)
         assert s(x, p).tolist() == want.tolist()
     monkeypatch.setattr(worker, "POS_KEYS", False)
     s = sampler(monkeypatch, fast=False, seed=9, **CARD)
