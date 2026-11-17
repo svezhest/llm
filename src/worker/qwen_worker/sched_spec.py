@@ -666,8 +666,9 @@ class _SpecMixin:
                         for x, sa, sd in shadow.settle():
                             pick_kind.sample(x, sa, sd)
                     if prev == kind and not sdrafts:
-                        # a one-step burst (the head's) is no plain step's cost: a sync, its flush
-                        timed = ("plain" if k > 1 or kind == "plain" else None, t_round, k, kind, k)
+                        # (the head's no-draft round: its own kind, the sync and the
+                        # head's catch-up are its cost, a plain step's is not)
+                        timed = ("plain" if kind == "plain" else mt.kind_of(0), t_round, k, kind, k)
                     prev = kind
                     if trace is not None:
                         trace.append((kind, 1, 0, round(t_round, 4),
