@@ -126,7 +126,8 @@ def markdown(agg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.join(os.environ.get("PERF_OUT", "/tmp/perf"), "bench27"))
-    ap.add_argument("--index", action="append", default=[], help="index-*.json (repeatable); none: every session under --root")
+    ap.add_argument("--index", action="append", default=[],
+                    help="index-*.json (repeatable); none: every session under --root")
     ap.add_argument("--keep-off-probe", action="store_true")
     ap.add_argument("--json", default="")
     ap.add_argument("--md", default="")

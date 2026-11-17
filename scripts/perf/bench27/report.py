@@ -5,7 +5,7 @@ report, and the raw sessions copied into the repo without private paths (stdlib 
   tables  print every table (--h2: the 2K matrix, plan headline2; --ctx: plans ctx / ctx80)
   fill    replace the generated blocks of a report in place, each between
               <!-- report.py BLOCK -->  and  <!-- /report.py BLOCK -->
-          (blocks: setup medians ratios cells warmup prefill ctx-decode ctx-ratios ctx-prefill);
+          (blocks: setup tokens medians ratios cells warmup prefill ctx-decode ctx-ratios ctx-prefill);
           a block whose data is missing keeps its text; prints the [[TODO ...]] left in the file
   raw     copy each listed session's session.json and the indexes to DEST, every absolute path
           of this machine replaced: a session's code tree -> $CODE, the weights -> $WEIGHTS, the
@@ -58,7 +58,8 @@ PAIRS = [("auto", "llama-mtp"), ("plain", "llama"), ("plain", "mlx-vlm"), ("auto
 PREFILL_PAIRS = [("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama-mtp")]
 CLS = {"code": "code", "en": "English", "ru": "Russian"}
 MODE = {"greedy": "greedy", "sample": "sampling"}
-BLOCKS = ["setup", "medians", "ratios", "cells", "warmup", "prefill", "ctx-decode", "ctx-ratios", "ctx-prefill"]
+BLOCKS = ["setup", "tokens", "medians", "ratios", "cells", "warmup", "prefill", "ctx-decode", "ctx-ratios",
+          "ctx-prefill"]
 
 
 def role(s):
@@ -195,6 +196,29 @@ def b_setup(M, C):
                     facts[k].append(val)
     out += "\n\n" + "\n".join(f"- {k}: {'; '.join(map(str, v))}" for k, v in facts.items())
     return out
+
+
+def b_tokens(M, C):
+    """Prompt tokens as each server counted them (usage.prompt_tokens) against the manifest's count
+    (built with the tokenizer the manifest names): the systems must agree with each other."""
+    sess = M.sessions + (C.sessions if C else [])
+    if not sess:
+        return None
+    systems = order_systems({m["system"] for m in sess})
+    got, exp = {}, {}
+    for m in sess:
+        for r in m["results"]:
+            if r.get("kind") == "cell" and r.get("prompt_tokens") is not None:
+                got.setdefault(r["prompt"], {}).setdefault(m["system"], set()).add(r["prompt_tokens"])
+                exp[r["prompt"]] = r.get("expected_prompt_tokens")
+    rows = []
+    for pid, per in got.items():
+        vals = [sorted(per.get(s, ())) for s in systems]
+        agree = len({tuple(v) for v in vals if v}) == 1
+        rows.append([pid, str(exp.get(pid))]
+                    + [(str(v[0]) if v[0] == v[-1] else f"{v[0]}–{v[-1]}") if v else "–" for v in vals]
+                    + ["yes" if agree else "**no**"])
+    return table(["prompt", "manifest"] + [name(s) for s in systems] + ["systems agree"], rows)
 
 
 def b_medians(M, _):
@@ -371,8 +395,9 @@ def b_ctx_prefill(_, C):
     return table(["cold prefill (TTFT, round 1)"] + [name(s) for s in C.systems], rows)
 
 
-FUNCS = {"setup": b_setup, "medians": b_medians, "ratios": b_ratios, "cells": b_cells, "warmup": b_warmup,
-         "prefill": b_prefill, "ctx-decode": b_ctx_decode, "ctx-ratios": b_ctx_ratios, "ctx-prefill": b_ctx_prefill}
+FUNCS = {"setup": b_setup, "tokens": b_tokens, "medians": b_medians, "ratios": b_ratios, "cells": b_cells,
+         "warmup": b_warmup, "prefill": b_prefill, "ctx-decode": b_ctx_decode, "ctx-ratios": b_ctx_ratios,
+         "ctx-prefill": b_ctx_prefill}
 
 
 def build(a):
