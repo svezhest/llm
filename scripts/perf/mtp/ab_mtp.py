@@ -32,6 +32,9 @@ decode tok/s = (n - 1) / (t_last - t_first), rounds (bursts included), tokens pe
 accepted drafts per round per drafter, the rounds and tokens per arm (spec_stats["arms"]); the
 head's gate (spec_stats["mtp"]): rounds by draft count k (0: a plain burst), by accepted drafts,
 tokens of the plain bursts, drafts computed and dropped. The gate's tables: gate_table.py.
+--prof 1|2 (QWEN_SPEC_PROF, qwen_worker/rprof.py): each request's rounds and plain-loop steps
+split into host before / after the sync, the sync, the scheduler's tick (2: + the GPU work left
+after every 8th walk), per request in the JSON ("prof"); pooled tables: round_table.py.
 
   cd src/worker && QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1 \\
     QWEN_KV_BITS=0 QWEN_MAX_BATCH=1 QWEN_WIRED_LIMIT_GB=27 QWEN_PRESENCE_PENALTY=0 \\
@@ -74,6 +77,7 @@ ap.add_argument("--skip-speed", action="store_true")
 ap.add_argument("--alt-head", default="", help="a second MTP drafter dir, taken by the +h variants")
 ap.add_argument("--json", default="")
 ap.add_argument("--trace", action="store_true", help="QWEN_SPEC_TRACE: per-round rows in the JSON")
+ap.add_argument("--prof", type=int, default=0, help="QWEN_SPEC_PROF level: per-round host / sync spans in the JSON")
 ap.add_argument("--warm-tokens", type=int, default=0, help="max_tokens of the warm-up requests (0 = --max-tokens)")
 a = ap.parse_args()
 
@@ -127,6 +131,7 @@ def set_variant(v, sampling=False):
         flags |= {"p", "q"} if QMV0 else {"p"}
     W.SPEC_PLAIN = "p" in flags
     W.SPEC_TRACE = a.trace
+    W.SPEC_PROF = a.prof
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
     W.VERIFY_QMV = QMV0 if ("q" in flags or "q4" in flags) else 0
@@ -248,6 +253,8 @@ def run(key, rid, v, seed=0, max_tokens=0):
     dt = times[-1] - times[0] if n > 2 else 0.0
     out = dict(tokens=toks, n=n, prompt=len(r.ids), ttft=times[0] - t0 if times else None,
                tps=(n - 1) / dt if dt else 0.0, finish=[str(x) for x in ev[1:2]])
+    if r.prof is not None:
+        out["prof"] = r.prof.summary()
     if W.SPEC_TRACE:
         out["trace"] = (r.spec_stats or {}).get("trace")
         out["times"] = [round(t, 4) for t in times]

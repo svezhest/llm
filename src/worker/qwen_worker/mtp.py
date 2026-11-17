@@ -164,6 +164,7 @@ class MTPDraft:
     BINS, SEED0, B = 5, 0.8, 0.1        # the seed's keep rate per confidence bin: the start (at least), the EMA's weight
     said = False                        # the lm_head's path over a block: logged once
     CHUNK = 512                         # head rows per forward (flush)
+    prof = None                         # QWEN_SPEC_PROF: the request's rprof.RoundProf (set by _spec)
 
     def __init__(self, model, lm, k=None):
         self.model, self.lm = model, lm
@@ -196,6 +197,7 @@ class MTPDraft:
         self.appended = 0               # chained entries of the current round
         self.seed = None                # (token (1, 1), hidden (1, 1, H), confidence (1, 1)) or None
         self.block = None               # verify(): the head over the block's rows
+        self.prof = None
         self.fresh()
 
     def fresh(self):
@@ -337,7 +339,13 @@ class MTPDraft:
             raise RuntimeError("mtp: no seed (a pushed position without its successor)")
         tok, h, conf = self.seed
         top = min(self.KMAX, room)
-        k = self.depth(conf.item(), [self._ms(k) for k in range(top + 1)], top)
+        prof = self.prof
+        if prof is not None:
+            prof.lap("flush")
+        c1 = conf.item()
+        if prof is not None:
+            prof.wait("seed")
+        k = self.depth(c1, [self._ms(k) for k in range(top + 1)], top)
         if k == 0:                      # (the seed's confidence: evaluated with the last round)
             self.low += 1
             self.ks[0] += 1

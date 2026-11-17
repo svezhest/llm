@@ -449,6 +449,12 @@ SPEC_PLAIN = _auto("QWEN_SPEC_PLAIN", "1", "0") == "1"
 # positions DFlash's drafter was fed, [(arm, shadow drafts)], the round's tokens),
 # times on the scheduler's clock.
 SPEC_TRACE = os.environ.get("QWEN_SPEC_TRACE", "0") == "1"
+# QWEN_SPEC_PROF=1 (tools): each request's rounds / plain steps timed on the host
+# clocks (rprof.RoundProf in req.prof: host before / after the sync, the sync,
+# the scheduler's tick); 2: also the GPU work left after every 8th walk (a sync
+# there, those rounds left out). Level 1 makes no MLX call: the syncs and evals
+# are those of a run without it.
+SPEC_PROF = int(os.environ.get("QWEN_SPEC_PROF", "0") or 0)
 # QWEN_VERIFY_QMV=N (2..3; 0 = off): verify blocks of 2..N tokens (MTP rounds of
 # 1..2 drafts) on 4 / 5 / 6 / 8-bit g64 modules through mrqmv.py, a multi-row qmv
 # whose every row is MLX's solo qmv bit for bit (self-tested per shape at load):
