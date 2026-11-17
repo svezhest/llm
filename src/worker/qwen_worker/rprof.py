@@ -33,9 +33,13 @@ start, its spans in phases:
 
 `cpu_*`: the thread's CPU time in the host phases (less than the wall: the
 thread was descheduled or waited for the GIL, e.g. behind a stream handler).
-Laps: the host and wait spans by name (summed per record).
+Laps: the host and wait spans by name (summed per record); "gc": Python's
+cyclic collector on this thread inside the record (it overlaps the lap it
+interrupted: not part of the sum).
 """
 
+import gc
+import threading
 import time
 
 
@@ -46,6 +50,8 @@ class RoundProf:
               "cpu_pre", "cpu_build", "cpu_post", "cpu_between", "tokens")
 
     __slots__ = ("level", "recs", "r", "t", "c", "prev", "t_end", "c_end", "nsync")
+    _on = None                          # (the profile whose record is open, its thread) for the gc callback
+    _gc_t0 = None
 
     def __init__(self, level=1):
         self.level = int(level)
@@ -57,8 +63,23 @@ class RoundProf:
 
     # ---- marks ----
 
+    @staticmethod
+    def _gc(phase, info):
+        on = RoundProf._on
+        if on is None or on[1] != threading.get_ident():
+            return
+        if phase == "start":
+            RoundProf._gc_t0 = time.perf_counter()
+        elif RoundProf._gc_t0 is not None and on[0].r is not None:
+            laps = on[0].r["laps"]
+            laps["gc"] = laps.get("gc", 0.0) + time.perf_counter() - RoundProf._gc_t0
+            RoundProf._gc_t0 = None
+
     def begin(self):
         """A record starts (after the yield / at the step's entry)."""
+        if RoundProf._gc not in gc.callbacks:
+            gc.callbacks.append(RoundProf._gc)
+        RoundProf._on = (self, threading.get_ident())
         t, c = time.perf_counter(), time.thread_time()
         p = self.prev
         if p is not None:
