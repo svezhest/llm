@@ -170,6 +170,19 @@ def _verify_linear(self, linear, x):
     return _VERIFY_LINEAR(self, linear, x)
 
 
+def _rows_linear(linear, x):
+    """A (1, T, K) call beside the verify forward (the MTP head's lm_head over a
+    block's rows) through the block's own kernels: mrqmv for 2..QWEN_VERIFY_QMV
+    rows, mrqmm for its row counts (the weights read once for the T rows; the
+    library's quantized_matmul costs about a solo row per row); else the module."""
+    if x.ndim == 3 and x.shape[0] == 1 and x.shape[1] > 1:
+        if linear.__dict__.get("_qmv") and _qmv_t(x):
+            return _qmv_rows(linear["weight"], linear["scales"], linear["biases"], x)
+        if VERIFY_MR and _verify_mr(linear, x):
+            return _mr_rows(linear, x)
+    return linear(x)
+
+
 def _block_sdpa(queries, keys, values, scale):
     """Causal attention of the LAST queries.shape[2] positions over `keys`
     (query i sees keys [0, n - T + i]) through MLX's vector kernel; raises

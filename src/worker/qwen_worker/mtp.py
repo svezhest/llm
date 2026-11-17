@@ -38,6 +38,7 @@ import mlx.core as mx
 
 from . import config as cfg
 from .config import log
+from .kernels import _rows_linear
 
 
 class Clock:
@@ -54,6 +55,7 @@ class Clock:
     def __init__(self, ms=None):
         self.g, self.c = 1.0, dict(ms or {})
         self.sub = {}
+        self.rate = {}                  # MTPDraft: depth i >= 2 -> P(draft i kept | the ones before kept)
 
     def at(self, tag):
         """The clock of one class of requests, `tag` = (the context's size
@@ -67,7 +69,7 @@ class Clock:
         if c is None:
             near = next((x for t, x in self.sub.items() if t[0] == tag[0]), self)
             c = self.sub[tag] = Clock()
-            c.g, c.c = near.g, dict(near.c)
+            c.g, c.c, c.rate = near.g, dict(near.c), dict(near.rate)
         return c
 
     def ms(self, kind):
@@ -117,27 +119,31 @@ class MTPDraft:
     """A loaded MTP head (`model`: mlx-vlm's Qwen3_5MTPDraftModel) bound to
     the target language model `lm`; per-request state in start().
 
-    The draft count of a round (QWEN_MTP_K=0: round()) follows the head's own
-    confidence, the top-1 probability of each draft: the seed's is evaluated
-    with the previous round (verify(): the head runs over the verify block's
-    rows on the target's tokens, so after the walk the seed and its
-    confidence are read at no extra sync), and the round takes no draft
-    (a plain burst) when (1 + c1) / T(1) <= 1 / T(0); else drafts are added
-    while the expected tokens per ms rise, E / T(k) with E = 1 + sum of the
-    products of the drafts' confidences, a draft not read yet predicted by
-    the last one read. A draft's confidence is read only once the next draft
-    is queued (one sync per draft, the GPU never idle), so the verify is
-    built while the last draft computes, and no draft is computed and then
-    dropped. T(k): the measured wall time of a k-draft round (Clock, per
-    class of requests), T(0) a plain step's; unmeasured ones scaled from the
-    nearest measured by the prior 1 + R * k. Consecutive low seeds lengthen
-    the plain bursts (BURSTS: 1, 2, 4, 8 steps with step-ahead), a confident
-    one resets them; the head catches up after a burst in one flush queued
-    with its last step."""
+    The draft count of a round (QWEN_MTP_K=0: round()): k = argmax over
+    0..KMAX of E(k) / T(k), the expected tokens per ms. E(k) = 1 + p1 +
+    p1 p2 + ...: p1 is the seed's own confidence (its top-1 probability,
+    evaluated with the previous round: verify() runs the head over the verify
+    block's rows on the target's tokens, so after the walk the seed and its
+    confidence are read at no extra sync), p_i for the chained drafts the
+    measured rate at which draft i was kept when the ones before it were
+    (Clock.rate of the request's class, an EMA from RATE0; the head's own
+    confidence in a chained draft is not used: it does not know its input is
+    an approximation, and on prose "seed above 0.8" took four drafts where
+    three or more were kept in 1 round of 10). Every PROBE-th drafting round
+    takes all the drafts there is room for, so the rates of depths the rule
+    does not take stay measured. T(k): the measured wall time of a k-draft
+    round (Clock, per class of requests), T(0) a plain step's; unmeasured
+    ones scaled from the nearest measured by the prior 1 + R * k. k = 0 is a
+    burst of plain steps: consecutive ones lengthen (BURSTS: 1, 2, 4, 8 steps
+    with step-ahead), a drafting round resets them; the head catches up after
+    a burst in one flush queued with its last step. The drafts and the verify
+    are queued together: one sync per round."""
 
     kind = "mtp"
     R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
     BURSTS = (1, 2, 4, 8)               # plain steps of the n-th k = 0 round in a row
+    RATE0, A = 0.5, 0.2                 # a chained draft's keep rate: the start, the EMA's weight
+    PROBE = 8                           # every PROBE-th drafting round: all the drafts
     CHUNK = 512                         # head rows per forward (flush)
 
     def __init__(self, model, lm, k=None):
@@ -178,6 +184,7 @@ class MTPDraft:
         self.accept_lens, self.draft_lens = [], []
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
         self.low = 0                    # k = 0 rounds in a row
+        self.nround = 0                 # drafting rounds (the gate's)
         self.ks = [0] * (max(self.KMAX, cfg.MTP_K) + 1)     # rounds by draft count (0: bursts)
         self.burst_tokens = 0           # tokens of the k = 0 rounds' plain steps
         self.dropped = 0                # drafts computed and not verified
@@ -302,34 +309,37 @@ class MTPDraft:
         if self.seed is None:
             raise RuntimeError("mtp: no seed (a pushed position without its successor)")
         tok, h, conf = self.seed
-        known = [conf.item()]           # (evaluated with the last round: verify / prime)
-        T = [self._ms(k) for k in range(self.KMAX + 1)]
-        if not self.want(known, 0, T):
+        top = min(self.KMAX, room)
+        k = self.depth(conf.item(), [self._ms(k) for k in range(top + 1)], top)
+        if k == 0:                      # (the seed's confidence: evaluated with the last round)
             self.low += 1
             self.ks[0] += 1
             return self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
         self.low = 0
-        toks, confs, k = [tok], [], 1
+        toks = [tok]
         self.appended = 0
-        while k < min(self.KMAX, room) and self.want(known, k, T):
+        for _ in range(k - 1):
             h = self._forward(tok, h)
             self.appended += 1
-            tok, c = self._head(h)
+            tok = self._head(h)[0]
             toks.append(tok)
-            confs.append(c)
-            mx.async_eval(tok, c)
-            k += 1
-            if len(known) < k - 1:      # draft k - 1's confidence: draft k is queued
-                known.append(confs[len(known) - 1].item())
         self.seed = None
         self.ks[k] += 1
         return mx.concatenate(toks, axis=1) if len(toks) > 1 else toks[0]
 
-    def want(self, known, k, T):
-        """Draft k + 1 after k (0: the seed)? While it raises the expected
-        tokens per ms: gain(k + 1) / T(k + 1) > gain(k) / T(k), the drafts'
-        confidences `known` (read so far), the last one for the rest."""
-        return self.gain(known, k + 1, known[-1]) / T[k + 1] > self.gain(known, k, known[-1]) / T[k]
+    def depth(self, c1, T, top):
+        """Drafts of the next round, 0..top: the count with the most expected
+        tokens per ms, gain(k) / T[k] (0: a plain step), from the seed's
+        confidence `c1` and the class's measured keep rates of the chained
+        drafts; every PROBE-th drafting round all `top`."""
+        rate = self._clock().rate
+        ps = [c1] + [rate.get(i, self.RATE0) for i in range(2, top + 1)]
+        k = max(range(top + 1), key=lambda j: self.gain(ps, j, 0.0) / T[j])
+        if k:
+            self.nround += 1
+            if self.nround % self.PROBE == 0:
+                k = top
+        return k
 
     def draft(self, n):
         """(1, n) draft tokens (lazy): the seed, then n - 1 chained steps
@@ -388,8 +398,13 @@ class MTPDraft:
     def record(self, accepted, drafted):
         """After a round's tokens were read: its acceptance (the round's wall
         time goes to the Clock from _spec)."""
-        self.accept_lens.append(int(accepted))
-        self.draft_lens.append(int(drafted))
+        accepted, drafted = int(accepted), int(drafted)
+        self.accept_lens.append(accepted)
+        self.draft_lens.append(drafted)
+        rate = self._clock().rate
+        for i in range(2, min(drafted, accepted + 1) + 1):      # depths reached: the ones before kept
+            r = rate.get(i, self.RATE0)
+            rate[i] = r + self.A * ((accepted >= i) - r)
 
     # ---- the head ----
 
@@ -413,7 +428,7 @@ class MTPDraft:
     def _head(self, h):
         """-> (argmax (1, n) int32, top-1 probability (1, n) fp32) of the
         lm_head over h (1, n, H)."""
-        logits = self.lm.lm_head(h).astype(mx.float32)
+        logits = _rows_linear(self.lm.lm_head, h).astype(mx.float32)
         m = mx.max(logits, axis=-1)
         return (mx.argmax(logits, axis=-1).astype(mx.int32),
                 mx.exp(m - mx.logsumexp(logits, axis=-1)))
