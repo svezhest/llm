@@ -8,10 +8,11 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   loses to plain decoding (×0.74–0.83) and the target's own MTP head is the better drafter
   (×1.2–1.3 everywhere, ×1.8 on code).
 - `QWEN_DRAFT=auto` loads both and picks per round (`mtp.Chooser`): on the 27B oQ4e,
-  greedy at 2K, code ×2.07, English ×1.39, Russian ×1.17, short prose ×1.07 of plain; within
-  3 % of the best single drafter on code and English, 6–11 % under the head alone on prose
+  greedy at 2K, code ×1.94, English ×1.33, Russian ×1.20, short prose ×1.09–1.13 of plain
+  (T 0.6: ×1.78 / ×1.23 / ×1.20 / ×1.07–1.09); 0.91–1.01 of the best single setting per
+  cell, on q8 KV 1.00 (Russian 8K, English 2K), the no-draft floor 0.98–0.99 of plain
   ([perf/2026-11-17/auto_gate.md](perf/2026-11-17/auto_gate.md)). One setting for a mixed
-  load; a prose-only load is still faster on the head alone.
+  load; a prose-only load is still 4–9 % faster on the head with one fixed draft.
 - The MTP head's draft count is its own gate (`QWEN_MTP_K=0`): at least one draft a round,
   all `KMAX` where the measured keep rates pay for the matrix kernel's block (code), plain
   steps only after four rounds that kept nothing. A 2-row verify block costs ×1.17 of a

@@ -3,6 +3,8 @@
 Qwen3.8-27B oQ4e (`weights/qwen38-27b-mlx-oq4e`, `QWEN_MRQMM4/5/6=1`), drafters DFlash2
 (`weights/qwen38-27b-dflash2`) and the target's own MTP head (`weights/qwen38-27b-mtp`).
 M1 Max 32 GB, mlx 0.32.3, mlx-vlm 0.7.6. Labels: [M] measured, [D] derived, [E] estimated.
+The head is a function of the checkpoint: `scripts/perf/mtp/split_mtp.py` run again on the
+oQ4e dir writes the same `model.safetensors` (sha256 `0b763aef…56adc4`) and config [M].
 Design of the head and of the chooser: [../2026-11-16/mtp_draft.md](../2026-11-16/mtp_draft.md);
 this report is the acceptance work on top of it. Tool: `scripts/perf/mtp/gate_auto.sh`
 (`ab_mtp.py` + `gate_table.py`): every variant in one process, interleaved per prompt,
@@ -47,10 +49,40 @@ gaps are made of [D]:
   request at 16.2 tok/s against the head's 19.2), and `auto` 3–5 % under the gated head
   (DFlash's first rounds, shadow drafts, one more burst).
 
-Sampling (T 0.6) and the floor were measured on the first commit of the series (run 2,
-below): 3 of 5 and 3 of 4 (the miss: 0.969); their runs on the final rule are queued.
-Two requests per cell do not resolve 3 % under sampling: the same variant differs by
-+14 % / −21 % between two runs of a cell (another trajectory, another text).
+Sampling (T 0.6), the rule as shipped (run 8, [M], tok/s, medians of 2 requests):
+
+| cell | plain | DFlash | MTP, 1 draft | MTP, gated | `auto` | `auto` × plain | `auto` / best |
+|---|---|---|---|---|---|---|---|
+| code 2K | 15.2 | 26.6 | 20.1 | 24.5 | 27.0 | 1.78 | 1.014 pass |
+| English 2K | 15.4 | 19.9 | 18.9 | 19.9 | 18.9 | 1.23 | 0.952 |
+| Russian 2K | 15.4 | 12.7 | 18.6 | 18.6 | 18.5 | 1.20 | 0.992 pass |
+| short English | 15.6 | 16.7 | 18.4 | 18.3 | 17.0 | 1.09 | 0.922 |
+| short Russian | 15.6 | 11.1 | 17.7 | 17.6 | 16.8 | 1.07 | 0.946 |
+
+2 of 5 at 0.97, every cell ≥ 0.92 and above plain (×1.07–1.78). English 2K is a tie of
+three settings (DFlash 19.9, the gated head 19.9, one draft 18.9): `auto` splits the
+request between the arms (26 % of the rounds DFlash's, 7 and 3 switches in the two
+requests) and lands on the lowest of them. Short prose: 5–8 % of the tokens went out in bursts of plain
+steps (the gated head alone: 2–5 %), plus DFlash's first rounds. Two requests per cell do
+not resolve 3 % under sampling: one variant's two requests of a cell differ by up to 27 %
+(DFlash on short English 18.7 / 14.7; another trajectory, another text).
+
+The floor, the rule as shipped (run 8, [M]): the head's machinery with no draft taken
+(`mtpz`) 0.983–0.991 of plain, the plain path under speculation (`pplain`) 0.984–0.996,
+English 2K and short Russian, greedy and sampling — 4 of 4 cells for both (run 2: 3 of 4,
+the miss 0.969).
+
+q8 KV (`QWEN_KV_BITS=8`, the 27B's serving format), greedy, the rule as shipped (run 8,
+[M], tok/s; the fixed-draft variant here takes two drafts):
+
+| cell | plain | DFlash | MTP, 2 drafts | MTP, gated | `auto` | `auto` × plain | `auto` / best |
+|---|---|---|---|---|---|---|---|
+| Russian 8K | 15.5 | 13.8 | 18.0 | 18.9 | 19.0 | 1.23 | 1.006 pass |
+| English 2K | 15.8 | 21.7 | 19.0 | 20.4 | 21.6 | 1.37 | 0.996 pass |
+
+2 of 2: on q8 `auto` takes the head on Russian (96 % of the rounds) and DFlash on English
+(98 %), both requests of a cell within 1 % of each other. Longer contexts (8K and 32K on
+q8, a whole session of `auto`) are in [decode_27b_bench.md](decode_27b_bench.md).
 
 ## The defects, in the order the gate found them
 
@@ -130,8 +162,11 @@ inside `auto` (×2.07–2.13).
 
 ## Open
 
-- Sampling and the floor on the final commit; q8 KV and long context (the matrix's
-  `ctx` plan runs `auto` there).
+- Under sampling a request whose arms tie (English 2K: DFlash = the gated head) is split
+  between them and pays the switches (0.95); short prose under sampling loses 5–8 % of its
+  tokens to bursts of plain steps. More requests per cell are needed before tuning either:
+  two do not resolve 3 % at T 0.6.
+- 80K context for `auto` is not measured (8K and 32K are, in the benchmark report).
 - DFlash's tokens per round start every request at a fixed prior (3.0): a class prior, as
   the head's arm has, would spare the first code request its detour and Russian prose its
   first DFlash rounds.

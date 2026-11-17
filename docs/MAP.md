@@ -43,11 +43,13 @@ kernel and end to end; numerics within the batched-decode class.
 
 DFlash (9B) and DFlash2 (27B) for a lone greedy text row: ×1.4–2 on code / English, a loss
 on Russian prose, where the target's MTP head wins (×1.2–1.3). `QWEN_DRAFT=auto` loads both
-and picks per round: 27B code ×2.07, English ×1.39, Russian ×1.17 of plain; within 3 % of the
-best single drafter on code / English, 6–11 % under the head alone on prose (gate: 2 of 5
-greedy cells). Prompt lookup pays on copy-heavy turns, off by default. DFlash ≠ plain greedy
-bitwise, deterministic run to run. Open: sampling and q8 / long-context gates of `auto` on
-the final rule; the head is not sampled while DFlash runs.
+and picks per round: 27B greedy code ×1.94, English ×1.33, Russian ×1.20, short prose ×1.09–1.13
+of plain (T 0.6: ×1.78 / ×1.23 / ×1.20 / ×1.07–1.09), above plain in every cell and
+0.91–1.01 of the best single setting; the 0.97 gate holds in 1 of 5 greedy and 2 of 5
+sampled cells at fp16 KV, 2 of 2 on q8, the floor 4 of 4. Prompt lookup pays on copy-heavy
+turns, off by default. DFlash ≠ plain greedy bitwise, deterministic run to run. Open: the
+first request of a class on code (DFlash's fixed prior), tied arms under sampling; the head
+is not sampled while DFlash runs.
 
 ## Prompt cache — [prompt-cache.md](prompt-cache.md)
 
