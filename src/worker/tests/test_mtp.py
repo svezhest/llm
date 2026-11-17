@@ -832,9 +832,10 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     turn (every PROBE-th, twice as rarely after a probe that kept fewer than
     two drafts more than the depth); LOW rounds in a row with no draft kept
     (LOW_MAX = LOW: the run's length fixed, need() below): a burst of plain
-    steps, then one drafting round, the bursts longer (BURSTS) until a draft
-    is kept; an unmeasured T scaled by 1 + R * k from the nearest measured k;
-    QWEN_MTP_KMAX the ceiling."""
+    steps, then drafting rounds, after again() of them with none kept
+    (2 at a keep rate of 0.8) the next burst, longer (BURSTS), until a
+    draft is kept; an unmeasured T scaled by 1 + R * k from the nearest
+    measured k; QWEN_MTP_KMAX the ceiling."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
     monkeypatch.setattr(worker.MTPDraft, "LOW_MAX", worker.MTPDraft.LOW)
@@ -902,9 +903,11 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     clock.rate.update({3: 0.2, 4: 0.2})                  # 2.71 / 176 > 2.87 / 193 > 2.90 / 210
     seed(0.95)
     assert mt.round(9).shape == (1, 2)
+    monkeypatch.setattr(worker.MTPDraft, "B", 0.0)        # (the keep rate stays 0.8)
+    clock.keep = 0.8
     mt.fresh()
     got = []
-    for hit in [0] * mt.LOW + [0, 0, 0, 1] + [0] * mt.LOW + [0]:     # what each drafting round keeps
+    for hit in [0] * mt.LOW + [0] * 7 + [1] + [0] * mt.LOW + [0, 0]:  # what each drafting round keeps
         while True:
             seed(0.1)
             r = mt.round(9)
@@ -915,8 +918,9 @@ def test_gate_draft_count(dense, monkeypatch, clock):
         got.append("d")
     seed(0.1)
     got.append(mt.round(9))
-    # LOW misses, then bursts 8, 16, 32 with one drafting round between; a kept draft ends them
-    assert got == ["d"] * mt.LOW + [8, "d", 16, "d", 32, "d", 32, "d"] + ["d"] * mt.LOW + [8, "d", 16]
+    # LOW misses, then bursts 8, 16, 32, 64 with two drafting rounds between; a kept draft ends them
+    assert got == (["d"] * mt.LOW + [8, "d", "d", 16, "d", "d", 32, "d", "d", 64, "d", "d"]
+                   + ["d"] * mt.LOW + [8, "d", "d", 16])
     assert mt.ks[0] == 6 and mt.stats()["k"] == mt.ks
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 2)     # every 2nd drafting round
     best = worker.MTPDraft.best
@@ -960,7 +964,10 @@ def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
     moves by record() outside runs of misses only (not deep in a run, nor
     after a burst). A 9B-like stream (each draft kept with p 0.55): a few
     bursts where the fixed run of LOW sent over a fifth of the tokens to
-    plain steps; a head that keeps nothing still bursts after LOW misses."""
+    plain steps; a head that keeps nothing still bursts after LOW misses.
+    After a burst the next one needs again() misses in a row, the fewest
+    with a chance of at most EPS2 at the rate before the run, within 1..LOW
+    (was one: at the 9B's keep rate a coin flip chained bursts)."""
     import random
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
@@ -973,6 +980,11 @@ def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
         assert mt.need() == n, p
         if mt.LOW < n < mt.LOW_MAX:
             assert (1 - p) ** n < mt.EPS <= (1 - p) ** (n - 1)
+    for p, n in ((1.0, 1), (0.9, 2), (0.75, 2), (0.7, 3), (0.6, 4), (0.5, 4), (0.3, 4), (0.0, 4)):
+        clock.keep = p
+        assert mt.again() == n, p
+        if 1 < n < mt.LOW:
+            assert (1 - p) ** n <= mt.EPS2 < (1 - p) ** (n - 1)
     clock.keep = None
     mt.record(1, 1)
     assert clock.keep == pytest.approx(0.82)                         # KEEP0 + B * (1 - KEEP0)
@@ -1014,14 +1026,15 @@ def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
         return got
 
     mt.start(0)
-    clock.keep = 0.5                                     # the 9B's short prose
-    got = go([0] * 8 + [0, 0, 1])
-    assert got == ["d"] * 8 + [8, "d", 16, "d", 32, "d"]
+    clock.keep = 0.5                                     # the 9B's short prose: 8 misses, 4 after a burst
+    got = go([0] * 8 + [0] * 4 + [0, 1])
+    assert got == ["d"] * 8 + [8] + ["d"] * 4 + [16, "d", "d"]
     assert clock.keep == pytest.approx(0.5 * 0.9 ** mt.LOW)         # (the run's first LOW only)
     clock.keep = 0.8                                     # the 27B's: the fixed rule's run
     assert go([0] * 4 + [1]) == ["d"] * 4 + [8, "d"]
-    clock.keep = 0.8
-    assert go([0] * 12)[:12] == ["d"] * 4 + [8, "d", 16, "d", 32, "d", 32, "d"]  # a head that keeps nothing
+    clock.keep = 0.8                                     # a head that keeps nothing: 2 after a burst
+    assert go([0] * 16) == ["d"] * 4 + [8, "d", "d", 16, "d", "d", 32, "d", "d", 64, "d", "d",
+                                        128, "d", "d", 128, "d", "d"]
     tokens = {}
     for fixed in (True, False):
         monkeypatch.setattr(worker.MTPDraft, "LOW_MAX", mt.LOW if fixed else 8)
@@ -1030,8 +1043,20 @@ def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
         mt.start(0)
         got = go([rng.random() < 0.55 for _ in range(400)])
         tokens[fixed] = sum(x for x in got if x != "d")
-    assert tokens[True] > 0.2 * (400 * 1.55 + tokens[True])         # (~1.55 tokens a drafting round)
+    assert tokens[True] > 0.1 * (400 * 1.55 + tokens[True])         # (~1.55 tokens a drafting round)
     assert tokens[False] * 3 < tokens[True]
+    again = worker.MTPDraft.again
+    for one in (True, False):                            # the 9B's sampled keep rate, the next burst after
+        if one:                                          # one miss (the rule until 2026-11-18)
+            monkeypatch.setattr(worker.MTPDraft, "again", lambda self: 1)
+        else:
+            monkeypatch.setattr(worker.MTPDraft, "again", again)
+        rng = random.Random(4)
+        clock.keep = 0.5
+        mt.start(0)
+        got = go([rng.random() < 0.5 for _ in range(1000)])
+        tokens[one] = sum(x for x in got if x != "d")
+    assert tokens[True] > 4 * tokens[False]
 
 
 @pytest.mark.parametrize("bursts", [(1,), (1, 2, 4, 8)])

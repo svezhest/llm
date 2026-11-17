@@ -178,22 +178,29 @@ class MTPDraft:
     ones its sure continuation). Plain steps are for text the head cannot
     draft: after `run` rounds in a row with no draft kept, a burst of
     BURSTS[0] plain steps with step-ahead (the head catches up in one flush
-    queued with its last step), then one drafting round; while that one keeps
-    nothing the bursts lengthen (BURSTS), a kept draft ends them: the plain
-    loop's speed within ~3 % on text where every draft fails. `run` (need(),
-    set at a run's first miss) is the shortest run of misses less likely
-    than EPS at the class's measured keep rate (Clock.keep), within
-    LOW..LOW_MAX. A fixed LOW fitted the 27B (keep ~0.75: (1/4)^4 = 1/256);
-    on the 9B (keep 0.5-0.65) four misses came by chance every 40-70 rounds,
-    and with the bursts' doubling 9-59 % of the tokens went to plain steps
-    where one draft a round was 15-20 % faster. Bursts are not priced by the
-    Clock: its ("mtp", 0) reads a burst token at 1/1.55 of a 1-draft round
-    on both models, end to end about 1/1.3."""
+    queued with its last step), then drafting rounds again; after again()
+    of them in a row with no draft kept the next burst, longer (BURSTS), a
+    kept draft ends them: on text where every draft fails the plain loop's
+    speed within ~4 % over 300 tokens, ~2 % past 1000 (depth_sim.py
+    --none). `run` (need(), set at a run's first miss) is the shortest run
+    of misses less likely than EPS at the class's measured keep rate
+    (Clock.keep), within LOW..LOW_MAX; again() (set with it) the shortest
+    one at most as likely as EPS2, within 1..LOW (2 rounds at 0.75, 4 at
+    0.5). A fixed LOW fitted the 27B (keep ~0.75: (1/4)^4 = 1/256); on the
+    9B (keep 0.5-0.65) four misses came by chance every 40-70 rounds, and
+    with the bursts' doubling 9-59 % of the tokens went to plain steps
+    where one draft a round was 15-20 % faster. Until 2026-11-18 one missed
+    round after a burst started the next one, a coin flip at the 9B's
+    sampled keep rate: chains of up to six bursts (152 of 256 tokens of a
+    request). Bursts are not priced by the Clock: its ("mtp", 0) reads a
+    burst token at 1/1.55 of a 1-draft round on both models, end to end
+    about 1/1.3."""
 
     kind = "mtp"
     R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
-    BURSTS = (8, 16, 32)                # plain steps of the n-th burst in a row
+    BURSTS = (8, 16, 32, 64, 128)       # plain steps of the n-th burst in a row
     LOW, LOW_MAX, EPS = 4, 8, 1 / 256   # rounds in a row with no draft kept before a burst; need()
+    EPS2 = 1 / 16                       # ... before the next burst after one; again()
     KEEP0, B = 0.8, 0.1                 # the keep rate (Clock.keep): the start, the EMA's weight
     PRIOR, N = 2, 16                    # the keep rates per depth: the class's weight at a request's start, 1 / the EMA's
     MARGIN = 0.02                       # E / T over the current depth's to take another
@@ -241,6 +248,7 @@ class MTPDraft:
         self.low = 0                    # bursts in a row (no draft kept between them)
         self.miss = 0                   # drafting rounds in a row with no draft kept
         self.run = self.LOW             # ... that make a burst (need() at the run's first miss)
+        self.after = 1                  # ... that make the next one after a burst (again(), as `run`)
         self.cur = None                 # the depth taken (the gate's)
         self.nround = 0                 # drafting rounds (the gate's) since the last probe
         self.every = self.PROBE         # ... and how many until the next
@@ -377,7 +385,7 @@ class MTPDraft:
             return k, 0
         self.low += 1
         self.ks[0] += 1
-        self.miss = self.run - 1        # one drafting round after the burst
+        self.miss = self.run - self.after               # drafting rounds before the next one
         return 0, self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
 
     def depth(self, top):
@@ -425,14 +433,25 @@ class MTPDraft:
         whose chance at the class's keep rate p (Clock.keep, KEEP0 until
         measured) is below EPS, (1 - p)^n < EPS, within LOW..LOW_MAX (a
         head that keeps nothing still bursts after LOW_MAX)."""
+        return min(self.LOW_MAX, max(self.LOW, self._runs(self.EPS)))
+
+    def again(self):
+        """Rounds in a row with no draft kept after a burst before the next
+        one: the fewest whose chance at the class's keep rate is at most
+        EPS2, 1..LOW (below a keep rate of 1/2 a drafting round hardly
+        beats a plain step: a burst by chance costs little)."""
+        return min(self.LOW, max(1, self._runs(self.EPS2)))
+
+    def _runs(self, eps):
+        """The fewest n with (1 - p)^n <= eps, p the class's keep rate
+        (Clock.keep, KEEP0 until measured)."""
         p = self._clock().keep
         p = self.KEEP0 if p is None else p
         if p >= 1.0:
-            return self.LOW
+            return 1
         if p <= 0.0:
             return self.LOW_MAX
-        n = math.ceil(math.log(self.EPS) / math.log(1.0 - p) - 1e-9)
-        return min(self.LOW_MAX, max(self.LOW, n))
+        return math.ceil(math.log(eps) / math.log(1.0 - p) - 1e-9)
 
     def draft(self, n):
         """(1, n) draft tokens (lazy): the seed, then n - 1 chained steps
@@ -495,7 +514,7 @@ class MTPDraft:
         self.draft_lens.append(drafted)
         ck = self._clock()
         if not accepted and not self.miss:
-            self.run = self.need()      # (at the rate before the run)
+            self.run, self.after = self.need(), self.again()    # (at the rate before the run)
         if drafted and not self.low and self.miss < self.LOW:
             # the keep rate outside runs of misses (rounds deep in one, and
             # the ones after a burst, are the text need() tests for)

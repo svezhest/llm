@@ -14,10 +14,12 @@ that + 1 and costs T(k); a burst of n plain steps emits n at n * T(0) + one
 catch-up flush. T(k) per mode from `--ms` (ms of a plain step and of a
 1..KMAX-draft round: measured, e.g. round_prof.py), each round's time drawn
 around it with a log-normal spread `--cv`, now and then an outlier
-(`--outlier`: a pause, a cold kernel; a kind's first sample sets its Clock
-time) and a drift of the machine's speed
-per request (`--drift`; the variants of a text in one pass share it). The rounds' times feed the class's Clock as _spec
-does (every round but a request's first), record() its acceptance.
+(`--outlier`: a pause; `--cold`: a draft count's first round in a process)
+and a drift of the machine's speed per request (`--drift`; the variants of
+a text in one pass share it). The rounds' times feed the class's Clock as
+_spec does (every round but a request's first), record() its acceptance.
+`--none N` adds a text the head drafts nothing of (the plain loop's floor:
+1.0 with `--cv 0 --outlier 0,1 --drift 0`).
 
 Requests: `--rounds` passes over the texts in their order; per text the
 variants in `--variants` back to back (`mtpK`: a fixed K drafts; `mtp0`:
@@ -69,6 +71,8 @@ ap.add_argument("--mtp", default=os.path.join(os.path.dirname(os.path.abspath(__
 ap.add_argument("--head", default="q8")
 ap.add_argument("--modes", default="greedy,sampled")
 ap.add_argument("--texts", default="", help="keys in order (default: the JSON's)")
+ap.add_argument("--none", type=int, default=0,
+                help="+ a text of N positions the head drafts nothing of (key 'none')")
 ap.add_argument("--ms", action="append", default=[],
                 help="mode=T0,T1,..,TKMAX: a plain step and a k-draft round, ms")
 ap.add_argument("--variants", default="mtp1,mtp2,mtp3,mtp4,mtp0")
@@ -163,6 +167,9 @@ variants = a.variants.split(",")
 for mode in a.modes.split(","):
     T = ms[mode]
     texts = [t for t in d["texts"] if t["mode"] == mode]
+    if a.none:
+        texts.append(dict(key="none", mode=mode, gen=[0] * (a.none + 1),
+                          heads={a.head: dict(chain=[[-1] * kmax] * a.none, conf=[[0.0] * kmax] * a.none)}))
     if a.texts:
         by = {t["key"]: t for t in texts}
         texts = [by[k] for k in a.texts.split(",")]
