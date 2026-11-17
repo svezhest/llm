@@ -1,0 +1,132 @@
+# `QWEN_DRAFT=auto` on the 27B: the gate, what failed it, what was fixed
+
+Qwen3.8-27B oQ4e (`weights/qwen38-27b-mlx-oq4e`, `QWEN_MRQMM4/5/6=1`), drafters DFlash2
+(`weights/qwen38-27b-dflash2`) and the target's own MTP head (`weights/qwen38-27b-mtp`).
+M1 Max 32 GB, mlx 0.32.3, mlx-vlm 0.7.6. Labels: [M] measured, [D] derived, [E] estimated.
+Design of the head and of the chooser: [../2026-11-16/mtp_draft.md](../2026-11-16/mtp_draft.md);
+this report is the acceptance work on top of it. Tool: `scripts/perf/mtp/gate_auto.sh`
+(`ab_mtp.py` + `gate_table.py`): every variant in one process, interleaved per prompt,
+2 rounds × 256 tokens, 2K context, fp16 KV, thinking off.
+
+## The gate
+
+`auto` ≥ 0.97 × the best of the other variants in every cell — plain decode, DFlash alone
+(`dflash`), the head with one fixed draft (`mtp1+q`), the head with its own gate
+(`mtp0+q`). Cells: code / English / Russian at 2K + short English / Russian prose, greedy
+and sampling (T 0.6). The floor: the head's machinery with no draft taken (`mtpz`) and the
+plain path under speculation (`pplain`) ≥ 0.97 × plain.
+
+## Result
+
+Greedy, the last run on this commit series (gate 7, [M], tok/s, medians of 2 requests):
+
+| cell | plain | DFlash | MTP, 1 draft | MTP, gated | `auto` | `auto` × plain | `auto` / best |
+|---|---|---|---|---|---|---|---|
+| code 2K | 17.4 | 37.0 | 24.0 | 30.9 | 35.9 | 2.07 | 0.973 pass |
+| English 2K | 16.6 | 22.7 | 21.4 | 22.3 | 23.0 | 1.39 | 1.013 pass |
+| Russian 2K | 16.5 | 13.8 | 20.5 | 20.3 | 19.3 | 1.17 | 0.944 |
+| short English | 16.6 | 17.6 | 20.0 | 19.3 | 17.8 | 1.07 | 0.891 |
+| short Russian | 16.6 | 12.3 | 19.7 | 18.7 | 17.8 | 1.07 | 0.906 |
+
+2 of 5 cells. `auto` is above plain in every cell and never takes the losing drafter for a
+whole answer on Russian (DFlash alone: ×0.74–0.83); it is 3–11 % under the best single
+setting on the three prose cells where the head wins. What that gap is made of [D]:
+
+- short English: the chooser stayed on DFlash for 97 % of the rounds. The class's rate of
+  the head's arm was lost at its first sample (the decay ran from time 0, not from the
+  request's first sample), four unlucky rounds read below DFlash, and an arm that is left
+  is not sampled again (DFlash is shadow-drafted while the head runs; the head is not while
+  DFlash runs). Fixed after this run (`HEAD_PRIOR`, see below); re-measured in gate 8.
+- Russian 2K: 7 % of the rounds are DFlash's at the start of the request (it starts on
+  DFlash, whose prior is 3 tokens a round), ~1 % shadow drafts, and probe rounds of all four
+  drafts (26 against the head alone's 14).
+- short Russian: the same + three bursts of plain steps per request (22 % of the tokens at
+  the plain rate, 16.6 against the head's 19.7).
+
+Sampling (T 0.6) and the floor were measured on the first commit of the series only
+(gate 2, below): 3 of 5 and 3 of 4 (the miss: 0.969). Two requests per cell do not resolve
+3 % under sampling: the same variant differs by +14 % / −21 % between two runs of a cell
+(another trajectory, another text).
+
+## The six defects, in the order the gate found them
+
+Each row is one commit and the gate run that measured the one before it. `auto / best` per
+cell: code, English, Russian, short English, short Russian (greedy). The machine's speed
+differs between runs (plain 11.4 … 17.4 tok/s: thermal state), so only ratios inside one
+run compare.
+
+| run | what the run showed | `auto / best` | fix |
+|---|---|---|---|
+| — | (the block prices below) 3-row verify blocks through the exact multi-row qmv cost ×1.80 of a step, through mrqmm ×1.48 | — | `auto`: `QWEN_VERIFY_QMV` 3 → 2 |
+| 2 | (fixed variant: 2 drafts) the head's `lm_head` over a block's rows went through the library's `quantized_matmul` (a 1-draft round ×1.70 of a step); the depth rule read "seed confidence > 0.8 → 4 drafts": chained confidences come one draft late and are overconfident, 3 + drafts were kept in 1 round of 10 on prose | 0.91 0.98 1.01 0.99 0.97 | `kernels._rows_linear` (the block's own kernels); depth from measured keep rates per depth (`Clock.rate`), a probe round keeps them measured |
+| 3 | 10–20 % of prose rounds took no draft: the seed's top-1 probability understates its keep rate under greedy (a seed of 0.4 is kept far more often) | 0.85 0.94 0.93 0.94 0.86 | the seed's keep rate measured per confidence bin (`Clock.seed`, 5 bins, optimistic start) |
+| 4 | still 25 % of the tokens in no-draft rounds: a no-draft round was priced as a plain step of the plain loop (Clock 77.8 ms), the head's own cost ~15 % more | 0.91 0.89 0.91 0.86 0.85 | no-draft rounds timed as their own kind `("mtp", 0)`; a request starts on DFlash once the head's arm is known in its class (`Clock.arm`) |
+| 5 | the chooser is right in steady state (code and English all DFlash from the 2nd request); bursts of 2 / 4 / 8 plain steps after one unlikely seed skip the sure tokens after it (short Russian: 53 burst rounds) | 0.92 0.99 0.92 0.89 0.82 | bursts 1, 1, 1, 2, 4, 8 |
+| 6 | a single plain step between two rounds costs about a 1-draft round (no step-ahead, the head's catch-up); probes of all four drafts every 8th round cost 6 % | 0.91 0.98 0.91 0.91 0.93 | the rule picks among 1..`KMAX` only; plain steps only as a burst of 8 / 16 / 32 after 4 rounds in a row that kept nothing; probe interval doubles (8 … 64) while probes keep ≤ 1 draft |
+| 7 | the gated head ≥ one fixed draft on code (+29 %) and English (+4 %), 0.99 / 0.965 / 0.95 on Russian / short prose; `auto` stuck on DFlash on short English | 0.97 1.01 0.94 0.89 0.91 | the head's arm keeps its class rate with the weight of 8 rounds, aged from the request's first sample; probes reset only at ≥ 3 kept |
+
+Per-run tables (speeds, arms' shares, rounds by k and by accepted drafts, the Clock):
+`raw/gate<N>_auto_greedy.{txt,json}`, `raw/gate2_auto_sampling.*`, `raw/gate2_floor_auto.*`.
+
+The head with its own gate (`mtp0+q`) against one fixed draft (`mtp1+q`), per run — the
+quantity the fixes of runs 3–6 moved [M]:
+
+| run | code | English | Russian | short English | short Russian |
+|---|---|---|---|---|---|
+| 3 | 1.25 | 1.01 | 0.96 | 0.95 | 0.90 |
+| 4 | 1.29 | 0.97 | 0.93 | 0.91 | 0.86 |
+| 5 | 1.30 | 1.02 | 0.96 | 0.91 | 0.87 |
+| 6 | 1.27 | 1.03 | 0.97 | 0.96 | 0.91 |
+| 7 | 1.29 | 1.04 | 0.99 | 0.965 | 0.95 |
+
+## What a verify block costs (the physics under the rule)
+
+One quiet run, 15 iterations per row count after a 300 s cool-down, code prompt at 2K
+(`raw/verify_block_anatomy.json`; measured on the `qmv5` branch, whose "cur" and "mm"
+routes are main's exact multi-row qmv and mrqmm) [M]:
+
+| rows T | exact multi-row qmv ("cur") | mrqmm ("mm") | what `auto` takes | × a 1-row step (59.2 ms) |
+|---|---|---|---|---|
+| 2 | 69.1 ms | 87.9 ms | qmv | 1.17 |
+| 3 | 106.5 ms | 87.6 ms | mrqmm | 1.48 |
+| 4 | 369 ms | 88.5 ms | mrqmm | 1.49 |
+| 5 | 473 ms | 91.8 ms | mrqmm | 1.55 |
+
+A second row rides in the slack of the scalar kernel (+16 %); from three rows on the cost
+is the matrix kernel's fixed work per weight, flat in T (≈ ×1.5 for 3..8 rows). So with a
+keep rate p1 for the first draft and p2.. for the chained ones, depth 1 pays when
+(1 + p1) / 1.17 > 1, i.e. always on text the head can draft at all, and depths 2–4 cost the
+same, so the choice is 1 or `KMAX`: all four pay only when
+p1·p2·(1 + p3·(1 + p4)) > 0.5·(1 + p1) [D]. Code meets that (69 of 139 gated rounds keep
+all four), Russian prose does not (run 2, where the old rule drafted four in 152 rounds:
+77 kept two or more, 21 three or more — about 2.5 tokens a round [E] at ×1.5 the time of a
+1-draft round's 1.8).
+
+The same numbers bound what the head can reach on this machine: a 1-draft round is ×1.5 of
+a plain step end to end (89 ms against 59: the block, the head, the sync), so ×1.24–1.29
+on prose is (1 + p1) / 1.5 with p1 ≈ 0.75–0.8 kept, and the targets set for the head
+(English ×1.6, code ×2.1) need blocks of 3–5 rows at ×1.20–1.35 of a step, below the
+matrix kernel's measured ×1.48 [D]. On code the same class of gain comes from DFlash
+inside `auto` (×2.07–2.13).
+
+## Rules as shipped
+
+- `MTPDraft.depth`: k = argmax over 1..`KMAX` of E(k) / T(k); E from `Clock.seed` (the
+  seed's keep rate per confidence bin) and `Clock.rate` (the keep rate of depth i given
+  i − 1 kept), both EMAs per class of requests; T from the Clock (`("mtp", k)`).
+- Probe: all the drafts there is room for, every 8th drafting round, twice as rarely (up
+  to 64) after each probe that kept ≤ 2.
+- Plain steps: only after 4 drafting rounds in a row that kept nothing — a burst of 8,
+  then one drafting round; 16, 32 while that one keeps nothing; a kept draft ends them.
+- `Chooser`: a class's first request starts on the head; later ones on DFlash with the
+  head's arm seeded from the class's last request (weight of 8 rounds); DFlash is
+  shadow-drafted while the head runs; a switch needs a 2 % margin.
+
+## Open
+
+- Sampling and the floor on the final commit; q8 KV and long context (the matrix's
+  `ctx` plan runs `auto` there).
+- The head is not sampled while DFlash runs; a shadow of its first draft would need the
+  head's catch-up every round (not free). Until then the class prior carries it.
+- Requests of one class mix code and prose: the per-class keep rates follow the last
+  requests, a per-request start costs a few probe rounds.

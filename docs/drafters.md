@@ -4,9 +4,19 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
 
 - Speculation runs only for a lone text row (greedy; sampling is opt-in); it is demoted to a
   batch row when another request would be admitted next to it.
-- DFlash (9B) and DFlash2 (27B) speed code and English up ×1.4–2; on short Russian prose
-  DFlash loses to plain decoding and the target's own MTP head is the better drafter. The
-  hybrid of both loses to the better single one: load one drafter ([knobs.md](knobs.md)).
+- DFlash (9B) and DFlash2 (27B) speed code and English up ×1.4–2; on Russian prose DFlash
+  loses to plain decoding (×0.74–0.83) and the target's own MTP head is the better drafter
+  (×1.2–1.3 everywhere, ×1.8 on code).
+- `QWEN_DRAFT=auto` loads both and picks per round (`mtp.Chooser`): on the 27B oQ4e,
+  greedy at 2K, code ×2.07, English ×1.39, Russian ×1.17, short prose ×1.07 of plain; within
+  3 % of the best single drafter on code and English, 6–11 % under the head alone on prose
+  ([perf/2026-11-17/auto_gate.md](perf/2026-11-17/auto_gate.md)). One setting for a mixed
+  load; a prose-only load is still faster on the head alone.
+- The MTP head's draft count is its own gate (`QWEN_MTP_K=0`): at least one draft a round,
+  all `KMAX` where the measured keep rates pay for the matrix kernel's block (code), plain
+  steps only after four rounds that kept nothing. A 2-row verify block costs ×1.17 of a
+  step, 3–5 rows ×1.48–1.55 (the kernels' floor on this machine), which caps the head at
+  about (1 + keep rate) / 1.5.
 - Prompt lookup (`QWEN_LOOKUP=draft`) pays on turns that copy earlier text; default off.
 - The verify attention is the one-pass kernel (`QWEN_VERIFY_ATT=2`, `QWEN_VATT_Q8=1`,
   [kernels.md](kernels.md)). DFlash is not bit-equal to plain greedy (near-ties) but is

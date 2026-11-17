@@ -1,5 +1,10 @@
 # The 27B's native MTP head as a speculative drafter (QWEN_DRAFT=<MTP dir>)
 
+> Later (2026-11-17): the draft-count rule and the chooser described here were replaced
+> after the GPU gate — see [../2026-11-17/auto_gate.md](../2026-11-17/auto_gate.md). The
+> knobs `QWEN_MTP_REFEED` / `QWEN_MTP_COST` and the replay tools `chooser_sim.py` /
+> `gate_sim.py` named below no longer exist; the numbers stand as measured on that day.
+
 Qwen3.8-27B ships one multi-token-prediction layer (`mtp_num_hidden_layers: 1`). The oQ4e
 checkpoint (`weights/qwen38-27b-mlx-oq4e`) keeps it as `language_model.mtp.*`; the
 uniform 4-bit lmstudio build (`qwen38-27b-mlx-4bit`, "u4" below) drops it. This report

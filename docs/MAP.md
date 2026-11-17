@@ -42,9 +42,12 @@ kernel and end to end; numerics within the batched-decode class.
 ## Speculative decoding — [drafters.md](drafters.md)
 
 DFlash (9B) and DFlash2 (27B) for a lone greedy text row: ×1.4–2 on code / English, a loss
-on short Russian prose, where the target's MTP head wins. Load one drafter (the hybrid
-loses). Prompt lookup pays on copy-heavy turns, off by default. DFlash ≠ plain greedy
-bitwise, deterministic run to run. Measured; open: an acceptance-based fallback to plain.
+on Russian prose, where the target's MTP head wins (×1.2–1.3). `QWEN_DRAFT=auto` loads both
+and picks per round: 27B code ×2.07, English ×1.39, Russian ×1.17 of plain; within 3 % of the
+best single drafter on code / English, 6–11 % under the head alone on prose (gate: 2 of 5
+greedy cells). Prompt lookup pays on copy-heavy turns, off by default. DFlash ≠ plain greedy
+bitwise, deterministic run to run. Open: sampling and q8 / long-context gates of `auto` on
+the final rule; the head is not sampled while DFlash runs.
 
 ## Prompt cache — [prompt-cache.md](prompt-cache.md)
 

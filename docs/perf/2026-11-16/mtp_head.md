@@ -1,5 +1,10 @@
 # The 27B's MTP head: 4-bit vs 8-bit vs fp16, acceptance per depth, chaining, cost
 
+> Later (2026-11-17): the draft-count rule and the chooser described here were replaced
+> after the GPU gate — see [../2026-11-17/auto_gate.md](../2026-11-17/auto_gate.md). The
+> knobs `QWEN_MTP_REFEED` / `QWEN_MTP_COST` and the replay tools `chooser_sim.py` /
+> `gate_sim.py` named below no longer exist; the numbers stand as measured on that day.
+
 Status: **probe and tables written and checked on the CPU (tiny random model); no GPU run yet.**
 Every number cell below is empty until `accept_probe.py` has run on the 27B. Labels as in
 `mtp_draft.md`: [M] measured, [D] derived, [E] estimated.
