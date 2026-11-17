@@ -257,7 +257,9 @@ def test_chooser_head_is_the_default_arm(clock):
     c = worker.Chooser(("dflash", "mtp"), mtp=object())
     assert c.expect("mtp")[0] == pytest.approx(2.0) and c.pick() == "dflash"
     dflash(1.0)
-    assert c.pick() == "mtp" and c.switches == 1
+    assert c.pick(now=5e6) == "mtp" and c.switches == 1
+    c.timed("mtp", 1.0, 115.0)                           # an unlucky round: the class's rate still weighs
+    assert c.expect("mtp")[0] == pytest.approx((2.0 * c.HEAD_PRIOR + 1.0) / (c.HEAD_PRIOR + 1))
 
 
 def test_chooser_shadows_cadence(clock):
@@ -712,7 +714,7 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     most expected tokens per ms, E(k) / T(k), E from the class's keep rates
     of seeds of this confidence (Clock.seed) and of the chained drafts
     (Clock.rate), both moved by record(); a probe round takes all the room
-    (every PROBE-th, rarer after probes that kept at most one draft); LOW
+    (every PROBE-th, rarer after probes that kept at most two drafts); LOW
     rounds in a row with no draft kept: a burst of plain steps, then one
     drafting round, the bursts longer (BURSTS) until a draft is kept; an
     unmeasured T scaled by 1 + R * k from the nearest measured k;
@@ -787,8 +789,8 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     mt.fresh()
     clock.rate.clear()
     shapes = []
-    for kept in (1, 1, 1, 1, 1, 2, 1, 1, 1):             # probes: round 2, round 6 (4 rounds after a probe
-        seed(0.95)                                       # that kept one), round 8 (it kept two: back to 2)
+    for kept in (1, 1, 1, 1, 1, 3, 1, 1, 1):             # probes: round 2, round 6 (4 rounds after a probe
+        seed(0.95)                                       # that kept one), round 8 (it kept three: back to 2)
         shapes.append(mt.round(9).shape[1])
         mt.record(kept, shapes[-1])
     assert shapes == [1, 4, 1, 1, 1, 4, 1, 4, 1] and mt.every == 4

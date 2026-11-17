@@ -137,7 +137,7 @@ class MTPDraft:
     drafts where three or more were kept in 1 round of 10). A probe round
     takes all the drafts there is room for, so the rates of depths the rule
     does not take stay measured: every PROBE-th drafting round, and twice as
-    rarely (up to PROBE_MAX) after each probe that kept at most one draft (a
+    rarely (up to PROBE_MAX) after each probe that kept at most two drafts (a
     probe costs half a round on the 27B: every 8th was 6 % of prose). T(k): the measured wall time of a
     k-draft round (Clock, per class of requests); unmeasured ones scaled from
     the nearest measured by the prior 1 + R * k. The drafts and the verify
@@ -443,7 +443,7 @@ class MTPDraft:
             self.miss += 1
         if self.probe:
             self.probe = False
-            self.every = self.PROBE if accepted > 1 else min(2 * self.every, self.PROBE_MAX)
+            self.every = self.PROBE if accepted > 2 else min(2 * self.every, self.PROBE_MAX)
         ck = self._clock()
         rate, b, self.bin = ck.rate, self.bin, None
         if b is not None and drafted:
@@ -515,7 +515,10 @@ class Chooser:
 
     The head's arm is the first one until it is measured in the request's
     class (Clock.arm: its rate in the class's last request, the weight of
-    PRIOR rounds in the next one); with that known a request starts on the
+    HEAD_PRIOR rounds in the next one, decayed from the request's first
+    sample on - a head left after 4 unlucky rounds is never sampled again,
+    and with the prior gone at its first sample short English prose stayed on
+    DFlash 11 % behind it); with that known a request starts on the
     first arm of START it has - DFlash: where it leads (code) no round is
     spent finding that out, where it loses its own first rounds say so and
     the head's arm, which needs no evidence, takes over. The current arm is
@@ -525,6 +528,7 @@ class Chooser:
 
     TAU = 2500.0
     PRIOR = 2
+    HEAD_PRIOR = 8                              # rounds: the weight of the class's last rate of the head's arm
     PRIORS = {"dflash": 3.0}
     START = ("dflash", "mtp", "plain")
     MARGIN = 0.02                               # (the gate allows 3 % below the best arm)
@@ -544,7 +548,7 @@ class Chooser:
         self.m = [0.0, 0.0, 0.0, 0.0, 1.0]      # the head's arm: decayed tokens, ms, rounds; t; Clock g
         if self.head and self.clock.arm is not None:
             tok, ms, g = self.clock.arm
-            self.m = [tok * self.PRIOR, ms * self.PRIOR, float(self.PRIOR), 0.0, g]
+            self.m = [tok * self.HEAD_PRIOR, ms * self.HEAD_PRIOR, float(self.HEAD_PRIOR), None, g]
         self.n = {k: 0 for k in kinds}          # rounds taken
         self.got = {k: 0 for k in kinds}        # tokens of those rounds
         self.shadowed = {k: 0 for k in kinds}   # shadow drafts
@@ -559,6 +563,8 @@ class Chooser:
         if not (self.head and k == "mtp") or ms <= 0.0:
             return
         m = self.m
+        if m[3] is None:                        # the class's prior: it ages from this request's first sample
+            m[3] = self.t
         d = math.exp(-max(0.0, self.t - m[3]) / self.TAU)
         m[0], m[1], m[2] = m[0] * d + tokens, m[1] * d + ms, m[2] * d + 1.0
         m[3], m[4] = max(m[3], self.t), self.clock.g
