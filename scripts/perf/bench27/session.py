@@ -13,7 +13,8 @@ Run it with the worker venv's python (stdlib otherwise): its `tokenizers` counts
 each stream's first chunk (bench_decode.decode_tps); under a plain python3 that count is 1.
 
 Systems (`--list`): ours-plain / ours-dflash (worker + gateway of --code, the 4-bit),
-ours-oq4e-plain / -dflash / -mtp / -auto (QWEN_DRAFT=auto), mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
+ours-oq4e-plain / -dflash / -mtp / -auto (QWEN_DRAFT=auto), the 9B (Ornith 1.5, MLX 8-bit): ours9-plain /
+-dflash / -mtp / -auto, mlx-vlm9, llama9-q8_0 / llama9-q8_0-mtp (one GGUF with the MTP layers); mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
 from the worker venv), llama-q4_0 / llama-q4kxl / llama-q4_0-mtp / llama-q4_0-dflash
 (llama-server), llama-bench-q4_0 / -q4kxl, ppl-mlx-4bit / ppl-mlx-oq4e / ppl-llama-q4_0 /
 ppl-llama-q4kxl (perplexity). --env adds/overrides process env (ours: the worker's);
@@ -44,6 +45,15 @@ CODE_DEFAULT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 GGUF_DIR = "gguf-qwen38-27b"
 GGUF = {"q4_0": "Qwen3.8-27B-Q4_0.gguf", "q4kxl": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
         "mtp": "mtp-Qwen3.8-27B-Q4_0.gguf", "dflash": "dflash-Qwen3.8-27B-Q4_0.gguf"}
+GGUF9_DIR = "gguf-ornith15-9b"                # the 9B (Ornith 1.5): Q8_0 = the precision of the MLX 8-bit checkpoint;
+GGUF9 = {"q8_0": "Ornith-1.5-9B-MTP-Q8_0.gguf"}  # one file with the nextn (MTP) layers: plain and draft-mtp (md=0)
+# the 9B worker recipe: a lone row, fp16 KV (docs/models.md), the stand's cache settings without its disk tier
+OURS9_ENV = {
+    "QWEN_KV_BITS": "0", "QWEN_MAX_BATCH": "1", "QWEN_MAX_CONTEXT": "131072", "QWEN_PROMPT_CACHE": "1",
+    "QWEN_PROMPT_CACHE_GB": "4", "QWEN_PROMPT_CACHE_REPLY": "0", "QWEN_PRESENCE_PENALTY": "0", "LOG_LEVEL": "INFO",
+}
+# drafter dirs per model family: (DFlash, MTP head)
+DRAFTERS = {"qwen38-27b": ("qwen38-27b-dflash2", "qwen38-27b-mtp"), "ornith15-9b": ("qwen35-9b-dflash", "_staging/ornith15-9b-mtp")}
 # the 27B worker recipe (docs/drafters.md "DFlash2 on the 27B", long context; 80K fits under a 27 GiB wired limit)
 OURS_ENV = {
     "QWEN_TEXT_ONLY": "1", "QWEN_MRQMM4": "1", "QWEN_KV_BITS": "0", "QWEN_MAX_BATCH": "1",
@@ -75,15 +85,16 @@ def ctx_for(plan_name):
 
 
 # --------------------------------------------------------------------------- systems
-def ours(ctx, model_dir, draft):
+def ours(ctx, model_dir, draft, base=None):
     w = ctx["weights"]
-    env = dict(OURS_ENV, QWEN_MODEL=os.path.join(w, ctx["set"].get("model", model_dir)))
+    env = dict(OURS_ENV if base is None else base, QWEN_MODEL=os.path.join(w, ctx["set"].get("model", model_dir)))
+    dflash, head = DRAFTERS[next(k for k in DRAFTERS if model_dir.startswith(k))]
     if draft == "auto":                          # every drafter found next to the model dir, chosen per round
         env.update(QWEN_DRAFT="auto")
     elif draft == "mtp":                         # the target's own MTP head (qwen_worker/mtp.py)
-        env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-mtp"), QWEN_MTP_K="0")
+        env.update(QWEN_DRAFT=os.path.join(w, head), QWEN_MTP_K="0")
     elif draft:
-        env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-dflash2"), QWEN_DRAFT_SAMPLING="1")
+        env.update(QWEN_DRAFT=os.path.join(w, ctx["set"].get("dflash", dflash)), QWEN_DRAFT_SAMPLING="1")
     env.update(ctx["env"])
     wdir = os.path.join(ctx["code"], "src", "worker")
     py = os.path.join(wdir, ".venv", "bin", "python")
@@ -106,9 +117,9 @@ def ours(ctx, model_dir, draft):
     }
 
 
-def mlx_vlm(ctx, draft):
+def mlx_vlm(ctx, draft, model_dir="qwen38-27b-mlx-4bit"):
     w = ctx["weights"]
-    model = os.path.join(w, ctx["set"].get("model", "qwen38-27b-mlx-4bit"))
+    model = os.path.join(w, ctx["set"].get("model", model_dir))
     py = os.path.join(ctx["code"], "src", "worker", ".venv", "bin", "python")
     argv = [py, "-m", "mlx_vlm.server", "--model", model, "--host", "127.0.0.1", "--port", str(ctx["port"])]
     if draft:
@@ -119,25 +130,25 @@ def mlx_vlm(ctx, draft):
             "ready": "/health", "model": model, "extra": {}, "drop": []}
 
 
-def llama(ctx, quant, spec=None):
-    g = os.path.join(ctx["weights"], GGUF_DIR)
-    gguf = os.path.join(g, GGUF[quant])
+def llama(ctx, quant, spec=None, gdir=GGUF_DIR, files=GGUF, name="qwen38-27b-"):
+    g = os.path.join(ctx["weights"], gdir)
+    gguf = os.path.join(g, files[quant])
     c = int(ctx["set"].get("ctx", ctx_for(ctx["plan"])))
     argv = ["llama-server", "-m", gguf, "-ngl", "99", "-fa", "on", "-c", str(c), "--jinja", "-np", "1",
             "--host", "127.0.0.1", "--port", str(ctx["port"]), "--cache-ram", str(ctx["set"].get("cache_ram", 0))]
     if spec:
         argv += ["--spec-type", f"draft-{spec}"]
-        if ctx["set"].get("md", "1") != "0":   # md=0: the target's own nextn (MTP) layer, no draft file
-            argv += ["-md", os.path.join(g, GGUF[spec])]
+        if ctx["set"].get("md", "1") != "0" and spec in files:   # md=0: the target's own nextn (MTP) layer, no draft file
+            argv += ["-md", os.path.join(g, files[spec])]
         if "n_max" in ctx["set"]:
             argv += ["--spec-draft-n-max", str(ctx["set"]["n_max"])]
     argv += ctx["set"].get("args", "").split()
-    for f in [gguf] + ([os.path.join(g, GGUF[spec])] if spec else []):
+    for f in [gguf] + ([os.path.join(g, files[spec])] if spec in files else []):
         if not os.path.exists(f) or os.path.exists(f + ".aria2"):
             raise SystemExit(f"{f}: missing or still downloading")
     return {"procs": [{"name": "llama-server", "argv": argv, "env": dict(ctx["env"]), "cwd": ctx["dir"],
                        "mem": True}],
-            "ready": "/health", "model": "qwen38-27b-" + quant,
+            "ready": "/health", "model": name + quant,
             "extra": {"cache_prompt": True, "repeat_penalty": 1.0, "presence_penalty": 0.0,
                       "frequency_penalty": 0.0},
             "drop": [], "template_check": True}
@@ -188,6 +199,13 @@ SYSTEMS = {
     "ours-oq4e-dflash": lambda c: ours(c, "qwen38-27b-mlx-oq4e", True),
     "ours-oq4e-mtp": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "mtp"),
     "ours-oq4e-auto": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "auto"),
+    "ours9-plain": lambda c: ours(c, "ornith15-9b-mlx-8bit", False, OURS9_ENV),
+    "ours9-dflash": lambda c: ours(c, "ornith15-9b-mlx-8bit", True, OURS9_ENV),
+    "ours9-mtp": lambda c: ours(c, "ornith15-9b-mlx-8bit", "mtp", OURS9_ENV),
+    "ours9-auto": lambda c: ours(c, "ornith15-9b-mlx-8bit", "auto", OURS9_ENV),
+    "mlx-vlm9": lambda c: mlx_vlm(c, False, "ornith15-9b-mlx-8bit"),
+    "llama9-q8_0": lambda c: llama(c, "q8_0", None, GGUF9_DIR, GGUF9, "ornith15-9b-"),
+    "llama9-q8_0-mtp": lambda c: llama(c, "q8_0", "mtp", GGUF9_DIR, GGUF9, "ornith15-9b-"),
     "mlx-vlm": lambda c: mlx_vlm(c, False),
     "mlx-vlm-dflash": lambda c: mlx_vlm(c, True),
     "llama-q4_0": lambda c: llama(c, "q4_0"),
