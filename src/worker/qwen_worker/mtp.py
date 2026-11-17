@@ -57,6 +57,7 @@ class Clock:
         self.sub = {}
         self.rate = {}                  # MTPDraft: depth i >= 2 -> P(draft i kept | the ones before kept)
         self.seed = {}                  # MTPDraft: bin of the seed's confidence -> P(the seed kept)
+        self.arm = None                 # Chooser: the head's arm as last measured (tokens, ms per round, g)
 
     def at(self, tag):
         """The clock of one class of requests, `tag` = (the context's size
@@ -71,6 +72,7 @@ class Clock:
             near = next((x for t, x in self.sub.items() if t[0] == tag[0]), self)
             c = self.sub[tag] = Clock()
             c.g, c.c, c.rate, c.seed = near.g, dict(near.c), dict(near.rate), dict(near.seed)
+            c.arm = near.arm
         return c
 
     def ms(self, kind):
@@ -212,8 +214,12 @@ class MTPDraft:
 
     @staticmethod
     def kind_of(k):
-        """The Clock kind of a k-draft round (0: a plain step)."""
-        return "plain" if k == 0 else ("mtp", k)
+        """The Clock kind of a k-draft round. 0: a token of the head's
+        no-draft rounds, their sync and the head's catch-up included (a plain
+        step of the plain loop is "plain": ~15 % less on the 27B, and taking
+        it for the price of a no-draft round sent a quarter of the tokens to
+        bursts where one draft per round was faster)."""
+        return ("mtp", k)
 
     def _ms(self, k):
         """Expected wall time of a k-draft round (k = 0: one plain step):
@@ -490,7 +496,12 @@ class Chooser:
     often as its drafts cost NEAR of the time (an arm within CLOSE of the
     current one's rate) or FAR.
 
-    The request starts on the first arm of START it has. The current arm is
+    The head's arm is the first one until it is measured in the request's
+    class (Clock.arm: its rate in the class's last request, the weight of
+    PRIOR rounds in the next one); with that known a request starts on the
+    first arm of START it has - DFlash: where it leads (code) no round is
+    spent finding that out, where it loses its own first rounds say so and
+    the head's arm, which needs no evidence, takes over. The current arm is
     left only for one whose rate is MARGIN higher and, a drafter other than
     the head, known from >= NEED recent samples. An arm other than the head
     never timed in this class of requests is taken PROBE rounds first."""
@@ -498,7 +509,7 @@ class Chooser:
     TAU = 2500.0
     PRIOR = 2
     PRIORS = {"dflash": 3.0}
-    START = ("mtp", "dflash", "plain")
+    START = ("dflash", "mtp", "plain")
     MARGIN = 0.02                               # (the gate allows 3 % below the best arm)
     WARM, NEED = 3, 2.5
     NEAR, FAR, CLOSE = 0.01, 0.004, 0.8
@@ -514,6 +525,9 @@ class Chooser:
         pri = dict(self.PRIORS, **(priors or {}))
         self.tok = {k: Avg(pri.get(k, 2.0), self.PRIOR) for k in kinds}
         self.m = [0.0, 0.0, 0.0, 0.0, 1.0]      # the head's arm: decayed tokens, ms, rounds; t; Clock g
+        if self.head and self.clock.arm is not None:
+            tok, ms, g = self.clock.arm
+            self.m = [tok * self.PRIOR, ms * self.PRIOR, float(self.PRIOR), 0.0, g]
         self.n = {k: 0 for k in kinds}          # rounds taken
         self.got = {k: 0 for k in kinds}        # tokens of those rounds
         self.shadowed = {k: 0 for k in kinds}   # shadow drafts
@@ -531,6 +545,7 @@ class Chooser:
         d = math.exp(-max(0.0, self.t - m[3]) / self.TAU)
         m[0], m[1], m[2] = m[0] * d + tokens, m[1] * d + ms, m[2] * d + 1.0
         m[3], m[4] = max(m[3], self.t), self.clock.g
+        self.clock.arm = (m[0] / m[2], m[1] / m[2], m[4])
 
     def expect(self, k):
         """(tokens per round, ms per round or None: never timed) of arm k."""

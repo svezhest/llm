@@ -212,7 +212,8 @@ def test_avg_weights_samples_by_age():
 
 def test_chooser_head_is_the_default_arm(clock):
     """With the gated head: DFlash never timed is probed PROBE rounds (the
-    head never is), the head is taken until it is measured, DFlash wins only
+    head never is), the head is taken until it is measured (a later request
+    of the class starts on DFlash, the head's rate known), DFlash wins only
     by a MARGIN known from recent samples, and the head is taken back on the
     margin alone; its rate (tokens / ms of its rounds) follows the drift
     while it is not taken; nothing else is a plain arm."""
@@ -250,6 +251,12 @@ def test_chooser_head_is_the_default_arm(clock):
         clock.add("dflash", 234.0)                       # the machine 30 % slower
     assert c.expect("mtp")[1] == pytest.approx(115.0 * clock.g, rel=1e-6) and clock.g > 1.2
     assert c.pick(force="dflash") == "dflash" and c.switches == 4
+    # the class's next request: the head's arm is known (Clock.arm), so it starts on DFlash
+    # and the head takes over as soon as DFlash's own rounds read below it
+    c = worker.Chooser(("dflash", "mtp"), mtp=object())
+    assert c.expect("mtp")[0] == pytest.approx(2.0) and c.pick() == "dflash"
+    dflash(1.0)
+    assert c.pick() == "mtp" and c.switches == 1
 
 
 def test_chooser_shadows_cadence(clock):
@@ -259,6 +266,7 @@ def test_chooser_shadows_cadence(clock):
     clock.add("dflash", 180.0)
     c = worker.Chooser(("dflash", "mtp"), mtp=object())
     c.timed("mtp", 2.9, 115.0)                           # 25.2 tok/s
+    c.cur = "mtp"                                        # (a request under way on the head's arm)
     t = 0.0
 
     def go(n, tok):
