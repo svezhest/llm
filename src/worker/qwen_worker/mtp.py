@@ -141,14 +141,19 @@ class MTPDraft:
     does not take stay measured. T(k): the measured wall time of a k-draft
     round (Clock, per class of requests), T(0) a plain step's; unmeasured
     ones scaled from the nearest measured by the prior 1 + R * k. k = 0 is a
-    burst of plain steps: consecutive ones lengthen (BURSTS: 1, 2, 4, 8 steps
-    with step-ahead), a drafting round resets them; the head catches up after
-    a burst in one flush queued with its last step. The drafts and the verify
+    burst of plain steps: one step, and only from the 4th no-draft round in a
+    row longer (BURSTS: 1, 1, 1, 2, 4, 8 steps with step-ahead; a drafting
+    round resets them): in prose an unlikely seed is a word's first token and
+    the next ones are its sure continuation, which a longer burst would skip
+    (bursts of 2..8 right away cost the gated head 4-13 % against one fixed
+    draft on Russian prose); a long run of them is text the head cannot
+    draft, where 8-step bursts keep the plain loop's speed. The head catches
+    up after a burst in one flush queued with its last step. The drafts and the verify
     are queued together: one sync per round."""
 
     kind = "mtp"
     R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
-    BURSTS = (1, 2, 4, 8)               # plain steps of the n-th k = 0 round in a row
+    BURSTS = (1, 1, 1, 2, 4, 8)         # plain steps of the n-th k = 0 round in a row
     RATE0, A = 0.5, 0.2                 # a chained draft's keep rate: the start, the EMA's weight
     PROBE = 8                           # every PROBE-th drafting round: all the drafts
     BINS, SEED0, B = 5, 0.8, 0.1        # the seed's keep rate per confidence bin: the start (at least), the EMA's weight
