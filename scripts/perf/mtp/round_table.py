@@ -62,7 +62,8 @@ def table(rows, title, out):
         tail = stats([laps.get("tail", 0.0) for p, f, laps in rs if p])
         ex = st["exposed"]
         xp = (f"{st['wall']['mean'] / loop:5.2f}/{ex['mean'] / loop:5.2f}" if loop else "")
-        out.append(f"{key:7s} {len(main):4d} {st['tokens']['mean']:5.2f} {st['wall']['p50']:6.1f}/{st['wall']['mean']:6.1f}  "
+        out.append(f"{key:7s} {len(main):4d} {st['tokens']['mean']:5.2f} "
+                   f"{st['wall']['p50']:6.1f}/{st['wall']['mean']:6.1f}  "
                    + " ".join(f"{st[s]['mean']:6.2f}" for s in SPANS)
                    + f" {st['gpu']['mean']:6.1f} {ex['mean']:6.2f}/{ex['p50']:6.2f}/{ex['p90']:6.2f}"
                    + f" {cpu / host if host else 0:5.2f} {tail['p50'] if tail['n'] else float('nan'):5.2f} {xp:>12s}")
