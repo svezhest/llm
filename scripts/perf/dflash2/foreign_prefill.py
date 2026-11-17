@@ -36,6 +36,8 @@ import worker as W  # noqa: E402
 import worker_pb2 as pb  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prof"))
+from doc_notes import NOTES  # noqa: E402
 ap = argparse.ArgumentParser()
 ap.add_argument("--writer", type=int, default=0)
 ap.add_argument("--foreign", type=int, default=14300)
@@ -74,7 +76,7 @@ def doc(files, n, head):
     return head + tok.decode(ids[:n])
 
 
-WDOC = doc([os.path.join(ROOT, f) for f in ("README.md", "CLAUDE.md", "BACKLOG.md")]
+WDOC = doc([os.path.join(ROOT, f) for f in list(NOTES)]
            + sorted(glob.glob(os.path.join(ROOT, "docs/perf/2026-10-1*/*.md"))), max(a.writer, 1),
            "You are a writing assistant. The draft so far:\n\n")
 FDOC = doc(sorted(glob.glob(os.path.join(ROOT, "src/worker/qwen_worker/*.py"))), a.foreign,

@@ -63,6 +63,7 @@ import worker_pb2 as pb  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "prof"))
+from doc_notes import NOTES  # noqa: E402
 from wtest import TASKS  # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -296,7 +297,7 @@ type(DRAFT).draft_block = draft_block
 
 # ------------------------------------------------------------------ requests
 text = ""
-for f in ["README.md", "CLAUDE.md", "BACKLOG.md"] + sorted(glob.glob(os.path.join(ROOT, "docs/perf/2026-10-1*/*.md"))):
+for f in list(NOTES) + sorted(glob.glob(os.path.join(ROOT, "docs/perf/2026-10-1*/*.md"))):
     text += open(os.path.join(ROOT, f)).read() + "\n\n"
     if len(text) > 6 * max(a.tokens, 1):
         break

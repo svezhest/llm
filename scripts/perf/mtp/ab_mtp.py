@@ -1,7 +1,7 @@
 """In-process A/B of the speculative drafters on the 27B: plain vs DFlash vs the
 target's MTP head vs both (hybrid), the real Engine and _Scheduler (no gRPC), one
 process, variants interleaved per (round, prompt), medians over rounds
-(CLAUDE.md "Measuring performance"). Sibling of scripts/perf/dflash2/ab27.py.
+(docs/measuring.md). Sibling of scripts/perf/dflash2/ab27.py.
 
 Load with both drafters: QWEN_DRAFT=auto (they are found next to the model dir), or
 QWEN_DRAFT=<DFlash dir> QWEN_DRAFT_MTP=<MTP dir>.

@@ -39,6 +39,8 @@ import worker as W  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "prof"))
+from doc_notes import NOTES  # noqa: E402
 ap = argparse.ArgumentParser()
 ap.add_argument("--tokens", type=int, default=32768, help="context before the first block")
 ap.add_argument("--blocks", type=int, default=64)
@@ -60,7 +62,7 @@ assert W._VATT_Q8 and W._VATT_Q8_DEC, "QWEN_VATT_Q8=1 self-test did not pass (se
 START = W.KV_KWARGS["quantized_kv_start"]
 tok = getattr(eng.processor, "tokenizer", eng.processor)
 text = ""
-for f in ["README.md", "CLAUDE.md", "BACKLOG.md"] + sorted(glob.glob(os.path.join(ROOT, "docs/perf/2026-1*/*.md"))):
+for f in list(NOTES) + sorted(glob.glob(os.path.join(ROOT, "docs/perf/2026-1*/*.md"))):
     text += open(os.path.join(ROOT, f)).read() + "\n\n"
     if len(text) > 5 * (a.tokens + a.T * a.blocks + a.decode + 64):
         break

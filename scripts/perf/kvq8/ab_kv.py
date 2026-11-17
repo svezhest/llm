@@ -60,6 +60,7 @@ import worker_pb2 as pb  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "prof"))
+from doc_notes import NOTES  # noqa: E402
 from wtest import TASKS  # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -131,8 +132,9 @@ def use(v):
 
 def doc(n):
     text = ""
-    for f in ["README.md", "CLAUDE.md", "BACKLOG.md"] + sorted(
-            glob.glob(os.path.join(ROOT, "docs", "**", "*.md"), recursive=True)):
+    for f in list(NOTES) + sorted(p for p in
+            glob.glob(os.path.join(ROOT, "docs", "**", "*.md"), recursive=True)
+            if os.path.relpath(p, ROOT) not in NOTES):
         text += open(os.path.join(ROOT, f), encoding="utf-8").read() + "\n\n"
         if len(text) > 6 * n:
             break

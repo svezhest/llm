@@ -24,7 +24,7 @@ interesting parts are probably the prompt cache for hybrid (Gated DeltaNet) mode
 the M1 matmul kernels (`pfqmm.py`, `mrqmm.py`), DFlash speculative decoding with the
 prompt cache, and `docs/perf/` — every change's measurements, raw data and the dead
 ends. Much of the code and the reports were written with AI coding agents (Claude
-Code); `CLAUDE.md` is the project memory they worked from.
+Code); `CLAUDE.md` and the topic notes in `docs/` (index: `docs/MAP.md`) are the project memory they worked from.
 
 ## Models (`weights/`)
 
@@ -45,7 +45,7 @@ Weights live in `weights/` (git-ignored). MLX loads from a plain path — no HF
 cache needed. Download recipe for a slow, throttled link: multi-connection
 `aria2c -c -x16 -s16` per shard with `--check-integrity --checksum=sha-256=<lfs.oid>`
 (oids from `https://huggingface.co/api/models/<repo>/tree/main`), `HF_HUB_DISABLE_XET=1`,
-never hard-kill (orphans partials). See `CLAUDE.md`. Scripted, resumable:
+never hard-kill (orphans partials). See `docs/models.md`. Scripted, resumable:
 `scripts/hf_pull.sh lmstudio-community/Qwen3.8-27B-MLX-5bit weights/qwen38-27b-mlx-5bit`
 (re-run the same line after any interruption; finished shards are skipped by checksum).
 
@@ -764,7 +764,7 @@ reports `max_batch` 1. Measured: 8 rows × 8K-token prompts peak at 17.5 GB on t
 9B. How the gateway uses `max_batch` (`GATEWAY_MAX_INFLIGHT`, several gateways on
 one worker, metrics): see *Observability* and *Env knobs*.
 
-See **CLAUDE.md** for design decisions, implementation notes, and gotchas.
+See **CLAUDE.md** for design decisions and gotchas, and [docs/MAP.md](docs/MAP.md) for the topic notes (implementation, measurements, the full env knob table).
 
 ## Observability
 ```zsh
@@ -806,7 +806,7 @@ batch steps: every request gets an error, then the process exits with 70);
 
 The knobs most setups touch. Every knob, grouped, is in the
 [tutorial's quick reference](docs/TUTORIAL.md#12-env-knob-quick-reference); the long table
-with all the measurements is in `CLAUDE.md` (*Env knobs*).
+with all the measurements is in [docs/knobs.md](docs/knobs.md).
 
 | var | where | default |
 |---|---|---|

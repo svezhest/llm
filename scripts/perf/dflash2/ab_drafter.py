@@ -1,6 +1,6 @@
 """In-process A/B of DFlash2 drafter variants on the 27B (a sibling of ab27.py):
 the real Engine and _Scheduler, one process, variants interleaved per (round,
-prompt) with rotation, medians over rounds (CLAUDE.md "Measuring performance").
+prompt) with rotation, medians over rounds (docs/measuring.md).
 
 Variants (comma separated):
   plain             no DFlash (eng.draft = None)

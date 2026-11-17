@@ -2,7 +2,7 @@
 # GPU gate for the 4-bit multi-row kernel (mrqmm, QWEN_MRQMM4) on the 4-bit 27B
 # (weights/qwen38-27b-mlx-4bit, lmstudio-community MLX 4-bit, affine g64
 # throughout). Run from the repo root on an idle GPU (nothing else on it:
-# CLAUDE.md "Measuring performance"); `setopt NO_BG_NICE` if backgrounded.
+# docs/measuring.md); `setopt NO_BG_NICE` if backgrounded.
 # Each step prints / writes its result to $PERF_OUT/mrqmm4/; pass criteria per step:
 #
 #  1. kernel unit tests (synthetic, ~5 s): tests/test_mrqmm.py all pass (the 4-bit
@@ -42,7 +42,7 @@ DRAFT=${DRAFT:-$ROOT/weights/qwen38-27b-dflash2}
 mkdir -p $OUT
 cd $W
 if (( $# )); then steps=("$@"); else steps=(1 2 3 4 5 6); fi
-# the 27B's load recipe (CLAUDE.md "DFlash2 on the 27B"); needs the wired-limit dance:
+# the 27B's load recipe (docs/drafters.md "DFlash2 on the 27B"); needs the wired-limit dance:
 #   sudo sysctl iogpu.wired_limit_mb=28672
 RUN27=(QWEN_KV_BITS=0 QWEN_WIRED_LIMIT_GB=27 QWEN_PROMPT_CACHE=0 PYTHONPATH=.)
 

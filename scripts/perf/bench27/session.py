@@ -44,7 +44,7 @@ CODE_DEFAULT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 GGUF_DIR = "gguf-qwen38-27b"
 GGUF = {"q4_0": "Qwen3.8-27B-Q4_0.gguf", "q4kxl": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
         "mtp": "mtp-Qwen3.8-27B-Q4_0.gguf", "dflash": "dflash-Qwen3.8-27B-Q4_0.gguf"}
-# the 27B worker recipe (CLAUDE.md "DFlash2 on the 27B", long context; 80K fits under a 27 GiB wired limit)
+# the 27B worker recipe (docs/drafters.md "DFlash2 on the 27B", long context; 80K fits under a 27 GiB wired limit)
 OURS_ENV = {
     "QWEN_TEXT_ONLY": "1", "QWEN_MRQMM4": "1", "QWEN_KV_BITS": "0", "QWEN_MAX_BATCH": "1",
     "QWEN_MAX_CONTEXT": "98304", "QWEN_PROMPT_CACHE": "1", "QWEN_PROMPT_CACHE_MOVE": "1",
@@ -78,7 +78,9 @@ def ctx_for(plan_name):
 def ours(ctx, model_dir, draft):
     w = ctx["weights"]
     env = dict(OURS_ENV, QWEN_MODEL=os.path.join(w, ctx["set"].get("model", model_dir)))
-    if draft:
+    if draft == "mtp":                           # the target's own MTP head (qwen_worker/mtp.py)
+        env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-mtp"), QWEN_MTP_K="0")
+    elif draft:
         env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-dflash2"), QWEN_DRAFT_SAMPLING="1")
     env.update(ctx["env"])
     wdir = os.path.join(ctx["code"], "src", "worker")
@@ -182,6 +184,7 @@ SYSTEMS = {
     "ours-dflash": lambda c: ours(c, "qwen38-27b-mlx-4bit", True),
     "ours-oq4e-plain": lambda c: ours(c, "qwen38-27b-mlx-oq4e", False),
     "ours-oq4e-dflash": lambda c: ours(c, "qwen38-27b-mlx-oq4e", True),
+    "ours-oq4e-mtp": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "mtp"),
     "mlx-vlm": lambda c: mlx_vlm(c, False),
     "mlx-vlm-dflash": lambda c: mlx_vlm(c, True),
     "llama-q4_0": lambda c: llama(c, "q4_0"),
@@ -202,8 +205,8 @@ SYSTEMS = {
 def preflight(force):
     out = {}
     ps = sh(["ps", "-axo", "pid,nice,command"])
-    alive = [l for l in ps.splitlines() if any(p in l for p in MODEL_PROCS) and "session.py" not in l
-             and "grep" not in l]
+    alive = [l for l in ps.splitlines() if any(p in l for p in MODEL_PROCS) and "grep" not in l
+             and not any(t in l for t in ("session.py", "run_matrix.py"))]   # drivers: a system name in argv
     out["model_processes"] = alive
     if alive and not force:
         raise SystemExit("other model processes are alive (one model on the GPU at a time):\n" + "\n".join(alive))
