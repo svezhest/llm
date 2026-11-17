@@ -22,7 +22,8 @@ median over the class's prompts (aggregate.py and chart.py show the same; the ch
 round twice, so a label can read 0.1 below the table). Ratios are cell by cell: the median
 over sessions of one cell (same prompt, mode, position in the session) against the other
 system's, then the geometric mean over cells. Sessions an index marks off-probe are left
-out (as aggregate.py does) unless --keep-off-probe. Systems are named and paired by ROLE.
+out (as aggregate.py does) unless --keep-off-probe. A system's column name and role: SYSTEMS;
+the ratio rows: PAIRS (by role).
 """
 from __future__ import annotations
 
