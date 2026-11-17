@@ -53,7 +53,7 @@ OURS9_ENV = {
     "QWEN_PROMPT_CACHE_GB": "4", "QWEN_PROMPT_CACHE_REPLY": "0", "QWEN_PRESENCE_PENALTY": "0", "LOG_LEVEL": "INFO",
 }
 # drafter dirs per model family: (DFlash, MTP head)
-DRAFTERS = {"qwen38-27b": ("qwen38-27b-dflash2", "qwen38-27b-mtp"), "ornith15-9b": ("qwen35-9b-dflash", "_staging/ornith15-9b-mtp")}
+DRAFTERS = {"qwen38-27b": ("qwen38-27b-dflash2", "qwen38-27b-mtp"), "ornith15-9b": ("_staging/ornith15-9b-dflash", "_staging/ornith15-9b-mtp-q8")}
 # the 27B worker recipe (docs/drafters.md "DFlash2 on the 27B", long context; 80K fits under a 27 GiB wired limit)
 OURS_ENV = {
     "QWEN_TEXT_ONLY": "1", "QWEN_MRQMM4": "1", "QWEN_KV_BITS": "0", "QWEN_MAX_BATCH": "1",
