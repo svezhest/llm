@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Charts of the 27B decode benchmark from aggregate.py's JSON (static PNGs for the report
-and the README; the table beside them is the accessible view).
+"""Charts of the decode benchmark (27B, 9B) from aggregate.py's JSON (static PNGs for the
+report and the README; the table beside them is the accessible view).
 
   1. decode_2k_<theme>.png   grouped bars: decode tok/s per system at 2K context, 256 tokens,
                              one panel per mode (greedy | sampling), groups = prompt class
@@ -10,7 +10,10 @@ Colors follow the system (a fixed slot per system, never by rank). matplotlib is
 repo's envs; run it from uv's cache without a download:
 
   uv run --offline --no-project --with matplotlib python scripts/perf/bench27/chart.py \\
-      --agg agg.json --out docs/perf/2026-11-16/
+      --agg agg.json --out docs/perf/2026-11-16/ [--title "..."]
+
+The title defaults to "<model> decode on <--machine>", the model named by the systems present
+(MODEL); --title replaces the whole prefix.
 """
 from __future__ import annotations
 
@@ -28,11 +31,24 @@ LABEL = {"ours-dflash": "ours, DFlash", "ours-plain": "ours, plain", "llama-q4_0
          "llama-q4_0-dflash": "llama.cpp Q4_0 + DFlash", "mlx-vlm": "mlx-vlm 0.7.6",
          "mlx-vlm-dflash": "mlx-vlm 0.7.6 + DFlash", "ours-oq4e-dflash": "ours oQ4e, DFlash",
          "ours-oq4e-plain": "ours oQ4e, plain", "ours-oq4e-auto": "ours oQ4e, auto (DFlash + MTP)",
-         "ours-oq4e-mtp": "ours oQ4e, MTP"}
+         "ours-oq4e-mtp": "ours oQ4e, MTP",
+         # the 9B (Ornith 1.5, MLX 8-bit / GGUF Q8_0)
+         "ours9-auto": "ours, auto", "ours9-plain": "ours, plain", "ours9-dflash": "ours, DFlash",
+         "ours9-mtp": "ours, MTP head", "mlx-vlm9": "mlx-vlm", "llama9-q8_0": "llama.cpp (Q8_0)",
+         "llama9-q8_0-mtp": "llama.cpp + MTP (Q8_0)"}
 # the oQ4e rows reuse their 4-bit twin's hue; hatched (secondary encoding, not a 9th hue)
 # only in a chart that also shows another system of that hue
 TWIN = {"ours-oq4e-dflash": "ours-dflash", "ours-oq4e-plain": "ours-plain", "ours-oq4e-auto": "ours-dflash",
-        "ours-oq4e-mtp": "llama-q4_0-dflash"}
+        "ours-oq4e-mtp": "llama-q4_0-dflash",
+        # the 9B systems take the hue of their 27B counterpart (the charts never mix the two models)
+        "ours9-auto": "ours-dflash", "ours9-dflash": "ours-dflash", "ours9-plain": "ours-plain",
+        "ours9-mtp": "llama-q4_0-dflash", "mlx-vlm9": "mlx-vlm", "llama9-q8_0": "llama-q4_0",
+        "llama9-q8_0-mtp": "llama-q4_0-mtp"}
+# the model a system serves, for the default title
+MODEL = {**{s: "Qwen3.8-27B (4-bit class)" for s in ORDER + ["ours-oq4e-dflash", "ours-oq4e-plain",
+                                                             "ours-oq4e-auto", "ours-oq4e-mtp"]},
+         **{s: "Ornith-1.5-9B (8-bit)" for s in ("ours9-auto", "ours9-plain", "ours9-dflash", "ours9-mtp",
+                                                 "mlx-vlm9", "llama9-q8_0", "llama9-q8_0-mtp")}}
 THEMES = {"light": {"bg": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "grid": "#e4e3df"},
           "dark": {"bg": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "grid": "#3a3a37"}}
 CLASSES = [("code", "code"), ("en", "English prose"), ("ru", "Russian prose")]
@@ -56,6 +72,15 @@ def sort_key(system):
     return (ORDER.index(key) if key in ORDER else 99, b in TWIN, system)
 
 
+def model_title(rows, machine):
+    models = []
+    for s in sorted({base(r["system"]) for r in rows}, key=sort_key):
+        m = MODEL.get(s, s)
+        if m not in models:
+            models.append(m)
+    return f"{' / '.join(models)} decode on {machine}"
+
+
 def setup(plt, th):
     plt.rcParams.update({"figure.facecolor": th["bg"], "axes.facecolor": th["bg"], "savefig.facecolor": th["bg"],
                          "text.color": th["ink"], "axes.labelcolor": th["ink2"], "xtick.color": th["ink2"],
@@ -75,6 +100,7 @@ def bars(plt, rows, theme, out, title):
     modes = [m for m in ("greedy", "sample") if any(r["mode"] == m for r in sel)]
     fig, axes = plt.subplots(1, len(modes), figsize=(5.2 * len(modes) + 1.5, 4.2), sharey=True, squeeze=False)
     w = 0.8 / len(systems)
+    pad = max(0.6, 0.02 * max(r["max"] for r in sel))     # value label above the whisker
     for ax, mode in zip(axes[0], modes):
         for j, s in enumerate(systems):
             color, hatch = style(s, theme, systems)
@@ -88,7 +114,7 @@ def bars(plt, rows, theme, out, title):
                 ax.errorbar(x, r["decode_tps"], yerr=[[r["decode_tps"] - r["min"]], [r["max"] - r["decode_tps"]]],
                             fmt="none", ecolor=th["ink2"], elinewidth=1, capsize=0, zorder=3)
                 if len(systems) <= 5:      # more bars than that: the report's table carries the values
-                    ax.text(x, r["max"] + 0.6, f"{r['decode_tps']:.1f}", ha="center", va="bottom", fontsize=7.5,
+                    ax.text(x, r["max"] + pad, f"{r['decode_tps']:.1f}", ha="center", va="bottom", fontsize=7.5,
                             color=th["ink2"])
         ax.set_xticks(range(len(CLASSES)), [c[1] for c in CLASSES])
         ax.set_title("greedy (temperature 0)" if mode == "greedy" else "sampling (T 0.6, top-p 0.95, top-k 20)",
@@ -158,16 +184,18 @@ def main():
     ap.add_argument("--agg", required=True)
     ap.add_argument("--out", default=".")
     ap.add_argument("--themes", default="light,dark")
-    ap.add_argument("--title", default="Qwen3.8-27B 4-bit decode on M1 Max 32 GB")
+    ap.add_argument("--title", default="", help="default: '<model of the systems> decode on <machine>'")
+    ap.add_argument("--machine", default="M1 Max 32 GB")
     a = ap.parse_args()
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     rows = json.load(open(a.agg))["rows"]
     os.makedirs(a.out, exist_ok=True)
+    title = a.title or model_title(rows, a.machine)
     for theme in a.themes.split(","):
-        for p in (bars(plt, rows, theme, a.out, a.title + ", 2K context"),
-                  lines(plt, rows, theme, a.out, a.title + ", by context")):
+        for p in (bars(plt, rows, theme, a.out, title + ", 2K context"),
+                  lines(plt, rows, theme, a.out, title + ", by context")):
             if p:
                 print("wrote", p)
 

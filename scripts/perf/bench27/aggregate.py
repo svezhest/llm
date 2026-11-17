@@ -7,6 +7,8 @@ turn-2 TTFT; peak footprint; the session probes. Sessions marked off-probe in an
 (> tol from the matrix median) are left out unless --keep-off-probe.
 
   python3 scripts/perf/bench27/aggregate.py --root $PERF_OUT/bench27 --json agg.json --md agg.md
+  python3 scripts/perf/bench27/aggregate.py --index $PERF_OUT/bench9/index-A.json \
+      --index $PERF_OUT/bench9/index-B.json --json agg.json     # the sessions of several matrices
 """
 from __future__ import annotations
 
@@ -22,10 +24,17 @@ def med(v):
 
 
 def load_sessions(root, index, keep_off):
-    if index:
-        idx = json.load(open(index))
-        names = [s["session"] for s in idx["sessions"] if keep_off or not s.get("off_probe")]
-        paths = [os.path.join(os.path.dirname(index), n, "session.json") for n in names]
+    """index: one index path or a list of them (their sessions in order, each once); none = every
+    session.json under root."""
+    indexes = [index] if isinstance(index, str) and index else list(index or [])
+    if indexes:
+        paths = []
+        for ix in indexes:
+            idx = json.load(open(ix))
+            for s in idx["sessions"]:
+                p = os.path.join(os.path.dirname(ix), s["session"], "session.json")
+                if (keep_off or not s.get("off_probe")) and p not in paths:
+                    paths.append(p)
     else:
         paths = sorted(glob.glob(os.path.join(root, "*", "session.json")))
     out = []
@@ -117,7 +126,7 @@ def markdown(agg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.join(os.environ.get("PERF_OUT", "/tmp/perf"), "bench27"))
-    ap.add_argument("--index", default="")
+    ap.add_argument("--index", action="append", default=[], help="index-*.json (repeatable); none: every session under --root")
     ap.add_argument("--keep-off-probe", action="store_true")
     ap.add_argument("--json", default="")
     ap.add_argument("--md", default="")
