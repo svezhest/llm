@@ -121,6 +121,7 @@ def test_oracle_exact_and_the_heads_cache(dense, spec, monkeypatch, how):
     k = int(how[1:]) if how != "gate" else 4
     monkeypatch.setattr(worker, "MTP_K", k if how != "gate" else 0)
     monkeypatch.setattr(worker.MTPDraft, "CHUNK", 7 if k % 2 else 512)   # the prefill slab in pieces
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", (1, 2, 4, 8))
     ids = prompts([25], 31)[0]
     ref = plain(dense, ids, 30)
     mt = Oracle(head(dense), dense, ids + ref[0], script=(3, 0, 4, 1, 0, 0, 2))
@@ -707,11 +708,13 @@ def test_prompt_cache_context(dense, spec, monkeypatch):
 
 
 def test_gate_draft_count(dense, monkeypatch, clock):
-    """The gate (MTPDraft.round / depth): the draft count with the most
-    expected tokens per ms, E(k) / T(k), E from the seed's confidence and the
-    class's keep rates of the chained drafts (Clock.rate, moved by record());
-    every PROBE-th drafting round takes all the room; k = 0 rounds in a row
-    lengthen the plain bursts (BURSTS), a drafted round resets them; an
+    """The gate (MTPDraft.round / depth): the draft count (>= 1) with the
+    most expected tokens per ms, E(k) / T(k), E from the class's keep rates
+    of seeds of this confidence (Clock.seed) and of the chained drafts
+    (Clock.rate), both moved by record(); a probe round takes all the room
+    (every PROBE-th, rarer after probes that kept at most one draft); LOW
+    rounds in a row with no draft kept: a burst of plain steps, then one
+    drafting round, the bursts longer (BURSTS) until a draft is kept; an
     unmeasured T scaled by 1 + R * k from the nearest measured k;
     QWEN_MTP_KMAX the ceiling."""
     monkeypatch.setattr(worker, "MTP_K", 0)
@@ -721,13 +724,10 @@ def test_gate_draft_count(dense, monkeypatch, clock):
         clock.add(worker.MTPDraft.kind_of(k), ms)
     mt = worker.MTPDraft(head(dense), dense)
     assert [mt._ms(k) for k in range(5)] == T
-    assert mt.depth(0.3, T, 4) == 1                      # a bin not measured yet: SEED0
-    clock.seed[1] = 0.35
-    assert mt.depth(0.3, T, 4) == 0                      # 1.35 / 137 < 1 / 100 < 1.4 / 137
-    clock.seed[1] = 0.4
-    assert mt.depth(0.3, T, 4) == 1 and mt.bin == 1
-    mt.record(0, 1)
-    assert clock.seed[1] == pytest.approx(0.36) and mt.bin is None
+    clock.seed[1] = 0.05
+    assert mt.depth(0.3, T, 4) == 1 and mt.bin == 1      # an unlikely seed: still one draft
+    mt.record(1, 1)
+    assert clock.seed[1] == pytest.approx(0.145) and mt.bin is None
     assert mt.depth(0.95, T, 4) == 1                     # (bin 4 starts at 0.9) rates 0.5: 2.35 / 176 < 1.9 / 137
     clock.rate.update({2: 0.9, 3: 0.9, 4: 0.9})
     assert mt.depth(0.95, T, 4) == 4 and mt.depth(0.95, T, 2) == 2
@@ -764,28 +764,34 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     assert d.shape == (1, 4) and mt.appended == 3 and len(confs) == 5    # KMAX
     seed(0.95)
     assert mt.round(1).shape == (1, 1)                   # room
-    clock.seed.update({0: 0.1, 1: 0.2})
-    seed(0.1)
-    assert [mt.round(9) for _ in range(6)] == [1, 1, 1, 2, 4, 8]   # one seed, low: longer bursts
     clock.rate.update({3: 0.2, 4: 0.2})
     seed(0.95)
     assert mt.round(9).shape == (1, 2)
-    seed(0.2)
-    assert mt.round(9) == 1                              # reset by the drafted round
-    assert mt.ks == [7, 1, 1, 0, 1] and mt.stats()["k"] == mt.ks
-    monkeypatch.setattr(worker.MTPDraft, "PROBE0", 3)    # every 3rd no-draft decision drafts once
     mt.fresh()
+    got = []
+    for hit in [0] * mt.LOW + [0, 0, 0, 1] + [0] * mt.LOW + [0]:     # what each drafting round keeps
+        while True:
+            seed(0.1)
+            r = mt.round(9)
+            if not isinstance(r, int):
+                break
+            got.append(r)
+        mt.record(hit, r.shape[1])
+        got.append("d")
     seed(0.1)
-    assert [isinstance(mt.round(9), int) for _ in range(3)] == [True, True, False] and mt.ks[:2] == [2, 1]
+    got.append(mt.round(9))
+    # LOW misses, then bursts 8, 16, 32 with one drafting round between; a kept draft ends them
+    assert got == ["d"] * mt.LOW + [8, "d", 16, "d", 32, "d", 32, "d"] + ["d"] * mt.LOW + [8, "d", 16]
+    assert mt.ks[0] == 6 and mt.stats()["k"] == mt.ks
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 2)     # every 2nd drafting round: all the room
     mt.fresh()
     clock.rate.clear()
-    seed(0.95)
-    assert mt.round(9).shape == (1, 1)
-    seed(0.95)
-    assert mt.round(9).shape == (1, 4)
-    seed(0.95)
-    assert mt.round(9).shape == (1, 1)
+    shapes = []
+    for kept in (1, 1, 1, 1, 1, 2, 1, 1, 1):             # probes: round 2, round 6 (4 rounds after a probe
+        seed(0.95)                                       # that kept one), round 8 (it kept two: back to 2)
+        shapes.append(mt.round(9).shape[1])
+        mt.record(kept, shapes[-1])
+    assert shapes == [1, 4, 1, 1, 1, 4, 1, 4, 1] and mt.every == 4
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
     mt.clock = worker.Clock({("mtp", 1): 66.0})
     assert mt._ms(3) == pytest.approx(66.0 * (1 + 3 * mt.R) / (1 + mt.R))
@@ -852,13 +858,14 @@ def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     """QWEN_DRAFT=auto's setup - DFlash + the gated head, the Chooser with
     its probes and DFlash's shadow drafts - == the head alone == plain
     greedy, the head's own confidences deciding (the random head's are
-    0.006..0.014, a bin whose keep rate is set to 0: plain bursts, every
-    PROBE0-th decision a draft, every PROBE-th drafting round all four)."""
+    0.006..0.014, a bin whose keep rate is set to 0: one draft a round, a
+    probe round all four; a burst after every round that keeps none)."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker.Clock, "add", lambda self, kind, ms: None)
-    monkeypatch.setattr(worker.MTPDraft, "PROBE0", 3)
-    monkeypatch.setattr(worker.MTPDraft, "PROBE", 2)
+    monkeypatch.setattr(worker.MTPDraft, "LOW", 1)
+    monkeypatch.setattr(worker.MTPDraft, "BURSTS", (1, 2))
+    monkeypatch.setattr(worker.MTPDraft, "PROBE", 3)
     monkeypatch.setattr(worker.MTPDraft, "B", 0.0)
     rounds = [0, 0, 0]
     for ids in prompts([25, 40, 7], 37):

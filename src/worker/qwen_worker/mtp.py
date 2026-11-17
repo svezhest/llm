@@ -123,41 +123,45 @@ class MTPDraft:
     the target language model `lm`; per-request state in start().
 
     The draft count of a round (QWEN_MTP_K=0: round()): k = argmax over
-    0..KMAX of E(k) / T(k), the expected tokens per ms. E(k) = 1 + p1 +
+    1..KMAX of E(k) / T(k), the expected tokens per ms. E(k) = 1 + p1 +
     p1 p2 + ...: p1 is the measured rate at which seeds of this confidence
     were kept (the seed's top-1 probability, evaluated with the previous
     round - verify() runs the head over the verify block's rows on the
     target's tokens, so after the walk the seed and its confidence are read
     at no extra sync - in BINS bins, Clock.seed of the request's class: under
-    greedy a seed of confidence 0.4 is kept far more often than 0.4; a bin
-    starts at SEED0 or above, so it is drafted until measured, and every
-    PROBE0-th no-draft decision drafts once), p_i for the chained drafts the
-    measured rate at which draft i was kept when the ones before it were
-    (Clock.rate of the request's class, an EMA from RATE0; the head's own
-    confidence in a chained draft is not used: it does not know its input is
-    an approximation, and on prose "seed above 0.8" took four drafts where
-    three or more were kept in 1 round of 10). Every PROBE-th drafting round
+    greedy a seed of confidence 0.4 is kept far more often than 0.4), p_i for
+    the chained drafts the measured rate at which draft i was kept when the
+    ones before it were (Clock.rate of the class, an EMA from RATE0; the
+    head's own confidence in a chained draft is not used: it does not know
+    its input is an approximation, and on prose "seed above 0.8" took four
+    drafts where three or more were kept in 1 round of 10). A probe round
     takes all the drafts there is room for, so the rates of depths the rule
-    does not take stay measured. T(k): the measured wall time of a k-draft
-    round (Clock, per class of requests), T(0) a plain step's; unmeasured
-    ones scaled from the nearest measured by the prior 1 + R * k. k = 0 is a
-    burst of plain steps: one step, and only from the 4th no-draft round in a
-    row longer (BURSTS: 1, 1, 1, 2, 4, 8 steps with step-ahead; a drafting
-    round resets them): in prose an unlikely seed is a word's first token and
-    the next ones are its sure continuation, which a longer burst would skip
-    (bursts of 2..8 right away cost the gated head 4-13 % against one fixed
-    draft on Russian prose); a long run of them is text the head cannot
-    draft, where 8-step bursts keep the plain loop's speed. The head catches
-    up after a burst in one flush queued with its last step. The drafts and the verify
-    are queued together: one sync per round."""
+    does not take stay measured: every PROBE-th drafting round, and twice as
+    rarely (up to PROBE_MAX) after each probe that kept at most one draft (a
+    probe costs half a round on the 27B: every 8th was 6 % of prose). T(k): the measured wall time of a
+    k-draft round (Clock, per class of requests); unmeasured ones scaled from
+    the nearest measured by the prior 1 + R * k. The drafts and the verify
+    are queued together: one sync per round.
+
+    A round with no draft is never the choice of that rule: one plain step
+    between two rounds has a round's host time and the head's catch-up but
+    no step-ahead, and costs about a 1-draft round (27B: priced as a plain
+    step it took a third of short Russian prose and ran 4-14 % behind one
+    fixed draft; in prose an unlikely seed is a word's first token, the next
+    ones its sure continuation). Plain steps are for text the head cannot
+    draft: after LOW rounds in a row with no draft kept, a burst of BURSTS[0]
+    plain steps with step-ahead (the head catches up in one flush queued with
+    its last step), then one drafting round; while that one keeps nothing the
+    bursts lengthen (BURSTS), a kept draft ends them: the plain loop's speed
+    within ~3 % on text where every draft fails."""
 
     kind = "mtp"
     R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
-    BURSTS = (1, 1, 1, 2, 4, 8)         # plain steps of the n-th k = 0 round in a row
+    BURSTS = (8, 16, 32)                # plain steps of the n-th burst in a row
+    LOW = 4                             # rounds in a row with no draft kept: a burst
     RATE0, A = 0.5, 0.2                 # a chained draft's keep rate: the start, the EMA's weight
-    PROBE = 8                           # every PROBE-th drafting round: all the drafts
+    PROBE, PROBE_MAX = 8, 64            # drafting rounds between two probes (all the drafts): the first, the most
     BINS, SEED0, B = 5, 0.8, 0.1        # the seed's keep rate per confidence bin: the start (at least), the EMA's weight
-    PROBE0 = 16                         # every PROBE0-th no-draft decision: one draft
     said = False                        # the lm_head's path over a block: logged once
     CHUNK = 512                         # head rows per forward (flush)
 
@@ -198,9 +202,11 @@ class MTPDraft:
         """A new request's statistics (no head state: tools too)."""
         self.accept_lens, self.draft_lens = [], []
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
-        self.low = 0                    # k = 0 rounds in a row
-        self.nround = 0                 # drafting rounds (the gate's)
-        self.nzero = 0                  # no-draft decisions
+        self.low = 0                    # bursts in a row (no draft kept between them)
+        self.miss = 0                   # drafting rounds in a row with no draft kept
+        self.nround = 0                 # drafting rounds (the gate's) since the last probe
+        self.every = self.PROBE         # ... and how many until the next
+        self.probe = False              # the round under way is one
         self.bin = None                 # the confidence bin of the round's seed (the gate's rounds)
         self.ks = [0] * (max(self.KMAX, cfg.MTP_K) + 1)     # rounds by draft count (0: bursts)
         self.burst_tokens = 0           # tokens of the k = 0 rounds' plain steps
@@ -335,8 +341,8 @@ class MTPDraft:
         if k == 0:                      # (the seed's confidence: evaluated with the last round)
             self.low += 1
             self.ks[0] += 1
+            self.miss = self.LOW - 1    # one drafting round after the burst
             return self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
-        self.low = 0
         toks = [tok]
         self.appended = 0
         for _ in range(k - 1):
@@ -349,23 +355,22 @@ class MTPDraft:
         return mx.concatenate(toks, axis=1) if len(toks) > 1 else toks[0]
 
     def depth(self, c1, T, top):
-        """Drafts of the next round, 0..top: the count with the most expected
-        tokens per ms, gain(k) / T[k] (0: a plain step), from the measured
-        keep rates of seeds of confidence `c1` and of the chained drafts
-        (the request's class); every PROBE0-th no-draft decision one draft,
-        every PROBE-th drafting round all `top`."""
+        """Drafts of the next round: 0 (a burst of plain steps) after LOW
+        rounds in a row that kept no draft; else 1..top, the count with the
+        most expected tokens per ms, gain(k) / T[k], from the measured keep
+        rates of seeds of confidence `c1` and of the chained drafts (the
+        request's class); a probe round all `top`."""
+        if self.miss >= self.LOW:
+            return 0
         ck = self._clock()
         b = min(self.BINS - 1, int(c1 * self.BINS))
         ps = [ck.seed.get(b, self._seed0(b))] + [ck.rate.get(i, self.RATE0) for i in range(2, top + 1)]
-        k = max(range(top + 1), key=lambda j: self.gain(ps, j, 0.0) / T[j])
-        if not k:
-            self.nzero += 1
-            if self.nzero % self.PROBE0:
-                return 0
-            k = 1
+        k = max(range(1, top + 1), key=lambda j: self.gain(ps, j, 0.0) / T[j])
         self.bin = b
         self.nround += 1
-        if self.nround % self.PROBE == 0:
+        self.probe = k < top and self.nround >= self.every
+        if self.probe:
+            self.nround = 0
             k = top
         return k
 
@@ -432,6 +437,13 @@ class MTPDraft:
         accepted, drafted = int(accepted), int(drafted)
         self.accept_lens.append(accepted)
         self.draft_lens.append(drafted)
+        if accepted:
+            self.miss = self.low = 0
+        else:
+            self.miss += 1
+        if self.probe:
+            self.probe = False
+            self.every = self.PROBE if accepted > 1 else min(2 * self.every, self.PROBE_MAX)
         ck = self._clock()
         rate, b, self.bin = ck.rate, self.bin, None
         if b is not None and drafted:
