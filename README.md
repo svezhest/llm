@@ -49,7 +49,8 @@ Cell by cell at the same minute of a session (the machine slows 16–23 % as it 
 only that comparison is fair): plain decode is ×1.15 of llama.cpp (ahead in 19 of 19 cells)
 and ×1.08 of mlx-vlm; with speculation ×1.10 of llama.cpp + MTP (ahead in 17 of 19; behind
 on sampled English) and ×1.59 of plain llama.cpp; a cold 2K prefill is ×1.09 of llama.cpp
-and ×1.44 of mlx-vlm. Each system runs the 4-bit-class file its ecosystem ships (not the
+and ×1.44 of mlx-vlm. At 32K context `auto` reads 29 tok/s on code and 16–17 on Russian
+(llama.cpp + MTP on another day: 16 and 12). Each system runs the 4-bit-class file its ecosystem ships (not the
 same weights), answer quality is not compared, one machine. Method, every cell and the raw
 sessions: [docs/perf/2026-11-17/decode_27b_bench.md](docs/perf/2026-11-17/decode_27b_bench.md);
 how `auto` chooses a drafter and where it still loses to the best single one:

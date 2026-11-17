@@ -1,0 +1,174 @@
+{
+ "entries": [
+  "llama-q4_0-mtp:ctx",
+  "llama-q4_0:ctx",
+  "mlx-vlm:ctx"
+ ],
+ "repeat": 1,
+ "code": "$CODE",
+ "sessions": [
+  {
+   "entry": "llama-q4_0-mtp:ctx",
+   "rep": 0,
+   "session": "20261116-190155-llama-q4_0-mtp-ctx-r0",
+   "status": "ok",
+   "probe": 334.8,
+   "summary": [
+    {
+     "cls": "code",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 24.76,
+     "min": 20.061,
+     "max": 29.454
+    },
+    {
+     "cls": "code",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 16.5,
+     "min": 16.324,
+     "max": 16.683
+    },
+    {
+     "cls": "ru",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 14.97,
+     "min": 13.827,
+     "max": 16.109
+    },
+    {
+     "cls": "ru",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 11.66,
+     "min": 11.569,
+     "max": 11.759
+    }
+   ],
+   "note": ""
+  },
+  {
+   "entry": "llama-q4_0:ctx",
+   "rep": 0,
+   "session": "20261116-193536-llama-q4_0-ctx-r0",
+   "status": "ok",
+   "probe": 334.7,
+   "summary": [
+    {
+     "cls": "code",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 14.03,
+     "min": 11.924,
+     "max": 16.145
+    },
+    {
+     "cls": "code",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 10.76,
+     "min": 10.707,
+     "max": 10.815
+    },
+    {
+     "cls": "ru",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 12.61,
+     "min": 11.613,
+     "max": 13.6
+    },
+    {
+     "cls": "ru",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 10.68,
+     "min": 10.592,
+     "max": 10.777
+    }
+   ],
+   "note": ""
+  },
+  {
+   "entry": "mlx-vlm:ctx",
+   "rep": 0,
+   "session": "20261116-200840-mlx-vlm-ctx-r0",
+   "status": "ok",
+   "probe": 334.6,
+   "summary": [
+    {
+     "cls": "code",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 13.53,
+     "min": 11.421,
+     "max": 15.637
+    },
+    {
+     "cls": "code",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 10.03,
+     "min": 9.782,
+     "max": 10.282
+    },
+    {
+     "cls": "ru",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 11.83,
+     "min": 11.216,
+     "max": 12.447
+    },
+    {
+     "cls": "ru",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 10.1,
+     "min": 9.983,
+     "max": 10.226
+    }
+   ],
+   "note": ""
+  }
+ ],
+ "probe_median": 334.7
+}

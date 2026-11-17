@@ -119,6 +119,36 @@ TTFT of the greedy cells = a cold 2K prefill [M]: ours 12.6–15.8 s (162 → 13
 the session), llama.cpp 13.6–17.4 s (150 → 118 tok/s), mlx-vlm 18.3–22.5 s (112 → 91 tok/s):
 ×1.08–1.10 of llama.cpp and ×1.43–1.45 of mlx-vlm at the same position [D].
 
+## Long context (8K, 32K)
+
+Plan `ctx`: code and Russian prompts of 8K and 32K tokens, greedy, 256 tokens, two rounds,
+then a follow-up turn on the 32K conversation. Ours: `auto` on q8 KV, today (main
+`3e5a154`); llama.cpp and mlx-vlm: the same plan and cell order on 2026-11-16 — another
+day, so indicative, and only the first round is at a matching position (in ours the second
+round is a prompt-cache hit, in theirs a second cold prefill, so the machine is warmer). [M]
+
+| decode tok/s, round 1 / round 2 | ours, `auto` | llama.cpp + MTP | llama.cpp | mlx-vlm |
+|---|---|---|---|---|
+| code 8K | 35.3 / 30.5 | 29.5 / 20.1 | 16.1 / 11.9 | 15.6 / 11.4 |
+| Russian 8K | 22.7 / 19.2 | 16.1 / 13.8 | 13.6 / 11.6 | 12.4 / 11.2 |
+| code 32K | 29.4 / 29.3 | 16.3 / 16.7 | 10.8 / 10.7 | 10.3 / 9.8 |
+| Russian 32K | 16.3 / 17.4 | 11.6 / 11.8 | 10.6 / 10.8 | 10.2 / 10.0 |
+
+| cold prefill (TTFT, round 1) | ours | llama.cpp + MTP | llama.cpp | mlx-vlm |
+|---|---|---|---|---|
+| 8K (code / Russian) | 51 s / 53 s | 59 s / 66 s | 57 s / 64 s | 79 s / 93 s |
+| 32K (code / Russian) | 280 s / 288 s | 368 s / 366 s | 346 s / 352 s | 454 s / 456 s |
+| follow-up turn on the 32K conversation | 4.5 s, then 1.2 s | 1.0 s | 0.9 s | 459 s (no cache) |
+
+- In the first round `auto` is ×1.2 (code 8K), ×1.4 (Russian) and ×1.8 (code 32K) of
+  llama.cpp + MTP [D]; its decode loses 17 % from 8K to 32K on code where llama.cpp + MTP
+  loses 45 %.
+- Russian at long context is where one drafter is not enough: with DFlash alone this
+  server read 8.9 tok/s at 8K and 6.8 at 32K on 2026-11-16 (below llama.cpp's plain decode);
+  `auto` takes the MTP head there (118–136 of ~135 rounds) and reads 16–23.
+- A cold 32K prefill is ×1.2–1.3 of llama.cpp and ×1.6 of mlx-vlm; the first follow-up
+  turn is slower than llama.cpp's (4.5 s against 1.0 s; the second 1.2 s).
+
 ## Limits of this comparison
 
 - One machine, one day; two sessions per system (the second on a later commit of the
@@ -127,7 +157,8 @@ the session), llama.cpp 13.6–17.4 s (150 → 118 tok/s), mlx-vlm 18.3–22.5 s
 - llama.cpp's `draft-mtp` ran with its default draft length; it was not tuned per class.
 - Different quantization files (above): speed per system as its ecosystem ships the model,
   not kernel against kernel on identical weights.
-- 2K context only here. Long context (8K–80K) for `auto` on q8 KV is measured separately.
+- Long context: one session per system, the external ones on another day; 80K not re-run
+  for `auto`.
 - Peak memory is not in the table: the harness reads the process footprint, which does not
   count llama.cpp's Metal buffers.
 

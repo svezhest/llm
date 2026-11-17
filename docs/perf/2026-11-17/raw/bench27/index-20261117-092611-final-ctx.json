@@ -1,0 +1,64 @@
+{
+ "entries": [
+  "ours-oq4e-auto:ctx:env.QWEN_MRQMM5=1,env.QWEN_MRQMM6=1,env.QWEN_KV_BITS=8,env.QWEN_KVQ_PREFILL_FUSED=1,env.QWEN_DECODE_ATT=8192"
+ ],
+ "repeat": 1,
+ "code": "$CODE",
+ "sessions": [
+  {
+   "entry": "ours-oq4e-auto:ctx:env.QWEN_MRQMM5=1,env.QWEN_MRQMM6=1,env.QWEN_KV_BITS=8,env.QWEN_KVQ_PREFILL_FUSED=1,env.QWEN_DECODE_ATT=8192",
+   "rep": 0,
+   "session": "20261117-092611-ours-oq4e-auto-ctx-r0",
+   "status": "ok",
+   "probe": 330.2,
+   "summary": [
+    {
+     "cls": "code",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 32.91,
+     "min": 30.477,
+     "max": 35.346
+    },
+    {
+     "cls": "code",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 29.35,
+     "min": 29.345,
+     "max": 29.364
+    },
+    {
+     "cls": "ru",
+     "ctx": 8192,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 20.94,
+     "min": 19.17,
+     "max": 22.701
+    },
+    {
+     "cls": "ru",
+     "ctx": 32768,
+     "mode": "greedy",
+     "max_tokens": 256,
+     "thinking": false,
+     "n": 2,
+     "decode_tps_median": 16.83,
+     "min": 16.3,
+     "max": 17.356
+    }
+   ],
+   "note": ""
+  }
+ ],
+ "probe_median": 330.2
+}
