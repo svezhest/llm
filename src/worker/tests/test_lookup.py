@@ -81,6 +81,10 @@ def test_draft_ctx_trims_like_the_drafter():
     d = worker._DraftCtx(6, None)                 # (a stand-in drafter: no caches)
     d.add(chunks[0])
     assert d.take(None) is chunks[0]
+    d = worker._DraftCtx(6, None, on=False)       # no drafter takes it: nothing held
+    for c in chunks:
+        d.add(c)
+    assert not d and not d.chunks
 
 
 # --- the scheduler ------------------------------------------------------------------

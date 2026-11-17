@@ -14,6 +14,33 @@ from .pcache import _own_states, _resume_tail, _tail_copy
 from .sizing import _slab
 from .kernels import _verify_head
 from .mtp import CLOCK, Chooser, Shadows
+from .rprof import RoundProf
+
+# A round's reads wait for what they read only (not a QWEN_ knob: tools flip it
+# between requests for an in-process A/B, ab_mtp.py's "+seq"): the head's
+# verify forward is queued as an eval of its own after the target's, and the
+# walk / shadow drafts are read from the arrays as queued, so the host's work
+# after the walk (commit, emits, the tick, the next round's graphs) runs while
+# the GPU still computes the head's verify. Off: one eval for both, read
+# through a reshape (a new op: it waits for everything queued before it).
+ROUND_OVERLAP = True
+
+
+def _queued_row(a):
+    """The tokens of a (1, n) (or (n,)) array as queued: tolist() of the array
+    itself - no new op, so the read waits for the eval that queued it only
+    (decode.md: a new op on a step's outputs waits for all queued work)."""
+    t = a.tolist()
+    return t[0] if a.ndim == 2 else t
+
+
+def _queued_walk(drafts, targets, budget):
+    """mlx-vlm 0.7.6 `_speculative_walk` on the arrays as queued (_queued_row): the
+    accepted drafts (up to the first mismatch with the target's token), then
+    the target's own token there; at most `budget` tokens."""
+    d, t = _queued_row(drafts)[:drafts.shape[-1]], _queued_row(targets)
+    accepted = next((i for i, (x, y) in enumerate(zip(d, t)) if x != y), len(d))
+    return accepted, (d[:accepted] + t[accepted:accepted + 1])[:budget]
 
 
 def _budget_cut(think, new, stopping):
@@ -336,7 +363,11 @@ class _SpecMixin:
                     h = mx.concatenate(o.hidden_states, axis=-1) if layers is not None else None
                     if mt is not None:
                         mt.push(o.hidden_states[-1])
+                    if prof is not None:
+                        prof.lap("close")
                     mx.eval(h, [c.state for c in cache])
+                    if prof is not None:
+                        prof.wait("close")
                     if h is not None:
                         ctx.append(h)
                         seen(h)
@@ -358,7 +389,11 @@ class _SpecMixin:
             requant()
             h = mx.concatenate(o.hidden_states, axis=-1) if layers is not None else None
             t = pick(o.logits[:, -1:, :], mx.array([tok], dtype=dtype), at)
+            if prof is not None:
+                prof.queued("step1")
             mx.eval(t, h, [c.state for c in cache])
+            if prof is not None:
+                prof.wait("step1", main=True)
             return h, [t.item()]
 
         finish, n, acc, drafted = "length", 0, 0, 0
@@ -367,6 +402,11 @@ class _SpecMixin:
         pick_kind = None                        # hybrid / plain arm: mtp.Chooser
 
         trace = [] if cfg.SPEC_TRACE else None  # QWEN_SPEC_TRACE: one tuple per round
+        # QWEN_SPEC_PROF: each round's host / sync spans (rprof; no MLX call)
+        prof = req.prof = RoundProf(cfg.SPEC_PROF) if cfg.SPEC_PROF else None
+        if mt is not None:
+            mt.prof = prof
+        rk = None                               # the profile's (key, tokens, steps) of the round
         used = {}                               # arm -> [rounds, tokens] (spec_stats["arms"])
 
         def use(arm, tokens):
@@ -405,13 +445,19 @@ class _SpecMixin:
             nonlocal n
             ahead, k = not pen.active, 1
             y = step(b)
+            if prof is not None:
+                prof.queued("step")
             mx.async_eval(y)
             while True:
                 nxt = None
                 if ahead and k < LOOKUP_BURST and n + 1 < max_tokens:
                     nxt, k = step(y), k + 1
                     mx.async_eval(nxt)
+                if prof is not None:
+                    prof.lap("step")
                 tok = y.item()
+                if prof is not None:
+                    prof.wait("item", main=True)
                 req.steps, req.rows_sum, lstat[3] = req.steps + 1, req.rows_sum + 1, lstat[3] + 1
                 if not emit(tok):
                     return tok, True
@@ -462,15 +508,27 @@ class _SpecMixin:
             fed it)."""
             nonlocal n
             y, h = pstep(b)
+            if prof is not None:
+                prof.queued("pstep")
             mx.async_eval(y, h)
             if before is not None:
+                if prof is not None:
+                    prof.lap("submit")
                 before()
+                if prof is not None:
+                    prof.wait("shadow")
             toks = []
             while True:
+                if prof is not None:
+                    prof.lap("submit" if not toks else "emit")
                 nxt, caught = None, False
                 if len(toks) + 1 < steps and n + 1 < max_tokens:
                     nxt = pstep(y)
+                    if prof is not None:
+                        prof.lap("pstep")
                     mx.async_eval(*nxt)
+                    if prof is not None:
+                        prof.lap("submit")
                 elif mt is not None:
                     # the last step: its position and token (lazy) join the head
                     mt.push(h[..., -H:])
@@ -478,7 +536,11 @@ class _SpecMixin:
                     mt.flush()
                     mt.prime()
                     caught = True
+                    if prof is not None:
+                        prof.lap("catchup")
                 tok = y.item()
+                if prof is not None:
+                    prof.wait("item", main=True)
                 toks.append(tok)
                 req.steps, req.rows_sum, lstat[3] = req.steps + 1, req.rows_sum + 1, lstat[3] + 1
                 if mt is not None and not caught:   # the position this step fed: both drafters' context
@@ -529,7 +591,7 @@ class _SpecMixin:
                     draft.lm_head = (lambda x, head=draft.lm_head, hd=self._hidden_dtype():
                                      head(x.astype(hd)))
             # the drafter's context: every position the target cache took since its last block
-            dctx = _DraftCtx(win, draft_cache)
+            dctx = _DraftCtx(win, draft_cache, on=draft is not None)
             if hidden is not None:
                 dctx.add(dfl(hidden))
             # QWEN_DRAFT_HYBRID: both drafters, one per round (mtp.Chooser);
@@ -572,7 +634,11 @@ class _SpecMixin:
                 mt.flush()
                 mt.prime()
             while n < max_tokens and not why:
+                if prof is not None and rk is not None:
+                    prof.end(*rk)
                 yield
+                if prof is not None:
+                    prof.begin()
                 if req.cancel.is_set():
                     finish = "cancelled"
                     break
@@ -600,7 +666,9 @@ class _SpecMixin:
                     return
                 look = propose(max_tokens - n)
                 if look is None and draft is None and mt is None:
+                    n0 = n
                     b, stopped = burst(b)
+                    rk = ("burst", n - n0, n - n0)
                     if stopped:
                         finish = "stop"
                         break
@@ -613,6 +681,8 @@ class _SpecMixin:
                     also = pick_kind.shadows()
                 steps = 0                       # > 0: a burst of plain steps (the plain arm, k = 0)
                 mine = False                    # the head's own round: settled from its verify()
+                if prof is not None:
+                    prof.lap("gate")
                 if look is None and kind == "plain":
                     bs, drafts, steps = 1, None, pick_kind.steps()
                 elif look is None and kind == "mtp":
@@ -628,6 +698,9 @@ class _SpecMixin:
                             steps = r
                         else:
                             drafts, bs, mine = r, r.shape[1] + 1, True
+                            if prof is not None:
+                                # (one draft: the seed, evaluated with the last round)
+                                (prof.queued if bs > 2 else prof.lap)("draft")
                             mx.async_eval(drafts)
                 elif look is None:
                     bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
@@ -641,13 +714,19 @@ class _SpecMixin:
                         hctx = dctx.take(draft_cache)
                         fed_ctx = hctx.shape[1]
                         drafts = draft.draft_block(b, _wide(hctx), draft_cache, bs, argmax, dtype)
+                        if prof is not None:
+                            prof.queued("draft")
                         mx.async_eval(drafts)
                 elif draft is not None and LOOKUP == "splice":
                     # the drafter's block, unless the continuation agrees on its first draft
                     bs = _dflash_next_block_size(draft, block_total, max_tokens - n + 1)
                     d = draft.draft_block(b, _wide(dctx.take(draft_cache)), draft_cache, bs,
                                           argmax, dtype)
+                    if prof is not None:
+                        prof.lap("draft")
                     mx.eval(d)
+                    if prof is not None:
+                        prof.wait("splice")
                     if d.shape[1] and d[0, 0].item() == look[0]:
                         drafts = mx.array([look], dtype=dtype)
                         bs = len(look) + 1
@@ -658,6 +737,8 @@ class _SpecMixin:
                 else:
                     drafts = mx.array([look], dtype=dtype)
                     bs = len(look) + 1
+                if prof is not None:
+                    prof.lap("dsubmit")
                 sdrafts = []
                 for x in also:
                     # (DFlash's cache takes the context it would take at its next block)
@@ -666,6 +747,8 @@ class _SpecMixin:
                     hctx = dctx.take(draft_cache)
                     fed_ctx = hctx.shape[1]
                     d = draft.draft_block(b, _wide(hctx), draft_cache, block_total, argmax, dtype)
+                    if prof is not None:
+                        prof.queued("shadow")
                     mx.async_eval(d)
                     sdrafts.append((x, d))
                 if steps:
@@ -673,7 +756,7 @@ class _SpecMixin:
                     # the head's round with no draft (its catch-up: pburst)
                     def before():
                         for x, d in sdrafts:
-                            shadow.add(x, d.reshape(-1).tolist())
+                            shadow.add(x, _queued_row(d) if ROUND_OVERLAP else d.reshape(-1).tolist())
                     b, stopped, new, f, cached = pburst(b, steps, before)
                     k = len(new)
                     use(kind, k)
@@ -683,6 +766,7 @@ class _SpecMixin:
                         pick_kind.done(0, 0, True, [x for x, _ in sdrafts], steps=k)
                         for x, sa, sd in shadow.settle():
                             pick_kind.sample(x, sa, sd)
+                    rk = ("mtp0" if kind == "mtp" else kind, k, k)
                     if prev == kind and not sdrafts:
                         # (the head's no-draft round: its own kind, the sync and the
                         # head's catch-up are its cost, a plain step's is not)
@@ -723,16 +807,38 @@ class _SpecMixin:
                     try:
                         # the verify forward opens a cache transaction (out.gdn_states)
                         # that must be committed every round, or aborted
+                        cp = prof is not None and prof.cprof(True)  # QWEN_SPEC_PROF=3: Python's profile of the build
                         out = lm(fed, cache=cache, capture_layer_ids=layers if layers is not None else [],
                                  speculative_verify=True, return_hidden=fin)
                         txn = out.gdn_states
+                        if prof is not None:
+                            if cp:
+                                prof.cprof(False)
+                            prof.lap("vgraph")
                         hidden = mx.concatenate(out.hidden_states, axis=-1) if layers is not None else None
                         targets = pick(out.logits, fed[0], at)
                         # the head's own round: it runs over the block's rows
                         # (the next seed), evaluated with the verify
                         ahead = mt.verify(hidden[..., -H:], targets) if mine else []
-                        mx.async_eval(targets, hidden, *ahead)
-                        accepted, new = _speculative_walk(drafts, targets, max_tokens - n)
+                        if prof is not None:
+                            prof.queued("pick")         # (the sampler's and the head's graphs)
+                        if ROUND_OVERLAP and ahead:
+                            # the head's verify as an eval of its own: the walk below
+                            # waits for the target's work only (_queued_row), the head's runs
+                            # on behind the host's work after it
+                            mx.async_eval(targets, hidden)
+                            mx.async_eval(*ahead)
+                        else:
+                            mx.async_eval(targets, hidden, *ahead)
+                        if prof is not None:
+                            prof.lap("submit")
+                        accepted, new = (_queued_walk if ROUND_OVERLAP else _speculative_walk)(
+                            drafts, targets, max_tokens - n)
+                        if prof is not None:
+                            prof.wait("walk", main=True)
+                            if prof.probe():        # QWEN_SPEC_PROF=2: the work queued behind targets
+                                mx.synchronize()
+                                prof.wait("tail")
                         hit, cut = accepted, None       # hit: the drafter's score (statistics)
                         if think is not None:
                             cut = _budget_cut(think, new, self.eng.stopping)
@@ -742,12 +848,20 @@ class _SpecMixin:
                                 # token leave the cache with the commit
                                 accepted, new = cut + 1, new[:cut + 1]
                         commit_speculative_round(lm, cache, txn, accepted, bs)
+                        if prof is not None:
+                            prof.lap("commit")
                         if accepted + 1 < bs:       # the kept state is a view of the block's
                             _own_states(cache)
+                            if prof is not None:
+                                prof.lap("own")
                     except BaseException:
+                        if prof is not None:
+                            prof.cprof(False)
                         abort_speculative_round(txn)
                         raise
                     requant()                   # (outside the transaction: offset >= start)
+                if prof is not None:
+                    prof.lap("requant")
                 if look is None and bs > 1:
                     if kind == "mtp":
                         mt.record(hit, bs - 1)
@@ -760,7 +874,7 @@ class _SpecMixin:
                 full = kind != "dflash" or bs == block_total
                 if look is None and pick_kind is not None:
                     pick_kind.done(hit, bs - 1, full, [x for x, _ in sdrafts])
-                    sdrafts = [(x, d.reshape(-1).tolist()) for x, d in sdrafts]
+                    sdrafts = [(x, _queued_row(d) if ROUND_OVERLAP else d.reshape(-1).tolist()) for x, d in sdrafts]
                     for x, d in sdrafts:
                         shadow.add(x, d)
                 arm = kind if look is None else None
@@ -773,6 +887,8 @@ class _SpecMixin:
                                   round(1000.0 * (time.perf_counter() - t_round), 2), fed_ctx,
                                   sdrafts, list(new)))
                 req.steps, req.rows_sum = req.steps + 1, req.rows_sum + 1
+                if prof is not None:
+                    prof.lap("book")
                 if hidden is not None:
                     if accepted < bs - 1:       # the positions the commit kept
                         hidden = hidden[:, : accepted + 1, :]
@@ -783,6 +899,8 @@ class _SpecMixin:
                         mt.round_end(accepted, hidden[..., -H:])
                     seen(hidden)
                     dctx.add(dfl(hidden))
+                if prof is not None:
+                    prof.lap("settle")
                 stopped, f = False, None
                 for j, tok in enumerate(new):
                     if not emit(tok):
@@ -796,6 +914,10 @@ class _SpecMixin:
                 if shadow is not None:
                     for x, sa, sd in shadow.settle():
                         pick_kind.sample(x, sa, sd)
+                if prof is not None:
+                    prof.lap("emit")
+                    rk = ("lookup" if look is not None else f"mtp{bs - 1}" if kind == "mtp" and bs > 1
+                          else kind if bs > 1 else "step1", len(new), 1)
                 if stopped or not new:
                     break
                 b = new[-1]

@@ -18,7 +18,7 @@ are changed at load, read as `cfg.NAME`), `chat` (tool-call parser, images, mess
 `_PlainContent`), `sampler`, `pcache` (`_Seg` / `_Entry` / `_PrefixCache`, cache-array
 helpers), `sizing` (`_step` / `_bounds` slab policy, `_FIXED_SLAB`, budget math), `stream`
 (detokenizer, `_StopFilter`, `_Control`, `_GenState`, `_done`), `grammar` (llguidance;
-`QWEN_JSON_MAX_WS`), `nosync`, `rows` (`RowsKV`, `_rows_attention`, stacked GDN), `kernels`
+`QWEN_JSON_MAX_WS`), `nosync`, `rprof` (`QWEN_SPEC_PROF`: a request's round / step timeline), `rows` (`RowsKV`, `_rows_attention`, stacked GDN), `kernels`
 (mlx-vlm patches: fused SDPA, DFlash verify, GDN fuse, batch-invariant checks), `lookup` (prompt lookup drafts: `_Lookup`, `_Gate`, `_DraftCtx`), `logprobs`,
 `request` (`_Req` / `_Row` / `_Own`), `scheduler` (`_Scheduler` core) + its mixins
 `sched_admit` / `sched_prefill` / `sched_spec` / `sched_store` / `sched_cascade` /

@@ -113,6 +113,13 @@ on code / ×0.8 on prose → opt-in `QWEN_DRAFT_SAMPLING=1`.
 
 ## Gotchas
 
+- A round's reads wait for what they read only (`sched_spec.ROUND_OVERLAP`, a module switch
+  for the in-process A/B, `ab_mtp.py` `+seq`): the MTP head's verify forward is an eval of its
+  own after the target's, and the walk and the shadow drafts are read from the arrays as
+  queued (`_queued_walk`: no new op), so the commit, the emits, the tick and the next round's
+  graphs run while the GPU computes the head's verify. A new op on a round's outputs (the
+  library walk's `reshape`) waits for all queued work. Per-round host / sync spans:
+  `QWEN_SPEC_PROF` ([knobs.md](knobs.md)).
 - DFlash greedy and the plain loop are byte-identical only for verify blocks
   ≤ `QWEN_VERIFY_EXACT_MAX_T` (8): longer blocks go through `quantized_matmul`,
   which rounds differently from the 1-row decode, so a near-tie can flip there

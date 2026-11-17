@@ -24,6 +24,11 @@ Variants (comma separated):
                +q the variant runs with it off)
   <v>+o        the old random stream (sampler.POS_KEYS off: the request's key split per draw, a
                verify block drawn with one key) instead of noise keyed by (seed, position)
+  <v>+m2       mrqmm from 2 rows (its MIN_ROWS 3 -> 2 for the variant): without +q the 2-token
+               verify blocks (and the head's lm_head over them) take it instead of mlx-vlm's
+               exact kernels (with +q mrqmv takes them first); batched-decode numerics class
+  <v>+seq      the round's reads as before sched_spec.ROUND_OVERLAP (one eval for the target's and
+               the head's verify, read through a reshape: the walk waits for both)
 Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tokens of
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
 scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts),
@@ -39,6 +44,10 @@ max_tokens = their count): the draws still run, the trajectory is the same for e
 of the sampler itself, e.g. plain,plain+o; speculative variants take no golden request: plain).
 --ident-mode sampling: the identity check at T 0.6 / top_p 0.95 / top_k 20 / --ident-seed against
 plain sampling with the same stream (+o variants against plain+o): first divergence per task.
+--prof 1|2|3 (QWEN_SPEC_PROF, qwen_worker/rprof.py): each request's rounds and plain-loop steps
+split into host before / after the sync, the sync, the scheduler's tick (2: + the GPU work left
+after every 8th walk; 3: + cProfile over every 16th verify graph build), per request in the JSON
+("prof"); pooled tables: round_table.py.
 
   cd src/worker && QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1 \\
     QWEN_KV_BITS=0 QWEN_MAX_BATCH=1 QWEN_WIRED_LIMIT_GB=27 QWEN_PRESENCE_PENALTY=0 \\
@@ -84,6 +93,7 @@ ap.add_argument("--skip-speed", action="store_true")
 ap.add_argument("--alt-head", default="", help="a second MTP drafter dir, taken by the +h variants")
 ap.add_argument("--json", default="")
 ap.add_argument("--trace", action="store_true", help="QWEN_SPEC_TRACE: per-round rows in the JSON")
+ap.add_argument("--prof", type=int, default=0, help="QWEN_SPEC_PROF level: per-round host / sync spans in the JSON")
 ap.add_argument("--warm-tokens", type=int, default=0, help="max_tokens of the warm-up requests (0 = --max-tokens)")
 a = ap.parse_args()
 
@@ -122,6 +132,8 @@ def qmv_bits(only4):
 
 
 QMV0 = W.VERIFY_QMV                     # after load: 0 unless mrqmv installed
+MRQ = sys.modules.get("mrqmm")          # (+m2: its row floor)
+MIN0 = MRQ.MIN_ROWS if MRQ is not None else None
 
 
 def set_variant(v, sampling=False):
@@ -138,6 +150,12 @@ def set_variant(v, sampling=False):
     W.SPEC_PLAIN = "p" in flags
     W.POS_KEYS = "o" not in flags
     W.SPEC_TRACE = a.trace
+    W.SPEC_PROF = a.prof
+    W.ROUND_OVERLAP = "seq" not in flags
+    if MRQ is not None:
+        MRQ.MIN_ROWS = 2 if "m2" in flags else MIN0
+    elif "m2" in flags:
+        raise SystemExit(f"{v}+m2: mrqmm not installed")
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
     W.VERIFY_QMV = QMV0 if ("q" in flags or "q4" in flags) else 0
@@ -263,6 +281,8 @@ def run(key, rid, v, seed=0, max_tokens=0):
     dt = times[-1] - times[0] if n > 2 else 0.0
     out = dict(tokens=toks, n=n, prompt=len(r.ids), ttft=times[0] - t0 if times else None,
                tps=(n - 1) / dt if dt else 0.0, finish=[str(x) for x in ev[1:2]])
+    if r.prof is not None:
+        out["prof"] = r.prof.summary()
     if W.SPEC_TRACE:
         out["trace"] = (r.spec_stats or {}).get("trace")
         out["times"] = [round(t, 4) for t in times]

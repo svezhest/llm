@@ -2,10 +2,12 @@
 
 import mlx.core as mx
 
+from . import config as cfg
 from .config import GIB, log, PREEMPT, PROMPT_CACHE_REPLY
 from .sampler import sample_rows
 from .pcache import _Seg
 from .nosync import _no_sync
+from .rprof import RoundProf
 from .rows import _gdn_concat, _gdn_split, _gdn_stack, _gdn_take, RowsKV
 from .logprobs import _cache_mode, _forced_logprobs, _read_logprobs, _token_logprobs, _wants
 
@@ -247,9 +249,16 @@ class _DecodeMixin:
             if not self.rows:
                 return
         rows = self.rows
+        prof = None
+        if cfg.SPEC_PROF and len(rows) == 1:   # QWEN_SPEC_PROF: a lone row's steps (the reference)
+            req = rows[0].req
+            prof = req.prof = req.prof or RoundProf(cfg.SPEC_PROF)
+            prof.begin()
         ahead = not any(r.sync for r in rows)
         with _no_sync():
             nxt = self._step(rows) if ahead else None
+        if prof is not None:
+            prof.queued("step")                 # (the next step: built and queued ahead)
         live = [r for r in rows if not r.first and not r.done]
         # item() per row: each token was evaluated by its step's async_eval,
         # so this waits for that step only. Any new op on them (a concatenate
@@ -257,6 +266,8 @@ class _DecodeMixin:
         # for it too: the GPU then idled while the host built the next step
         # (measured −5…12% step time at B = 8/16, step_profile).
         toks = [r.y.item() for r in live]
+        if prof is not None:
+            prof.wait("item", main=True)
         # logprobs rows only: evaluated with their token's step (no new op)
         lps = [_read_logprobs(r.lp) if r.lp is not None else None for r in live]
         for r, tok, lpi in zip(live, toks, lps):
@@ -309,6 +320,8 @@ class _DecodeMixin:
         if self.steps % 256 == 0:
             self.clear = True
         self._compact()
+        if prof is not None:
+            prof.end("loop", len(toks))
 
     # --- preemption (QWEN_PREEMPT) ------------------------------------------------
     def _preempt_rows(self):
