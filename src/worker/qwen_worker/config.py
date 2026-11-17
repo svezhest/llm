@@ -814,6 +814,10 @@ DECODE_ATT_MIN_KV = int(os.environ.get("QWEN_DECODE_ATT") or "0")
 #   (_probe_vatt_q8), else off. Default on since 2026-11-16 (27B oQ4e, 32K:
 #   KL vs the library 2.15e-5 / top-1 99.80 % verify, 1.67e-5 / 100 % decode;
 #   plain x1.42, DFlash x1.54 vs the library): docs/perf/2026-11-16/vatt_q8.md
+#   QWEN_VATT_Q8_KERNEL (read by vatt.py; "tile"): which pass-1 kernel it runs. "tile" = the one
+#   above (threadgroup tiles); "reg" = fragments built in registers, no tiles, the same fp16
+#   values; "regf" = reg with scale and bias out of the sums (the affine values unrounded).
+#   reg / regf: written 2026-11-17 without a GPU, not yet compiled or measured (the doc's last section).
 _VATT_Q8_MODE = os.environ.get("QWEN_VATT_Q8", "1")
 VATT_Q8_VERIFY = _VATT_Q8_MODE in ("1", "verify")
 VATT_Q8_DECODE = _VATT_Q8_MODE in ("1", "decode")

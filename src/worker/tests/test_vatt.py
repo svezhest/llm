@@ -184,16 +184,26 @@ CASES_Q8 = [  # (n, T, hq, hkv)
 ]
 
 
+# Q8Loader into the fp16 kernel's tiles / fragments in registers (vattq_p1) / the same with scale
+# and bias out of the sums: the affine values unrounded, so its reference is the exact one
+KERNELS_Q8 = ["tile", "reg", "regf"]
+
+
+def ref_q8(kernel, q, kq, vq, n, scale):
+    return vatt.reference_q8(q, kq, vq, n, scale, exact=kernel == "regf")
+
+
 @gpu_only
 @pytest.mark.parametrize("n,T,hq,hkv", CASES_Q8)
 @pytest.mark.parametrize("mul", [1.0, 8.0])
-def test_q8_matches_reference(gpu, n, T, hq, hkv, mul):
+@pytest.mark.parametrize("kernel", KERNELS_Q8)
+def test_q8_matches_reference(gpu, n, T, hq, hkv, mul, kernel):
     kq, vq = kvq(n, hkv, seed=n % 7)
     mx.random.seed(T)
     q = (mx.random.normal((1, hq, T, D)) * mul).astype(mx.float16)
     scale = D ** -0.5
-    out = vatt.attention_q8(q, kq, vq, n, scale)
-    ref = vatt.reference_q8(q, kq, vq, n, scale)
+    out = vatt.attention_q8(q, kq, vq, n, scale, kernel=kernel)
+    ref = ref_q8(kernel, q, kq, vq, n, scale)
     lib = rows_q8_lib(q, kq, vq, n, scale)
     mx.eval(out, ref, lib)
     assert out.shape == q.shape and out.dtype == mx.float16
@@ -203,35 +213,117 @@ def test_q8_matches_reference(gpu, n, T, hq, hkv, mul):
 
 
 @gpu_only
-def test_q8_dequantizes_like_mlx(gpu):
+@pytest.mark.parametrize("T", [1, 8])
+@pytest.mark.parametrize("kernel", KERNELS_Q8)
+def test_q8_error_gate(gpu, kernel, T):
+    """The microbench's shape (8K keys, |q| x 4): rms rel error <= 2.5e-4 (fp16 rounding of the
+    output is 2.0-2.1e-4), tile / reg vs fp32 over mx.dequantize's values, regf vs fp32 over the
+    affine values."""
+    n = 8192
+    kq, vq = kvq(n, 4, seed=6)
+    q = (mx.random.normal((1, 24, T, D)) * 4).astype(mx.float16)
+    out = vatt.attention_q8(q, kq, vq, n, D ** -0.5, kernel=kernel)
+    assert rel_rms(out, ref_q8(kernel, q, kq, vq, n, D ** -0.5)) <= 2.5e-4
+
+
+@gpu_only
+@pytest.mark.parametrize("kernel", ["tile", "reg"])
+def test_q8_dequantizes_like_mlx(gpu, kernel):
     """The in-register dequantization == mx.dequantize: the q8 kernel over the
     packed KV equals the fp16 kernel over mx.dequantize's fp16 KV (the same
-    tiles after the loaders) to fp16 rounding of the dequantized values."""
+    tiles after the loaders; "reg": the same fp16 values in its fragments) to
+    fp16 rounding of the dequantized values."""
     n = 3000
     kq, vq = kvq(n, 4, seed=5)
     q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
-    a = vatt.attention_q8(q, kq, vq, n, D ** -0.5)
+    a = vatt.attention_q8(q, kq, vq, n, D ** -0.5, kernel=kernel)
     b = vatt.attention(q, vatt.dequantized(kq, n), vatt.dequantized(vq, n), n, D ** -0.5)
     assert mx.abs(a.astype(mx.float32) - b.astype(mx.float32)).max().item() <= 2e-3
     assert rel_rms(a, b.astype(mx.float32)) < 2e-4
 
 
 @gpu_only
-@pytest.mark.parametrize("n,chunk", [(3000, 48), (3000, 96), (1000, 960), (4100, 4080), (517, 2016)])
-def test_q8_chunks_and_tails(gpu, n, chunk):
+@pytest.mark.parametrize("n,chunk", [(3000, 48), (3000, 96), (1000, 960), (4100, 4080), (517, 2016), (3000, 8),
+                                     (3000, 40)])
+@pytest.mark.parametrize("kernel", KERNELS_Q8)
+def test_q8_chunks_and_tails(gpu, n, chunk, kernel):
+    if kernel == "tile" and chunk % 16:      # its key blocks are 16 keys, "reg"'s 8 (default tiles)
+        pytest.skip("chunk not a multiple of the tile kernel's key block")
     kq, vq = kvq(n, 4, seed=1)
     q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
     for nn in (n, n - 3, n - 5):
-        out = vatt.attention_q8(q, kq, vq, nn, D ** -0.5, chunk=chunk)
-        assert rel_rms(out, vatt.reference_q8(q, kq, vq, nn, D ** -0.5)) < 4e-4, (nn, chunk)
+        out = vatt.attention_q8(q, kq, vq, nn, D ** -0.5, chunk=chunk, kernel=kernel)
+        assert rel_rms(out, ref_q8(kernel, q, kq, vq, nn, D ** -0.5)) < 4e-4, (nn, chunk)
 
 
 @gpu_only
-def test_q8_strided_view_no_copy(gpu):
+@pytest.mark.parametrize("kernel", KERNELS_Q8)
+def test_q8_strided_view_no_copy(gpu, kernel):
     kq, vq = kvq(3000, 4, seed=2, strided=True)
     q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
-    out = vatt.attention_q8(q, kq, vq, 2990, D ** -0.5)
-    assert rel_rms(out, vatt.reference_q8(q, kq, vq, 2990, D ** -0.5)) < 4e-4
+    out = vatt.attention_q8(q, kq, vq, 2990, D ** -0.5, kernel=kernel)
+    assert rel_rms(out, ref_q8(kernel, q, kq, vq, 2990, D ** -0.5)) < 4e-4
+
+
+REG_TILES = [(1, 2, 1), (1, 4, 1), (2, 4, 1), (3, 4, 1), (2, 2, 1), (1, 2, 2), (2, 4, 2), (1, 1, 1)]
+
+
+@gpu_only
+@pytest.mark.parametrize("tile", REG_TILES)
+@pytest.mark.parametrize("n,T", [(5, 1), (5, 5), (700, 1), (700, 3), (4099, 8), (9000, 16)])
+@pytest.mark.parametrize("kernel", ["reg", "regf"])
+def test_q8_reg_tiles(gpu, monkeypatch, tile, n, T, kernel):
+    """Every "reg" tile (MB 8-row query blocks a simdgroup x WN simdgroups x KF 8-key
+    fragments a key block) for one query and for blocks: partly filled row blocks, the
+    causal tail, keys past n never read."""
+    monkeypatch.setattr(vatt, "Q8R_DECODE", tile)
+    monkeypatch.setattr(vatt, "Q8R_VERIFY", tile)
+    kq, vq = kvq(n, 4, seed=3)
+    mx.random.seed(n + T)
+    q = (mx.random.normal((1, 24, T, D)) * 2).astype(mx.float16)
+    out = vatt.attention_q8(q, kq, vq, n, D ** -0.5, kernel=kernel)
+    assert not mx.any(mx.isnan(out)).item()
+    assert rel_rms(out, ref_q8(kernel, q, kq, vq, n, D ** -0.5)) < 4e-4
+
+
+@gpu_only
+def test_q8_reg_close_to_tile(gpu):
+    """Both kernels attend the same fp16 values (one fma a value): they differ by the
+    order of the fp32 sums only."""
+    n = 6000
+    kq, vq = kvq(n, 4, seed=4)
+    for T in (1, 8):
+        q = (mx.random.normal((1, 24, T, D)) * 2).astype(mx.float16)
+        a = vatt.attention_q8(q, kq, vq, n, D ** -0.5, kernel="tile").astype(mx.float32)
+        b = vatt.attention_q8(q, kq, vq, n, D ** -0.5, kernel="reg").astype(mx.float32)
+        assert rel_rms(b, a) < 2e-4            # fp16 output rounding of nearly equal fp32 values
+
+
+@gpu_only
+@pytest.mark.parametrize("kernel", ["tile", "reg"])
+@pytest.mark.parametrize("timing", [1, 2, 3])
+def test_q8_timing_variants_run(gpu, kernel, timing):
+    """The microbench's cost-split kernels compile and run (their numbers are wrong by design)."""
+    kq, vq = kvq(2000, 4, seed=1)
+    for T in (1, 8):
+        q = mx.random.normal((1, 24, T, D)).astype(mx.float16)
+        out = vatt.attention_q8(q, kq, vq, 2000, D ** -0.5, kernel=kernel, timing=timing)
+        mx.eval(out)
+        assert out.shape == q.shape
+
+
+@gpu_only
+def test_fp16_path_unchanged_by_the_q8_kernels(gpu):
+    """vatt.attention's kernel source does not depend on the q8 additions: the same bits
+    before and after a q8 call compiled its kernels (the fp16 / q8 kernels share the header)."""
+    k, v = kv(5000, 4, seed=9)
+    q = mx.random.normal((1, 24, 8, D)).astype(mx.float16)
+    a = vatt.attention(q, k, v, 5000, D ** -0.5)
+    mx.eval(a)
+    kq, vq = kvq(700, 4, seed=1)
+    for kernel in KERNELS_Q8:
+        mx.eval(vatt.attention_q8(q, kq, vq, 700, D ** -0.5, kernel=kernel))
+    assert mx.array_equal(a, vatt.attention(q, k, v, 5000, D ** -0.5)).item()
 
 
 def test_q8_rejects_bad_inputs():
@@ -242,6 +334,8 @@ def test_q8_rejects_bad_inputs():
                  (q, (k[0], k[1].astype(mx.float32), k[2]), k, 40, 64, 8)):
         with pytest.raises(ValueError):
             vatt.attention_q8(args[0], args[1], args[2], args[3], 0.0625, args[4], args[5])
+    with pytest.raises(ValueError):
+        vatt.attention_q8(q, k, k, 40, 0.0625, kernel="tiles")
 
 
 def test_q8_cpu_reference_is_dequantized_attention():
@@ -253,3 +347,93 @@ def test_q8_cpu_reference_is_dequantized_attention():
     out = vatt.attention_q8(q, kq, vq, 15, 0.0625)
     want = vatt.attention(q, mx.dequantize(*kq, 64, 8), mx.dequantize(*vq, 64, 8), 15, 0.0625)
     assert mx.array_equal(out, want).item()
+    assert mx.array_equal(vatt.attention_q8(q, kq, vq, 15, 0.0625, kernel="reg"), want).item()
+    # "regf" attends the affine values scale * code + bias unrounded: the exact reference
+    f = vatt.attention_q8(q, kq, vq, 15, 0.0625, kernel="regf")
+    assert mx.array_equal(f, vatt.reference_q8(q, kq, vq, 15, 0.0625, exact=True).astype(mx.float16)).item()
+    assert mx.abs(f.astype(mx.float32) - want.astype(mx.float32)).max().item() < 2e-2
+
+
+def test_q8_exact_reference_is_the_affine_values():
+    """reference_q8(exact=True) = attention over scale * code + bias computed in fp32."""
+    mx.random.seed(1)
+    q = mx.random.normal((1, 4, 2, D)).astype(mx.float16)
+    kq = mx.quantize(mx.random.normal((1, 2, 12, D)).astype(mx.float16), 64, 8)
+    vq = mx.quantize(mx.random.normal((1, 2, 12, D)).astype(mx.float16), 64, 8)
+
+    def affine(x):
+        w, s, b = x
+        codes = mx.stack([(w >> (8 * i)) & 0xff for i in range(4)], axis=-1).reshape(1, 2, 12, D).astype(mx.float32)
+        return codes * mx.repeat(s.astype(mx.float32), 64, axis=-1) + mx.repeat(b.astype(mx.float32), 64, axis=-1)
+    want = vatt.reference(q, affine(kq), affine(vq), 12, 0.0625)
+    got = vatt.reference_q8(q, kq, vq, 12, 0.0625, exact=True)
+    assert mx.abs(got - want).max().item() < 1e-5
+
+
+def test_q8_kernel_and_timing_plumbing(monkeypatch):
+    """CPU: attention_q8 hands the kernel name (None = Q8_KERNEL), the reg tile, the timing
+    variant and the launch geometry to the kernels (fakes; Metal: the VATT_GPU tests)."""
+    seen = {}
+
+    class Fake:
+        def __init__(self, name):
+            self.name = name
+
+        def __call__(self, inputs, grid, threadgroup, output_shapes, output_dtypes):
+            seen[self.name] = dict(grid=grid, threadgroup=threadgroup, n_in=len(inputs))
+            return [mx.zeros(s, d) for s, d in zip(output_shapes, output_dtypes)]
+
+    def reg(D_, hkv, scale, mb, wn, kf, fact=False, timing=0):
+        seen["reg"] = (mb, wn, kf, fact, timing)
+        return Fake("p1"), Fake("p2")
+
+    def tile(D_, hkv, scale, bq, bk, wm, wn, q8=False, timing=0):
+        seen["tile"] = (bq, bk, wm, wn, q8, timing)
+        return Fake("p1"), Fake("p2")
+    monkeypatch.setattr(vatt, "use_kernel", lambda: True)
+    monkeypatch.setattr(vatt, "_kernels_reg", reg)
+    monkeypatch.setattr(vatt, "_kernels", tile)
+    monkeypatch.setattr(vatt, "Q8R_DECODE", (1, 2, 1))
+    monkeypatch.setattr(vatt, "Q8R_VERIFY", (2, 4, 1))
+    n = 5000
+    kq = mx.quantize(mx.zeros((1, 4, n + 8, D), mx.float16), 64, 8)
+    for T, kernel, timing, want, tg, blocks, bk in ((8, "reg", None, (2, 4, 1, False, 0), 128, 3, 8),
+                                                    (8, "regf", 1, (2, 4, 1, True, 1), 128, 3, 8),
+                                                    (1, "reg", 3, (1, 2, 1, False, 3), 64, 1, 8),
+                                                    (16, "regf", None, (2, 4, 1, True, 0), 128, 6, 8)):
+        seen.clear()
+        q = mx.zeros((1, 24, T, D), mx.float16)
+        out = vatt.attention_q8(q, kq, kq, n, 0.0625, kernel=kernel, timing=timing)
+        assert out.shape == q.shape and seen["reg"] == want and "tile" not in seen
+        chunk = vatt.pick_chunk(n, 4, blocks, bk)
+        assert chunk % bk == 0
+        assert seen["p1"] == dict(grid=(tg * -(-n // chunk) * blocks, 4, 1), threadgroup=(tg, 1, 1), n_in=8)
+        assert seen["p2"]["grid"] == (D * 6 * T, 4, 1)
+    seen.clear()
+    vatt.attention_q8(mx.zeros((1, 24, 8, D), mx.float16), kq, kq, n, 0.0625, kernel="tile", timing=2)
+    assert seen["tile"] == (16, 16, 2, 2, True, 2) and "reg" not in seen
+    for name in vatt.Q8_KERNELS:               # the default kernel is the module's Q8_KERNEL
+        seen.clear()
+        monkeypatch.setattr(vatt, "Q8_KERNEL", name)
+        vatt.attention_q8(mx.zeros((1, 24, 1, D), mx.float16), kq, kq, n, 0.0625)
+        assert ("tile" in seen) == (name == "tile") and (name == "tile" or seen["reg"][3] == (name == "regf"))
+    seen.clear()                               # the fp16 path never takes a q8 kernel or a timing variant
+    k = mx.zeros((1, 4, n + 8, D), mx.float16)
+    vatt.attention(mx.zeros((1, 24, 8, D), mx.float16), k, k, n, 0.0625)
+    assert seen["tile"] == (16, 16, 2, 2, False, 0)
+
+
+def test_q8_kernel_sources_render():
+    """The Metal sources as text (no compiler here): the reg kernel's call and constants, one
+    header per timing variant, balanced brackets in the new function."""
+    import re
+    assert "vattq_p1<MB, WN, KF, FACT>(q, kv, po, pml" in vatt._P1R and "KVQ8 kv;" in vatt._P1R
+    assert "threadgroup float2 X[2 * WN * MB * KF * 32];" in vatt._P1R
+    for t in range(4):
+        assert f"#define VATT_Q8_TIMING {t}\n" in vatt._header(t)
+    assert vatt._header(0) is vatt._header(0) and vatt._header(0) != vatt._header(1)
+    f = vatt._IMPL[vatt._IMPL.index("template <int MB, int WN, int KF, bool FACT>"):]
+    code = re.sub(r"//.*", "", f)
+    for a, b in ("()", "{}", "[]"):
+        assert code.count(a) == code.count(b), (a, code.count(a), code.count(b))
+    assert vatt.Q8_KERNEL in vatt.Q8_KERNELS and vatt.Q8_KERNELS[0] == "tile"

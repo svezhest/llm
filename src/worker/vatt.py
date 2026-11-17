@@ -41,6 +41,18 @@ the per-query calls; tests/test_vatt.py and the load-time self-test
 
 On a CPU default device `attention` computes the same with mx ops in fp32
 (`reference`), so the worker's CPU tests run the path unchanged.
+
+8-bit quantized KV (QWEN_VATT_Q8, `attention_q8`): the same two passes over a
+QuantizedKVCache's (packed, scales, biases) buffers. Pass 1 is one of three
+kernels (QWEN_VATT_Q8_KERNEL): "tile" = vatt_p1 with Q8Loader dequantizing
+into its threadgroup tiles (every 16-row query block of a chunk converts its
+key tiles again); "reg" = vattq_p1, K / V fragments built in registers from
+the packed bytes as mrqmm.py builds its weights (no tiles, one barrier a key
+block, one conversion for the MB row blocks of a simdgroup), the same fp16
+values; "regf" = reg with the MMAs on the codes, scale and bias applied to
+the sums (the affine values unrounded: `reference_q8(exact=True)`). reg and
+regf were written 2026-11-17 without a GPU: not compiled or measured until
+docs/perf/2026-11-16/vatt_q8.md's last section is filled.
 """
 from __future__ import annotations
 
@@ -63,6 +75,23 @@ TARGET_TG = int(os.environ.get("VATT_TARGET_TG") or "256")   # pass-1 threadgrou
 TILE = os.environ.get("VATT_TILE", "")
 SPLIT = os.environ.get("VATT_SPLIT", "0") == "1"   # K / V / exchange in separate smem regions
 BK_MUL = int(os.environ.get("VATT_BK_MUL") or "1")           # > 1: BK = BK_MUL * BQ
+# microbench only, WRONG numbers (attention_q8(timing=) per call; a kernel per value): 1 = no
+# scale / bias (no reads of them, no fma), 2 = 1 without the offset subtraction, 3 = no KV reads
+# at all (constants: the MMAs, the tile stores / fragment builds and the merge alone)
+Q8_TIMING = int(os.environ.get("VATT_Q8_TIMING") or "0")
+# q8 pass 1 (QWEN_VATT_Q8_KERNEL; attention_q8(kernel=) per call): "tile" = Q8Loader into the fp16
+# kernel's threadgroup tiles (every 16-row query block converts its key tiles); "reg" = vattq_p1,
+# fragments built in registers, one conversion for the MB row blocks of a simdgroup, the same fp16
+# values; "regf" = reg with scale and bias taken out of the sums (the affine values unrounded)
+Q8_KERNELS = ("tile", "reg", "regf")
+Q8_KERNEL = os.environ.get("QWEN_VATT_Q8_KERNEL") or "tile"
+# "reg" tiles (MB 8-row query blocks a simdgroup, WN simdgroups splitting head_dim, KF 8-key
+# fragments a key block) for a decode step (<= 8 query rows a kv head) / a verify block; the
+# microbench reassigns them. Unmeasured guesses (2026-11-17: written without a GPU): decode =
+# today's 2 simdgroups x 8 rows; verify = 16 rows a threadgroup as the tile kernel, one group of
+# 64 dims a simdgroup (16 O fragments in registers, as the tile kernel holds)
+Q8R_DECODE = tuple(int(x) for x in (os.environ.get("VATT_Q8R_DECODE") or "1x2x1").split("x"))
+Q8R_VERIFY = tuple(int(x) for x in (os.environ.get("VATT_Q8R_VERIFY") or "2x4x1").split("x"))
 Q8_KMAP = os.environ.get("VATT_Q8_KMAP", "c")   # q8 K loader: "c" = threads over a key's units (coalesced reads), "k" = over keys
 
 _IMPL = r"""
@@ -335,7 +364,20 @@ struct Q8Loader {
     const short key = KF ? key0 : short(key0 + p * (TGP / CPK));
     const short c = KF ? short(c0 + p * (TGP / BK)) : c0;
     half v[16];
-    if (valid) {
+    if (valid && VATT_Q8_TIMING == 3) {
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 16; i++) v[i] = half(0.01h * half(c + 1));
+    } else if (valid && VATT_Q8_TIMING != 0) {
+      const uint4 q = *(const device uint4*)(w + key * wt + c * 4);
+      const half2 off = VATT_Q8_TIMING == 2 ? half2(0.0h) : half2(1024.0h);
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        const uint x = q[i];
+        const half2 lo = as_type<half2>((x & 0x00ff00ffu) | 0x64006400u) - off;
+        const half2 hi = as_type<half2>(((x >> 8) & 0x00ff00ffu) | 0x64006400u) - off;
+        v[4 * i] = lo.x; v[4 * i + 1] = hi.x; v[4 * i + 2] = lo.y; v[4 * i + 3] = hi.y;
+      }
+    } else if (valid) {
       const uint4 q = *(const device uint4*)(w + key * wt + c * 4);
       const half2 sc = half2(s[key * st + c / 4]);
       const half2 bi = half2(b[key * bt + c / 4]);
@@ -398,6 +440,311 @@ struct KVQ8 {
         vb + size_t(h) * vbh + size_t(start) * vbt, vwt, vst, vbt, dst, sg, ln);
   }
 };
+
+// Pass 1 over an 8-bit QuantizedKVCache with no threadgroup tiles (QWEN_VATT_Q8_KERNEL=reg /
+// regf): every MMA fragment of K and V is built in registers from the packed bytes, as
+// mrqmm.py builds its weights. A threadgroup = WN simdgroups x 8 * MB query rows, key blocks
+// of 8 * KF keys; a simdgroup owns GS = 4 / WN of the 4 groups of 64 dims (scores: its
+// partial sum over them, exchanged once per key block -- WN = 1: no exchange, no barrier;
+// values: its 64 * GS output dims). Per 8 keys of a block and group g, MMA step st = 0..7
+// takes the dims d = 64 g + 8 c + st of fragment column / row c:
+//   S (rows x keys) += Q frag (row fm; d-slots fn, fn + 1: registers) x K^T frag (d-slot fm;
+//     keys fn, fn + 1: byte st of the 8 bytes at 64 g + 8 fm of each key, one uint2 a key
+//     and group -> 16-bit lanes once per group, a shift and a mask per step)
+//   O[g, st] (rows x d-slots) += P frag (rows x keys) x V frag (key fm; d-slots fn, fn + 1:
+//     byte st of the low / high half of the uint4 at 64 g + 8 fn of the key)
+// K's fragment is built once per step for all MB row blocks of the simdgroup, V's too.
+// FACT = false ("reg"): dequantized as the tile loader does, (0x6400 | byte) - 1024 and one
+// fp16 fma with the group's scale and bias: the same fp16 values, summed in another order.
+// FACT = true ("regf"): the MMAs run on the centred codes c = byte - 128 (exact in fp16);
+// scale and bias come out of the sums, in fp32, once per (8 keys, group):
+//   S += s[k, g] * (q_g . c[k, g]) + (b[k, g] + 128 s[k, g]) * sum(q_g)
+//   O_g += (P s[., g]) c[., g] + sum_k P[r, k] (b[k, g] + 128 s[k, g])     (the last per row)
+// i.e. attention over the affine values s * code + b unrounded -- not mx.dequantize's fp16
+// values (reference_q8(exact=True) is its reference). Keys past N are never read (the index
+// is clamped; their scores are masked, so the clamped key's values get weight 0). The
+// exchange slots alternate between two buffers: one barrier a block. Same split-KV outputs
+// as vatt_p1. VATT_Q8_TIMING (microbench, wrong numbers): 1 = no scale / bias, 2 = 1 without
+// the offset subtraction, 3 = no KV reads.
+template <int MB, int WN, int KF, bool FACT>
+METAL_FUNC void vattq_p1(
+    const device half* Q, thread const KVQ8& kv,
+    device float* po, device float* pml,
+    const int M0, const int N, const int TQN, const int chunk, const int blocks, const int HKV_,
+    const float scale,
+    threadgroup float2* X,
+    const uint lid, const uint sg, const uint3 tid) {
+  using namespace mlx::steel;
+  constexpr int BD = 256, GS = 4 / WN, NS = 8 * GS, BQ = 8 * MB, BK = 8 * KF;
+  constexpr bool FA = FACT && VATT_Q8_TIMING == 0;
+  static_assert(WN == 1 || WN == 2 || WN == 4, "WN = 1, 2 or 4");
+  const int item = int(tid.x) / blocks, qb = int(tid.x) % blocks, h = int(tid.y);
+  const int q0 = qb * BQ;
+  const int start = item * chunk;
+  const int kend = min(N, start + chunk);
+  const int lim0 = N - TQN + 1;                 // row t = 0 sees keys < lim0
+  const short qid = short(lid) / 4;
+  const short fm = (qid & 4) + ((short(lid) / 2) % 4);      // fragment row
+  const short fn = (qid & 2) * 2 + (short(lid) % 2) * 2;    // fragment columns fn, fn + 1
+  const int g0 = int(sg) * GS;
+  // the code as fp16: (0x6400 | byte) = 1024 + byte, minus OFF
+  const half2 OFF = half2(VATT_Q8_TIMING == 2 ? 0.0h : (FA ? 1152.0h : 1024.0h));
+
+  const device uint8_t* kw = (const device uint8_t*)(kv.kw + size_t(h) * kv.kwh);
+  const device uint8_t* vw = (const device uint8_t*)(kv.vw + size_t(h) * kv.vwh);
+  const device half* ks = kv.ks + size_t(h) * kv.ksh;
+  const device half* kb = kv.kb + size_t(h) * kv.kbh;
+  const device half* vs = kv.vs + size_t(h) * kv.vsh;
+  const device half* vb = kv.vb + size_t(h) * kv.vbh;
+  const size_t kwt = size_t(kv.kwt) * 4, vwt = size_t(kv.vwt) * 4;     // token strides, bytes
+
+  half2 qf[MB][NS];                             // Q fragments: step i = 8 * gi + st
+  float qs[MB][GS];                             // FACT: sum of the row's q over group gi
+  STEEL_PRAGMA_UNROLL
+  for (int mb = 0; mb < MB; ++mb) {
+    const int r = q0 + 8 * mb + fm;
+    const device half* qr = Q + (size_t(h) * M0 + min(r, M0 - 1)) * BD + 64 * g0 + 8 * fn;
+    STEEL_PRAGMA_UNROLL
+    for (int i = 0; i < NS; ++i) {
+      const int o = 64 * (i / 8) + (i % 8);
+      qf[mb][i] = r < M0 ? half2(qr[o], qr[o + 8]) : half2(0.0h);
+    }
+    STEEL_PRAGMA_UNROLL
+    for (int gi = 0; gi < GS; ++gi) {
+      qs[mb][gi] = 0.0f;
+      if (FA) {                                 // Q frag x ones: the row's sum in every column
+        simdgroup_matrix<float, 8, 8> C = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        simdgroup_matrix<half, 8, 8> I = make_filled_simdgroup_matrix<half, 8, 8>(1.0h);
+        STEEL_PRAGMA_UNROLL
+        for (int st = 0; st < 8; ++st) {
+          simdgroup_matrix<half, 8, 8> A;
+          A.thread_elements()[0] = qf[mb][8 * gi + st].x;
+          A.thread_elements()[1] = qf[mb][8 * gi + st].y;
+          simdgroup_multiply_accumulate(C, A, I, C);
+        }
+        qs[mb][gi] = C.thread_elements()[0];
+      }
+    }
+  }
+
+  simdgroup_matrix<float, 8, 8> O[MB][NS];
+  float ob[MB][GS];                             // FACT: sum_k P[row, k] b'[k, g]
+  float max_score[MB], sum_score[MB];
+  STEEL_PRAGMA_UNROLL
+  for (int mb = 0; mb < MB; ++mb) {
+    max_score[mb] = Limits<float>::finite_min;
+    sum_score[mb] = 0.0f;
+    STEEL_PRAGMA_UNROLL
+    for (int i = 0; i < NS; ++i) O[mb][i] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+    STEEL_PRAGMA_UNROLL
+    for (int gi = 0; gi < GS; ++gi) ob[mb][gi] = 0.0f;
+  }
+
+  int par = 0;
+  for (int kbase = start; kbase < kend; kbase += BK, par ^= 1) {
+    float2 s[MB][KF];                           // this simdgroup's partial scores
+    STEEL_PRAGMA_UNROLL
+    for (int kf = 0; kf < KF; ++kf) {
+      const size_t ka = size_t(min(kbase + 8 * kf + fn, N - 1)), kc = size_t(min(kbase + 8 * kf + fn + 1, N - 1));
+      simdgroup_matrix<float, 8, 8> S[MB];
+      STEEL_PRAGMA_UNROLL
+      for (int mb = 0; mb < MB; ++mb) {
+        S[mb] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        s[mb][kf] = float2(0.0f);
+      }
+      STEEL_PRAGMA_UNROLL
+      for (int gi = 0; gi < GS; ++gi) {
+        const int g = g0 + gi;
+#if VATT_Q8_TIMING == 3
+        const uint2 a = uint2(0x01020304u + uint(fm)), c = uint2(0x04030201u + uint(fn));
+#else
+        const uint2 a = *(const device uint2*)(kw + ka * kwt + 64 * g + 8 * fm);
+        const uint2 c = *(const device uint2*)(kw + kc * kwt + 64 * g + 8 * fm);
+#endif
+        // 16-bit lanes (key fn, key fn + 1), word j = bytes 2j, 2j + 1 of each
+        const uint4 w = uint4(insert_bits(a.x, c.x, 16u, 16u), insert_bits(c.x, a.x >> 16, 0u, 16u),
+                              insert_bits(a.y, c.y, 16u, 16u), insert_bits(c.y, a.y >> 16, 0u, 16u));
+#if VATT_Q8_TIMING == 0
+        const half2 sc = half2(ks[ka * kv.kst + g], ks[kc * kv.kst + g]);
+        const half2 bi = half2(kb[ka * kv.kbt + g], kb[kc * kv.kbt + g]);
+#else
+        const half2 sc = half2(0.01h), bi = half2(0.0h);
+#endif
+        STEEL_PRAGMA_UNROLL
+        for (int st = 0; st < 8; ++st) {
+          const uint u = (w[st / 2] >> uint(8 * (st % 2))) & 0x00ff00ffu;
+          const half2 cd = as_type<half2>(u | 0x64006400u) - OFF;
+#if VATT_Q8_TIMING == 0
+          const half2 e = FA ? cd : fma(cd, sc, bi);
+#else
+          const half2 e = cd * sc;
+#endif
+          simdgroup_matrix<half, 8, 8> B;
+          B.thread_elements()[0] = e.x;
+          B.thread_elements()[1] = e.y;
+          STEEL_PRAGMA_UNROLL
+          for (int mb = 0; mb < MB; ++mb) {
+            simdgroup_matrix<half, 8, 8> A;
+            A.thread_elements()[0] = qf[mb][8 * gi + st].x;
+            A.thread_elements()[1] = qf[mb][8 * gi + st].y;
+            simdgroup_multiply_accumulate(S[mb], A, B, S[mb]);
+          }
+        }
+        if (FA) {                               // the group's sums -> scores, restart the sums
+          const float2 fs = float2(sc), fb = fma(float2(128.0f), fs, float2(bi));
+          STEEL_PRAGMA_UNROLL
+          for (int mb = 0; mb < MB; ++mb) {
+            const float2 t = float2(S[mb].thread_elements()[0], S[mb].thread_elements()[1]);
+            s[mb][kf] += fma(t, fs, qs[mb][gi] * fb);
+            S[mb] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+          }
+        }
+      }
+      if (!FA) {
+        STEEL_PRAGMA_UNROLL
+        for (int mb = 0; mb < MB; ++mb)
+          s[mb][kf] = float2(S[mb].thread_elements()[0], S[mb].thread_elements()[1]);
+      }
+    }
+
+    if (WN > 1) {     // every simdgroup adds the WN partial scores in the same order: the same bits in all
+      threadgroup float2* xs = X + par * (WN * MB * KF * 32);
+      STEEL_PRAGMA_UNROLL
+      for (int j = 0; j < MB * KF; ++j) xs[(int(sg) * MB * KF + j) * 32 + lid] = s[j / KF][j % KF];
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      STEEL_PRAGMA_UNROLL
+      for (int j = 0; j < MB * KF; ++j) {
+        float2 t = xs[j * 32 + lid];
+        STEEL_PRAGMA_UNROLL
+        for (int p = 1; p < WN; ++p) t += xs[(p * MB * KF + j) * 32 + lid];
+        s[j / KF][j % KF] = t;
+      }
+    }
+    STEEL_PRAGMA_UNROLL
+    for (int j = 0; j < MB * KF; ++j) s[j / KF][j % KF] *= scale;
+    if (kbase + BK > min(lim0, kend)) {           // past the chunk / the block's causal tail
+      STEEL_PRAGMA_UNROLL
+      for (int mb = 0; mb < MB; ++mb) {
+        const int r = q0 + 8 * mb + fm;
+        const int lim = min(r < M0 ? lim0 + r % TQN : N, kend) - kbase;
+        STEEL_PRAGMA_UNROLL
+        for (int kf = 0; kf < KF; ++kf) {
+          if (8 * kf + fn >= lim) s[mb][kf].x = Limits<float>::finite_min;
+          if (8 * kf + fn + 1 >= lim) s[mb][kf].y = Limits<float>::finite_min;
+        }
+      }
+    }
+
+    float2 pr[MB][KF];                            // probabilities: row fm; keys fn, fn + 1
+    STEEL_PRAGMA_UNROLL
+    for (int mb = 0; mb < MB; ++mb) {             // online softmax, log2 domain (as vatt_p1)
+      float t = max(s[mb][0].x, s[mb][0].y);
+      STEEL_PRAGMA_UNROLL
+      for (int kf = 1; kf < KF; ++kf) t = max(t, max(s[mb][kf].x, s[mb][kf].y));
+      t = max(t, simd_shuffle_xor(t, ushort(1)));
+      t = max(t, simd_shuffle_xor(t, ushort(8)));
+      const float new_max = max(max_score[mb], t);
+      const float factor = fast::exp2(max_score[mb] - new_max);
+      max_score[mb] = new_max;
+      float u = 0.0f;
+      STEEL_PRAGMA_UNROLL
+      for (int kf = 0; kf < KF; ++kf) {
+        pr[mb][kf] = fast::exp2(s[mb][kf] - new_max);
+        u += pr[mb][kf].x + pr[mb][kf].y;
+      }
+      u += simd_shuffle_xor(u, ushort(1));
+      u += simd_shuffle_xor(u, ushort(8));
+      sum_score[mb] = sum_score[mb] * factor + u;
+      if (factor != 1.0f) {
+        STEEL_PRAGMA_UNROLL
+        for (int i = 0; i < NS; ++i) {
+          O[mb][i].thread_elements()[0] *= factor;
+          O[mb][i].thread_elements()[1] *= factor;
+        }
+        STEEL_PRAGMA_UNROLL
+        for (int gi = 0; gi < GS; ++gi) ob[mb][gi] *= factor;
+      }
+    }
+
+    STEEL_PRAGMA_UNROLL
+    for (int kf = 0; kf < KF; ++kf) {
+      const size_t kk = size_t(min(kbase + 8 * kf + fm, N - 1));
+      // FACT: the P fragment's keys (its columns), for their scales and biases
+      const size_t ka = size_t(min(kbase + 8 * kf + fn, N - 1)), kc = size_t(min(kbase + 8 * kf + fn + 1, N - 1));
+      STEEL_PRAGMA_UNROLL
+      for (int gi = 0; gi < GS; ++gi) {
+        const int g = g0 + gi;
+#if VATT_Q8_TIMING == 3
+        const uint4 a = uint4(0x01020304u + uint(fm), 0x04030201u, 0x01010101u, 0x02020202u + uint(fn));
+#else
+        const uint4 a = *(const device uint4*)(vw + kk * vwt + 64 * g + 8 * fn);
+#endif
+        // 16-bit lanes (d-slot fn, d-slot fn + 1) = the low / high 8 bytes, word j = bytes 2j, 2j + 1
+        const uint4 w = uint4(insert_bits(a.x, a.z, 16u, 16u), insert_bits(a.z, a.x >> 16, 0u, 16u),
+                              insert_bits(a.y, a.w, 16u, 16u), insert_bits(a.w, a.y >> 16, 0u, 16u));
+#if VATT_Q8_TIMING == 0
+        const half2 sc = FA ? half2(1.0h) : half2(vs[kk * kv.vst + g]);
+        const half2 bi = FA ? half2(0.0h) : half2(vb[kk * kv.vbt + g]);
+#else
+        const half2 sc = half2(0.01h), bi = half2(0.0h);
+#endif
+        simdgroup_matrix<float, 8, 8> P[MB];      // FACT: each key's column times its scale
+        float2 fs = float2(1.0f);
+        if (FA) {
+          fs = float2(float(vs[ka * kv.vst + g]), float(vs[kc * kv.vst + g]));
+          const float2 fb = fma(float2(128.0f), fs, float2(float(vb[ka * kv.vbt + g]), float(vb[kc * kv.vbt + g])));
+          STEEL_PRAGMA_UNROLL
+          for (int mb = 0; mb < MB; ++mb) {
+            float t = pr[mb][kf].x * fb.x + pr[mb][kf].y * fb.y;
+            t += simd_shuffle_xor(t, ushort(1));
+            t += simd_shuffle_xor(t, ushort(8));
+            ob[mb][gi] += t;
+          }
+        }
+        STEEL_PRAGMA_UNROLL
+        for (int mb = 0; mb < MB; ++mb) {
+          P[mb].thread_elements()[0] = pr[mb][kf].x * fs.x;
+          P[mb].thread_elements()[1] = pr[mb][kf].y * fs.y;
+        }
+        STEEL_PRAGMA_UNROLL
+        for (int st = 0; st < 8; ++st) {
+          const uint u = (w[st / 2] >> uint(8 * (st % 2))) & 0x00ff00ffu;
+          const half2 cd = as_type<half2>(u | 0x64006400u) - OFF;
+#if VATT_Q8_TIMING == 0
+          const half2 e = FA ? cd : fma(cd, sc, bi);
+#else
+          const half2 e = cd * sc;
+#endif
+          simdgroup_matrix<half, 8, 8> B;
+          B.thread_elements()[0] = e.x;
+          B.thread_elements()[1] = e.y;
+          STEEL_PRAGMA_UNROLL
+          for (int mb = 0; mb < MB; ++mb)
+            simdgroup_multiply_accumulate(O[mb][8 * gi + st], P[mb], B, O[mb][8 * gi + st]);
+        }
+      }
+    }
+  }
+
+  const size_t p0 = (size_t(item) * HKV_ + h) * M0 + q0;
+  STEEL_PRAGMA_UNROLL
+  for (int mb = 0; mb < MB; ++mb) {
+    const int r = 8 * mb + fm;
+    if (q0 + r < M0) {
+      device float* o = po + (p0 + r) * BD + 64 * g0 + 8 * fn;
+      STEEL_PRAGMA_UNROLL
+      for (int i = 0; i < NS; ++i) {              // step i holds dims 64 gi + 8 (fn, fn + 1) + st
+        const int d = 64 * (i / 8) + (i % 8);
+        o[d] = (O[mb][i].thread_elements()[0] + ob[mb][i / 8]) / sum_score[mb];
+        o[d + 8] = (O[mb][i].thread_elements()[1] + ob[mb][i / 8]) / sum_score[mb];
+      }
+      if (fn == 0 && sg == 0) {
+        pml[2 * (p0 + r)] = max_score[mb];
+        pml[2 * (p0 + r) + 1] = sum_score[mb];
+      }
+    }
+  }
+}
 """
 
 # constants prepended (_consts): D, HKV, BQ, BK, WM, WN, SCALE2 (scale * log2 e)
@@ -430,6 +777,13 @@ _P1Q = _P1.split("    threadgroup half KV_smem[KVS];")[0] + r"""    threadgroup 
         threadgroup_position_in_grid);
 """
 
+# q8 "reg" / "regf": constants D, HKV, MB, WN, KF, FACT, SCALE2; the same inputs / outputs / meta as _P1Q
+_P1R = r"""
+    threadgroup float2 X[2 * WN * MB * KF * 32];
+""" + _P1Q.split("    threadgroup half KV_smem[KVS];")[1].split("    vatt_p1<")[0] + r"""    vattq_p1<MB, WN, KF, FACT>(q, kv, po, pml, meta[0], meta[1], meta[2], meta[3], meta[5], HKV, SCALE2, X,
+        thread_index_in_simdgroup, simdgroup_index_in_threadgroup, threadgroup_position_in_grid);
+"""
+
 _P2 = r"""
     const int r = int(threadgroup_position_in_grid.x);
     const int h = int(threadgroup_position_in_grid.y);
@@ -447,18 +801,19 @@ _P2 = r"""
     out[(size_t(h) * M0 + r) * D + d] = half(acc / L);
 """
 
-_HEADER = None
+_HEADER: dict = {}
 _KERNELS: dict = {}
 _META: dict = {}
 _LOCK = threading.Lock()
 
 
-def _header() -> str:
-    global _HEADER
-    if _HEADER is None:
-        _HEADER = (_cm.steel_headers() + _cm._OPS
-                   + f"#define VATT_Q8_KFAST {'false' if Q8_KMAP == 'c' else 'true'}\n" + _IMPL)
-    return _HEADER
+def _header(timing: int = 0) -> str:
+    """The kernels' header; `timing` = the q8 loaders' VATT_Q8_TIMING (0 for every real kernel)."""
+    if timing not in _HEADER:
+        _HEADER[timing] = (_cm.steel_headers() + _cm._OPS
+                           + f"#define VATT_Q8_KFAST {'false' if Q8_KMAP == 'c' else 'true'}\n"
+                           + f"#define VATT_Q8_TIMING {timing}\n" + _IMPL)
+    return _HEADER[timing]
 
 
 def tile_for(m0: int):
@@ -495,8 +850,8 @@ def _consts(D, hkv, scale, bq, bk, wm, wn):
             f"    constexpr float SCALE2 = {scale * math.log2(math.e)!r}f;\n")
 
 
-def _kernels(D, hkv, scale, bq, bk, wm, wn, q8=False):
-    key = (D, hkv, float(scale), bq, bk, wm, wn, q8)
+def _kernels(D, hkv, scale, bq, bk, wm, wn, q8=False, timing=0):
+    key = (D, hkv, float(scale), bq, bk, wm, wn, q8, timing)
     k = _KERNELS.get(key)
     if k is None:
         with _LOCK:
@@ -509,10 +864,37 @@ def _kernels(D, hkv, scale, bq, bk, wm, wn, q8=False):
                 tag = (f"q{bq}k{bk}w{wm}x{wn}{'s' if SPLIT else ''}_d{D}_h{hkv}_s"
                        + float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p'))
                 p1 = mx.fast.metal_kernel(
-                    name=f"vatt{'q8' if q8 else ''}_p1_{tag}",
+                    name=f"vatt{'q8' if q8 else ''}_p1_{tag}{f'_t{timing}' if timing else ''}",
                     input_names=(["q", "kw", "ks", "kb", "vw", "vs", "vb", "meta"] if q8
                                  else ["q", "k", "v", "meta"]),
-                    output_names=["po", "pml"], source=c + (_P1Q if q8 else _P1), header=_header(),
+                    output_names=["po", "pml"], source=c + (_P1Q if q8 else _P1), header=_header(timing),
+                    ensure_row_contiguous=False)
+                p2 = _KERNELS.get(("p2", D, hkv))
+                if p2 is None:
+                    p2 = _KERNELS[("p2", D, hkv)] = mx.fast.metal_kernel(
+                        name=f"vatt_p2_d{D}_h{hkv}", input_names=["po", "pml", "meta"],
+                        output_names=["out"], source=c + _P2)
+                k = _KERNELS[key] = (p1, p2)
+    return k
+
+
+def _kernels_reg(D, hkv, scale, mb, wn, kf, fact=False, timing=0):
+    key = ("reg", D, hkv, float(scale), mb, wn, kf, fact, timing)
+    k = _KERNELS.get(key)
+    if k is None:
+        with _LOCK:
+            k = _KERNELS.get(key)
+            if k is None:
+                if D != 256 or wn not in (1, 2, 4) or not 1 <= mb <= 6 or kf not in (1, 2):
+                    raise ValueError(f"vatt: q8 reg tile {mb}x{wn}x{kf} at head_dim {D}")
+                c = (f"constexpr int D = {D}, HKV = {hkv}, MB = {mb}, WN = {wn}, KF = {kf};\n"
+                     f"    constexpr bool FACT = {'true' if fact else 'false'};\n"
+                     f"    constexpr float SCALE2 = {scale * math.log2(math.e)!r}f;\n")
+                tag = (f"m{mb}w{wn}k{kf}{'f' if fact else ''}{f't{timing}' if timing else ''}_d{D}_h{hkv}_s"
+                       + float(scale).hex().replace('.', '_').replace('-', 'm').replace('+', 'p'))
+                p1 = mx.fast.metal_kernel(
+                    name=f"vattq8r_p1_{tag}", input_names=["q", "kw", "ks", "kb", "vw", "vs", "vb", "meta"],
+                    output_names=["po", "pml"], source=c + _P1R, header=_header(timing),
                     ensure_row_contiguous=False)
                 p2 = _KERNELS.get(("p2", D, hkv))
                 if p2 is None:
@@ -591,17 +973,23 @@ def attention(q, k, v, n, scale, chunk=None):
     return _run(q, [k, v], k.shape[1], n, scale, chunk, False)
 
 
-def _run(q, kv_inputs, Hkv, n, scale, chunk, q8):
+def _run(q, kv_inputs, Hkv, n, scale, chunk, q8, kernel="tile", timing=0):
     _, Hq, T, D = q.shape
     m0 = Hq // Hkv * T
-    bq, bk, wm, wn, blocks = tile_for(m0)
+    reg = q8 and kernel != "tile"
+    if reg:                          # 8 * MB query rows x 8 * KF keys a block, WN simdgroups
+        mb, wn, kf = Q8R_DECODE if m0 <= 8 else Q8R_VERIFY
+        bk, blocks, tg = 8 * kf, -(-m0 // (8 * mb)), 32 * wn
+    else:
+        bq, bk, wm, wn, blocks = tile_for(m0)
+        tg = 32 * wm * wn
     chunk = chunk or pick_chunk(n, Hkv, blocks, bk)
     if chunk % bk:
         raise ValueError(f"vatt: chunk {chunk} not a multiple of {bk}")
     items = -(-n // chunk)
     meta = _meta(m0, n, T, chunk, blocks)
-    p1, p2 = _kernels(D, Hkv, scale, bq, bk, wm, wn, q8)
-    tg = 32 * wm * wn
+    p1, p2 = (_kernels_reg(D, Hkv, scale, mb, wn, kf, kernel == "regf", timing) if reg
+              else _kernels(D, Hkv, scale, bq, bk, wm, wn, q8, timing))
     qf = q.reshape(-1)               # (Hkv, M0, D) row-major (a copy when q is a transposed view)
     po, pml = p1(inputs=[qf, *kv_inputs, meta], grid=(tg * items * blocks, Hkv, 1), threadgroup=(tg, 1, 1),
                  output_shapes=[(items * Hkv * m0 * D,), (items * Hkv * m0 * 2,)],
@@ -643,20 +1031,31 @@ def dequantized(x, n, group_size=Q8_GROUP, bits=8):
     return mx.dequantize(*(a[..., :n, :] for a in x), group_size=group_size, bits=bits)
 
 
-def reference_q8(q, kq, vq, n, scale, group_size=Q8_GROUP, bits=8):
-    """fp32 reference over the dequantized KV -> (1, Hq, T, D) fp32."""
+def reference_q8(q, kq, vq, n, scale, group_size=Q8_GROUP, bits=8, exact=False):
+    """fp32 reference over the dequantized KV -> (1, Hq, T, D) fp32. `exact`: over the
+    affine values scale * code + bias in fp32 instead of mx.dequantize's fp16 ones."""
+    if exact:
+        kq, vq = ((x[0], x[1].astype(F32), x[2].astype(F32)) for x in (kq, vq))
     return reference(q, dequantized(kq, n, group_size, bits), dequantized(vq, n, group_size, bits), n, scale)
 
 
-def attention_q8(q, kq, vq, n, scale, group_size=Q8_GROUP, bits=8, chunk=None):
+def attention_q8(q, kq, vq, n, scale, group_size=Q8_GROUP, bits=8, chunk=None, kernel=None, timing=None):
     """`attention` over an 8-bit QuantizedKVCache: kq / vq the cache's
     (packed, scales, biases) buffers (1, Hkv, cap, ...), keys [0, n) valid,
-    read in place and dequantized in registers into the kernel's fp16
-    threadgroup tiles (the rest of the kernel is the fp16 one)."""
+    read in place. `kernel` (None = Q8_KERNEL): "tile" dequantizes in registers
+    into the fp16 kernel's threadgroup tiles, "reg" straight into the MMA
+    fragments (vattq_p1), "regf" runs the MMAs on the codes with scale and
+    bias taken out of the sums (the affine values unrounded: not
+    mx.dequantize's fp16 ones). `timing` (None = Q8_TIMING): the microbench's
+    cost-split variants, wrong numbers."""
     check_q8(q, kq, vq, n, group_size, bits)
+    kernel = kernel or Q8_KERNEL
+    if kernel not in Q8_KERNELS:
+        raise ValueError(f"vatt: q8 kernel {kernel!r} ({' / '.join(Q8_KERNELS)})")
     if not use_kernel():
-        return reference_q8(q, kq, vq, n, scale, group_size, bits).astype(mx.float16)
-    return _run(q, [*kq, *vq], kq[0].shape[1], n, scale, chunk, True)
+        return reference_q8(q, kq, vq, n, scale, group_size, bits, exact=kernel == "regf").astype(mx.float16)
+    return _run(q, [*kq, *vq], kq[0].shape[1], n, scale, chunk, True, kernel,
+                Q8_TIMING if timing is None else timing)
 
 
 def partial_bytes(n: int, hq: int, T: int, D: int = 256) -> int:
