@@ -3,26 +3,112 @@
 import os
 
 import mlx.core as mx
+import numpy as np
 
 from .config import SAMPLER_TOPK_FAST
 
+# The draw's randomness is a function of (the request's seed, the absolute
+# position of the token drawn): `_words` mixes the two into a 64-bit key on
+# the host (splitmix64, a bijection of the position for a given seed), and
+# the noise of a row is a counter-based hash of (that key, the vocab column)
+# computed on the GPU (`_uniform`: one compiled elementwise kernel for all
+# rows of a draw, no MLX random state). So a token gets the same noise
+# whatever else is drawn with it: a row alone or in a batch, a plain step or
+# row i of a speculative verify block (position pos0 + i), before or after a
+# prompt-cache hit or a preemption -- llama.cpp's "one draw per emitted
+# position". A request without a seed gets a random one when its sampler is
+# made (admission: _Scheduler._setup -> make_sampler).
+# POS_KEYS False: the stream before this (the request's MLX key split per
+# draw; a verify block drawn with one key): an in-process A/B switch for
+# benchmarks, not a knob.
+POS_KEYS = True
+
+_M64 = (1 << 64) - 1
+
+
+def _mix64(z):
+    """splitmix64's output function (a bijection of 64-bit words)."""
+    z = (z + 0x9E3779B97F4A7C15) & _M64
+    z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & _M64
+    z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & _M64
+    return z ^ (z >> 31)
+
+
+def _words(seed, pos):
+    """The key of the draw at absolute position `pos` -> [low, high] uint32."""
+    z = _mix64(seed ^ _mix64(pos))
+    return [z & 0xFFFFFFFF, z >> 32]
+
+
+def _mix32(x):
+    """lowbias32 (hash-prospector): an avalanching bijection of uint32."""
+    x = x ^ (x >> 16)
+    x = x * 0x7FEB352D
+    x = x ^ (x >> 15)
+    x = x * 0x846CA68B
+    return x ^ (x >> 16)
+
+
+def _uniform_rows(keys, cols):
+    """keys (R, 2) uint32, cols (W,) uint32 -> (R, W) float32 uniforms in
+    (0, 1): (2j + 1) / 2^24 for 23 hash bits j (every value exact in fp32,
+    never 0 or 1). Two rounds keyed by both words: rows whose keys differ in
+    one word only are not permutations of each other's noise."""
+    x = _mix32(cols[None] ^ keys[:, :1])
+    x = _mix32(x + keys[:, 1:])
+    return ((x >> 9).astype(mx.float32) + 0.5) * (1.0 / (1 << 23))
+
+
+def _gumbel_rows(x, keys, cols):
+    """x + Gumbel noise of the rows' keys (mx.random.categorical's draw is
+    the argmax of this, with MLX's own noise)."""
+    return x + -mx.log(-mx.log(_uniform_rows(keys, cols)))
+
+
+# one fused kernel each (traced per shape; integer ops: bit-identical on any
+# row count, and no captured random state, so any thread may call them)
+_uniform = mx.compile(_uniform_rows)
+_gumbel = mx.compile(_gumbel_rows)
+_COLS = {}
+
+
+def _cols(width):
+    """0 .. width - 1 as uint32: a constant (numpy-backed, no graph), memoized."""
+    c = _COLS.get(width)
+    if c is None:
+        c = _COLS[width] = mx.array(np.arange(width, dtype=np.uint32))
+    return c
+
+
+def _draw(x, keys):
+    """Tokens (R,) of prepared rows `x` (filtered logits or a _TopK) from the
+    rows' keys (R, 2): Gumbel-max over the full vocabulary, or the _TopK's
+    own pick from k + 2 uniforms."""
+    if isinstance(x, _TopK):
+        return x.pick(_uniform(keys, _cols(x.width)))
+    return mx.argmax(_gumbel(x, keys, _cols(x.shape[-1])), axis=-1)
+
 
 def make_sampler(sampling, seed=None):
-    """logits (rows, V) -> token ids, with an explicit per-request RNG key.
+    """logits (rows, V) -> token ids, drawn with noise keyed by (seed, position).
 
     vLLM's order: temperature, then min_p, top_k and top_p, each on the
     distribution the previous one left (top_p over the top_k survivors,
     renormalized; at least one token always survives).
 
-    The key is ours, not the global one: mlx_lm's sampler draws through a
-    function compiled with ``inputs=outputs=mx.random.state``, which captures
-    the global key of the thread that first traced it. MLX random state is per
-    thread, so in the gRPC handler threads the captured key never advanced and
-    temperature 0.7 returned byte-identical answers. Here the key is split per
-    step; ``seed`` (request field) makes a request reproducible.
+    The randomness is ours, not MLX's global state: mlx_lm's sampler draws
+    through a function compiled with ``inputs=outputs=mx.random.state``,
+    which captures the global key of the thread that first traced it (MLX
+    random state is per thread: in the gRPC handler threads that key never
+    advanced and temperature 0.7 returned byte-identical answers). Here every
+    draw hashes (``seed``, the token's absolute position) -- see POS_KEYS --
+    so nothing is carried from draw to draw; ``seed`` (request field) makes a
+    request reproducible, None picks a random one.
 
-    The result is a `_Sampler`: called on one row's logits it is the per-row
-    sampler; `sample_rows` draws for several rows with equal settings at once.
+    The result is a `_Sampler`: called on rows' logits (+ the position of
+    the first row; the rows are consecutive positions) it is the per-request
+    sampler; `sample_rows` draws for several requests with equal settings
+    at once.
     """
     return _Sampler(sampling, seed)
 
@@ -39,8 +125,10 @@ class _Sampler:
             return
         self.top_p, self.min_p, self.top_k = sampling["top_p"], sampling["min_p"], sampling["top_k"]
         if seed is None:
-            seed = int.from_bytes(os.urandom(4), "little")
-        self.key = mx.random.key(int(seed) & 0x7FFF_FFFF_FFFF_FFFF)
+            seed = int.from_bytes(os.urandom(8), "little")
+        self.seed = int(seed) & _M64
+        self.key = mx.random.key(int(seed) & 0x7FFF_FFFF_FFFF_FFFF)    # POS_KEYS off only
+        self.next = 0                       # the position a draw without one takes (tools, tests)
         self.temp = max(temp, 0.01)
         self.group = (self.temp, self.min_p, self.top_k, self.top_p)
         self.fast = SAMPLER_TOPK_FAST and self.top_k > 0
@@ -125,33 +213,46 @@ class _Sampler:
         z = mx.concatenate([z, mx.where(extra > 0, kth + mx.log(mx.maximum(extra, 1.0)), ninf)], axis=-1)
         return _TopK(z, ids, order, start, extra)
 
-    def draw(self, x):
-        if isinstance(x, _TopK):
-            return x.pick(self.noise(*x.z.shape[:-1], x.width))
-        self.key, sub = mx.random.split(self.key)
-        return mx.random.categorical(x, key=sub)
+    def at(self, pos, rows):
+        """The keys (host words) of `rows` consecutive draws from absolute
+        position `pos` (None: where the last draw ended)."""
+        if pos is None:
+            pos = self.next
+        self.next = pos + rows
+        return [_words(self.seed, p) for p in range(pos, pos + rows)]
+
+    def draw(self, x, pos=None):
+        """Tokens of prepared rows `x`, row i being the token at position
+        pos + i. One host array of the rows' keys and one fused noise kernel
+        per draw (_uniform / _gumbel), whatever the row count."""
+        rows = (x.z if isinstance(x, _TopK) else x).shape[0]
+        if not POS_KEYS:
+            if isinstance(x, _TopK):
+                return x.pick(self.noise(rows, x.width))
+            self.key, sub = mx.random.split(self.key)
+            return mx.random.categorical(x, key=sub)
+        return _draw(x, mx.array(self.at(pos, rows), dtype=mx.uint32))
 
     def noise(self, rows, width):
-        """The fast path's randomness for `rows` rows: one uniform draw of
-        (rows, width) from the next key (_TopK.pick turns it into Gumbels +
-        the tie bucket's pick). One split + one random op per row: the rest
-        of a group's draw runs once on the stack (sample_rows), since a
-        per-row draw of ~25 small ops cost more host time at B = 16 than the
-        filter saved on the GPU (GPU phase 2026-10-24)."""
+        """POS_KEYS off: the fast path's randomness for `rows` rows, one
+        uniform draw of (rows, width) from the next split of the key."""
         self.key, sub = mx.random.split(self.key)
         return mx.random.uniform(shape=(rows, width), key=sub)
 
-    def __call__(self, logits):
+    def __call__(self, logits, pos=None):
+        """Tokens of `logits` (rows, V); row i is the token at absolute
+        position pos + i (the KV length after the forward that gave its
+        logits). Greedy ignores `pos`."""
         if self.greedy:
             return mx.argmax(logits - mx.logsumexp(logits, axis=-1, keepdims=True), axis=-1)
-        return self.draw(self.prepare(logits))
+        return self.draw(self.prepare(logits), pos)
 
 
 class _TopK:
     """_Sampler.survivors of some rows: z (R, k + 1) logits of the k
     candidates `ids` (R, k) + the ties-of-the-k-th bucket, `order` (R, V)
     the sorted vocab, the bucket's tokens = order[start : start + extra].
-    sample_rows draws a group at once from the rows' own noise (_Sampler.noise)."""
+    sample_rows draws a group at once from the rows' own noise (_draw)."""
     __slots__ = ("z", "ids", "order", "start", "extra")
 
     def __init__(self, z, ids, order, start, extra):
@@ -174,26 +275,31 @@ class _TopK:
         return mx.where(t == k, tie, tok)
 
 
-def sample_rows(samplers, logits, on_error=None):
+def sample_rows(samplers, logits, pos=None, on_error=None):
     """Next tokens of several rows -> list of (1,) arrays, each equal to what
-    `samplers[i](logits[i])` returns. Rows with the same settings and logits
-    dtype are filtered as one (G, V) stack: MLX's row ops (topk, argsort,
-    softmax, cumsum, logsumexp, argmax) give each row of a stack bit-for-bit
-    the result of that row alone (checked on Metal at the real vocabulary,
-    ties included: tests/test_mrqmm.py), and the draw stays per row with the
-    row's own key. At B=16 the card sampler (top_k 20, top_p 0.95) costs ~15 ms
-    of GPU per step row by row, mostly 16 full-vocab topk + argsort launches.
+    `samplers[i](logits[i], pos[i])` returns (`pos` None: each sampler's
+    next). Rows with the same settings and logits dtype are filtered as one
+    (G, V) stack: MLX's row ops (topk, argsort, softmax, cumsum, logsumexp,
+    argmax) give each row of a stack bit-for-bit the result of that row alone
+    (checked on Metal at the real vocabulary, ties included:
+    tests/test_mrqmm.py), and each row's noise is a function of its own key
+    only, so the group is drawn by one noise kernel + one argmax. At B=16 the
+    card sampler (top_k 20, top_p 0.95) costs ~15 ms of GPU per step row by
+    row, mostly 16 full-vocab topk + argsort launches.
 
     An exception while building a group's draw fails that group only: with
     `on_error`, on_error(i, e) is called for each of its rows and their
     entries stay None (the other groups are drawn); without, it is raised."""
     out = [None] * len(samplers)
+    if pos is None:
+        pos = [None] * len(samplers)
     groups = {}
     for i, (s, x) in enumerate(zip(samplers, logits)):
         groups.setdefault((s.group, x.dtype), []).append(i)
     for idx in groups.values():
         try:
-            ys = _sample_group([samplers[i] for i in idx], [logits[i] for i in idx])
+            ys = _sample_group([samplers[i] for i in idx], [logits[i] for i in idx],
+                               [pos[i] for i in idx])
         except Exception as e:  # noqa: BLE001 — this group's rows only
             if on_error is None:
                 raise
@@ -205,17 +311,21 @@ def sample_rows(samplers, logits, on_error=None):
     return out
 
 
-def _sample_group(samplers, logits):
+def _sample_group(samplers, logits, pos):
     """sample_rows for rows of one group (equal settings and dtype)."""
     s0 = samplers[0]
     if len(samplers) == 1:
-        return [s0(logits[0])]
+        return [s0(logits[0], pos[0])]
     stack = mx.concatenate(logits)
     if s0.greedy:
         toks = s0(stack)
         return [toks[j:j + 1] for j in range(len(samplers))]
     x = s0.prepare(stack)
-    if isinstance(x, _TopK):            # one draw for the stack, each row's own noise
+    if POS_KEYS:                        # one draw for the stack, each row's own key
+        keys = mx.array([w for s, p in zip(samplers, pos) for w in s.at(p, 1)], dtype=mx.uint32)
+        toks = _draw(x, keys)
+        return [toks[j:j + 1] for j in range(len(samplers))]
+    if isinstance(x, _TopK):            # (POS_KEYS off: each row's own split)
         toks = x.pick(mx.concatenate([s.noise(1, x.width) for s in samplers]))
         return [toks[j:j + 1] for j in range(len(samplers))]
     return [s.draw(x[j:j + 1]) for j, s in enumerate(samplers)]

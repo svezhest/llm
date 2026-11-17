@@ -601,7 +601,7 @@ PREFILL_LANE_BURST = max(1, int(os.environ.get("QWEN_PREFILL_LANE_BURST", "4") o
 #   next decode input goes). The victim is the growing row itself (the one
 #   cut today: the other rows are untouched). The client sees one stream: the
 #   handler's detokenizer / stop filter / reasoning split never notice, the
-#   scheduler carries the sampler (its key: the seeded stream continues), the
+#   scheduler carries the sampler (its seed: draws keyed by position go on), the
 #   penalty counts, _Control's counters, the grammar matcher and the thinking
 #   budget (on the request). Not for vision, DFlash, cascade-grouped rows,
 #   prompt_logprobs or prompt_cache "read" / "off" requests (they are cut as

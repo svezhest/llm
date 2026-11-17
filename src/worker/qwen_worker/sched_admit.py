@@ -326,8 +326,11 @@ class _AdmitMixin:
     def _setup(self, req):
         """The row of a request taken off the queue (its reservation counted)
         -> None when its options failed (the request got its error). A
-        preempted request goes on with its own sampler (key) and penalty
-        counts; its _Control masks are built already."""
+        preempted request goes on with its own sampler (seed) and penalty
+        counts; its _Control masks are built already. A request without a
+        seed gets a random one here (make_sampler): its draws are keyed by
+        (seed, absolute position) from then on, so it too gives the same
+        tokens plain, speculative, batched or resumed."""
         tokens = self._tokens(req)
         row = _Row(req, tokens, self._bytes(tokens))
         self.reserved += row.reserved

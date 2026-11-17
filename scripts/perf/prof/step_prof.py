@@ -246,8 +246,8 @@ def _sleepy(ms):
 _SR = W.sample_rows
 
 
-def _per_row(samplers, logits):
-    return [s(x) for s, x in zip(samplers, logits)]
+def _per_row(samplers, logits, pos=None, on_error=None):
+    return [s(x, p) for s, x, p in zip(samplers, logits, pos or [None] * len(samplers))]
 
 
 def _with_sampling(fn):

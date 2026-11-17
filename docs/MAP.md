@@ -49,7 +49,8 @@ of plain (T 0.6: ×1.78 / ×1.23 / ×1.20 / ×1.07–1.09), above plain in every
 sampled cells at fp16 KV, 2 of 2 on q8, the floor 4 of 4. Prompt lookup pays on copy-heavy
 turns, off by default. DFlash ≠ plain greedy bitwise, deterministic run to run. Open: the
 first request of a class on code (DFlash's fixed prior), tied arms under sampling; the head
-is not sampled while DFlash runs.
+is not sampled while DFlash runs. Sampled speculative text == plain sampled text (draws keyed
+by seed + position; CPU-tested, GPU check pending).
 
 ## Prompt cache — [prompt-cache.md](prompt-cache.md)
 
@@ -67,8 +68,8 @@ determinism. Measured; cascade's later floor / staged releases are tested only.
 
 ## API and gateway — [api.md](api.md)
 
-vLLM v0.30 behaviour: tool calls (`qwen3_xml` port), reasoning parser, sampler order,
-logprobs and prompt logprobs, llguidance grammars, request shaping; anything unsupported is a
+vLLM v0.30 behaviour: tool calls (`qwen3_xml` port), reasoning parser, sampler order (draws
+keyed by seed + absolute position), logprobs and prompt logprobs, llguidance grammars, request shaping; anything unsupported is a
 400. Gateway: queue, Check, in-flight slots from the worker's `max_batch`, cancel on
 disconnect. Firm. Open: multi-model routing (planned, not built).
 

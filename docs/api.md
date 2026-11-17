@@ -6,7 +6,8 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   don't is a 400; vLLM-unknown fields are ignored and logged.
 - Tool calls: a port of vLLM's `qwen3_xml`; structured output and tool grammars: llguidance;
   reasoning: vLLM's `qwen3` parser + mlx-vlm's thinking budget.
-- Sampler: vLLM's order in fp32 with an explicit per-request key (seeded requests reproduce).
+- Sampler: vLLM's order in fp32; each token's noise is keyed by (request seed, absolute position),
+  so a seeded request gives the same text plain, speculative, batched or after a cache hit.
 - Gateway: admission (queue → Check → in-flight slot → Generate), `ReqGuard` owns the slots
   and cancels on disconnect. Multi-model routing is planned, not built.
 
@@ -42,9 +43,27 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   on text-only) before queueing → 400 for streams too.
 - **Sampler** = vLLM order on float32: penalties (presence/frequency over generated
   tokens, repetition over prompt+output; `_Penalties`) → temperature → min_p → top_k →
-  top_p → draw (`make_sampler`, per-request key). Greedy stays argmax of
+  top_p → draw (`make_sampler`). Greedy stays argmax of
   `logits - logsumexp` in the model dtype — byte-identical to the old path. The old
   512-token presence window is gone (vLLM has none).
+- **Seed = (seed, position) noise (2026-11-17)**: the draw of the token at absolute position p
+  (the KV length after the forward that gave its logits) uses Gumbel / uniform noise hashed from
+  (the request's seed, p) — a host splitmix64 key per row + one compiled uint32 hash kernel over
+  the vocabulary for all rows of a draw (`sampler._uniform` / `_gumbel`); no MLX random state, nothing
+  carried between draws. A request without a seed gets a random 64-bit one at admission
+  (`_setup` → `make_sampler`). So the same seeded request gives the same text alone or in a
+  batch, through any speculative arm (row i of a verify block = position pos0 + i; a row after
+  the first rejected draft is discarded unread, so the next round draws that position from the
+  same, still unseen noise: the target distribution, and the plain loop's token where the
+  logits are bit-identical), after a prompt-cache hit, a preemption or a demotion — within the
+  exactness classes of [scheduler.md](scheduler.md) (B ≤ 2 and the exact verify are bit-equal;
+  mrqmm / cascade / the mrqmm verify can flip a near-tie). llama.cpp does the same (one draw per
+  emitted position). vLLM v0.30 promises only reproducibility for a seed (its per-request
+  generator advances per draw; its rejection sampler is not plain sampling's stream). The
+  stream for a given seed changed with this (`sampler.POS_KEYS = False` = the old one, an
+  in-process A/B switch for `scripts/perf/mtp/ab_mtp.py` `+o`). Cost: ~1 µs of host per row,
+  one fused kernel + one argmax per group instead of a split + random op (+ categorical) per row
+  (GPU step cost: not measured yet). CPU tests `tests/test_rng_pos.py`.
 - **Log-probabilities (2026-10-22, `docs/perf/2026-10-21/design/logprobs.md`, review
   `reviews/logprobs.md`)**: `logprobs` / `top_logprobs` (≤ 20) per generated token (reasoning,
   answer and the final EOS / stop token; raw logits before penalties / temperature, fp32
@@ -141,11 +160,9 @@ keep it that simple until a non-MLX (GGUF/llama.cpp) backend actually lands.
 
 ## Gotchas
 
-- **MLX random state is per thread, and mlx_lm's sampler is compiled against the
-  main thread's key.** gRPC handlers run in pool threads, so `mlx_lm.make_sampler`
-  there drew every token from the same never-advancing key: temperature 0.7
-  returned byte-identical answers, and `mx.random.seed` from the handler thread
-  changed nothing. The worker's own `make_sampler` (worker.py, no mlx_lm since the
-  0.7.6 bump) filters top_p/min_p/top_k itself and draws with an explicit per-request key split
-  per step; request `seed` feeds that key (reproducible, verified through the
-  gateway). Test any sampler change from a thread, not the REPL main thread.
+- **Draws use no MLX random state** (noise hashed from (seed, position), above). MLX random
+  state is per thread and mlx_lm's sampler is compiled against the main thread's key: in the
+  gRPC pool threads `mlx_lm.make_sampler` once drew every token from a never-advancing key
+  (temperature 0.7 returned byte-identical answers, `mx.random.seed` from the handler changed
+  nothing). Do not bring `mx.random` / an mlx_lm sampler back into the draw;
+  `tests/test_rng_pos.py` checks a draw from another thread.

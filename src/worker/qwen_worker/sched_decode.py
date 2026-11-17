@@ -182,6 +182,7 @@ class _DecodeMixin:
                 nxt.append(None)
         if pend:                                    # a drawing error fails its group's rows only
             ys = sample_rows([r.sampler for _, r, _ in pend], [x for _, _, x in pend],
+                             [r.pos for _, r, _ in pend],
                              on_error=lambda i, e: self._fail(pend[i][1], e))
             for (j, _, _), y in zip(pend, ys):
                 nxt[j] = y
@@ -217,11 +218,15 @@ class _DecodeMixin:
 
     def _sample(self, row, logits):
         """One row's logits -> its next token: _logits, then grammar, sampler.
-        (In a batch, rows without a grammar are drawn together: sample_rows.)"""
+        (In a batch, rows without a grammar are drawn together: sample_rows.)
+        The draw's key is the token's absolute position, row.pos (the KV
+        length after this step: _step counted it), so a row draws the same
+        noise for a position alone, in a batch, after a cache hit or a
+        preemption, and as _spec's verify rows and plain steps do."""
         logits = self._logits(row, logits)
         if row.req.guide is not None:
-            return row.req.guide.sample(logits, row.sampler)
-        return row.sampler(logits)
+            return row.req.guide.sample(logits, row.sampler, row.pos)
+        return row.sampler(logits, row.pos)
 
     def _iterate(self):
         """One decode step for the batch. Step-ahead: the next forward is

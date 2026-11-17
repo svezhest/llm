@@ -141,3 +141,27 @@ def test_sample_rows_topk_fast_full_vocab(monkeypatch):
             want_t = [solo[i](xs[i]).tolist() for i in range(B)]
             got_t = [y.tolist() for y in worker.sample_rows(grouped, xs)]
             assert got_t == want_t, (c, step)
+
+
+def test_position_noise_full_vocab(monkeypatch):
+    """Noise keyed by (seed, position) on Metal at V = 248320: the hash's
+    uniforms == the CPU's bit for bit (integer ops, exact conversion), and a
+    verify block's draw (T rows at positions pos..pos + T - 1, one kernel)
+    == each row drawn alone at its position, full-vocab and fast paths."""
+    V = 248320
+    keys = mx.array([worker._words(11, p) for p in (0, 1, 4095, 1 << 20)], dtype=mx.uint32)
+    gpu_u = worker._uniform(keys, worker._cols(V))
+    with mx.stream(mx.cpu):
+        cpu_u = worker._uniform_rows(keys, worker._cols(V))
+        mx.eval(cpu_u)
+    assert mx.array_equal(gpu_u, cpu_u).item()
+    for fast in (False, True):
+        monkeypatch.setattr(worker, "SAMPLER_TOPK_FAST", fast)
+        for c in [dict(temperature=0.6, top_p=0.95, top_k=20), dict(temperature=1.0),
+                  dict(temperature=0.8, min_p=0.05)]:
+            s = worker.make_sampler(dict(worker.SAMPLING_KWARGS, **c), seed=11)
+            for T in (2, 4, 8, 16):
+                lg = (mx.random.normal((T, V), key=mx.random.key(T)) * 4).astype(mx.float16)
+                lg[:, 7] = lg.max(axis=-1)                   # ties with the maximum
+                block = s(lg, 100).tolist()
+                assert block == [s(lg[i:i + 1], 100 + i).item() for i in range(T)], (fast, c, T)

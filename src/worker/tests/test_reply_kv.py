@@ -138,8 +138,8 @@ def test_stop_token_is_in_the_entry_only_when_fed(dense, small, monkeypatch, syn
         def consume(self, tok):
             pass
 
-        def sample(self, logits, sampler):
-            return sampler(logits)
+        def sample(self, logits, sampler, pos=None):
+            return sampler(logits, pos)
     sched = scheduler(dense)
     pc = sched.eng._pcache
     r = request(p, 10, "a", guide=AllowAll() if sync else None, stop_token_ids=[stop])

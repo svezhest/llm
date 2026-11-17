@@ -795,7 +795,8 @@ The sampler runs in vLLM's order, on float32 logits:
 6. the draw.
 
 Temperature 0 is argmax. Values in (0, 0.01) are raised to 0.01. `seed` makes a sampled
-request reproducible; each request draws with its own key.
+request reproducible; each token's draw is keyed by (seed, its position), so batching and
+speculative decoding do not change a seeded answer.
 
 ### 6.4 Thinking on and off, and the reasoning budget
 
@@ -1790,9 +1791,9 @@ Look for `llguidance tokenizer failed` at load.
 
 **Temperature > 0 gives identical answers every time.**
 That would mean someone reintroduced a sampler built against the main thread's random key.
-MLX random state is per thread, and gRPC handlers run on pool threads. The worker draws with
-an explicit per-request key; test any sampler change from a non-main thread. Fixed answers
-with the same `seed` are intended.
+MLX random state is per thread, and gRPC handlers run on pool threads. The worker's draw uses
+no MLX random state (noise hashed from the seed and the token's position); test any sampler
+change from a non-main thread. Fixed answers with the same `seed` are intended.
 
 **The venv is broken after moving the repo.**
 Run `uv sync` at the root and in `src/worker`.
