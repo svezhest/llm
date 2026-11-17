@@ -120,7 +120,7 @@ def set_variant(v, sampling=False):
     W.DRAFT_SAMPLING = sampling
     for m in (M, ALT):
         if m is not None:
-            m.__dict__.pop("want", None)        # (mtpz)
+            m.__dict__.pop("depth", None)       # (mtpz)
     flags = set(v.split("+")[1:])
     v = v.split("+")[0]
     if v in ("auto", "pplain"):
@@ -144,7 +144,7 @@ def set_variant(v, sampling=False):
             raise SystemExit("mtpz: no MTP head (QWEN_DRAFT / QWEN_DRAFT_MTP)")
         eng.draft, eng.mtp = None, M
         W.MTP_K, W.DRAFT_SAMPLING = 0, True
-        M.want = lambda known, k, T: False
+        M.depth = lambda c1, T, top: 0
     elif v == "plain":
         eng.draft = eng.mtp = None
     elif v == "dflash":

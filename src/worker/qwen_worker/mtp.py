@@ -56,6 +56,7 @@ class Clock:
         self.g, self.c = 1.0, dict(ms or {})
         self.sub = {}
         self.rate = {}                  # MTPDraft: depth i >= 2 -> P(draft i kept | the ones before kept)
+        self.seed = {}                  # MTPDraft: bin of the seed's confidence -> P(the seed kept)
 
     def at(self, tag):
         """The clock of one class of requests, `tag` = (the context's size
@@ -69,7 +70,7 @@ class Clock:
         if c is None:
             near = next((x for t, x in self.sub.items() if t[0] == tag[0]), self)
             c = self.sub[tag] = Clock()
-            c.g, c.c, c.rate = near.g, dict(near.c), dict(near.rate)
+            c.g, c.c, c.rate, c.seed = near.g, dict(near.c), dict(near.rate), dict(near.seed)
         return c
 
     def ms(self, kind):
@@ -121,10 +122,14 @@ class MTPDraft:
 
     The draft count of a round (QWEN_MTP_K=0: round()): k = argmax over
     0..KMAX of E(k) / T(k), the expected tokens per ms. E(k) = 1 + p1 +
-    p1 p2 + ...: p1 is the seed's own confidence (its top-1 probability,
-    evaluated with the previous round: verify() runs the head over the verify
-    block's rows on the target's tokens, so after the walk the seed and its
-    confidence are read at no extra sync), p_i for the chained drafts the
+    p1 p2 + ...: p1 is the measured rate at which seeds of this confidence
+    were kept (the seed's top-1 probability, evaluated with the previous
+    round - verify() runs the head over the verify block's rows on the
+    target's tokens, so after the walk the seed and its confidence are read
+    at no extra sync - in BINS bins, Clock.seed of the request's class: under
+    greedy a seed of confidence 0.4 is kept far more often than 0.4; a bin
+    starts at SEED0 or above, so it is drafted until measured, and every
+    PROBE0-th no-draft decision drafts once), p_i for the chained drafts the
     measured rate at which draft i was kept when the ones before it were
     (Clock.rate of the request's class, an EMA from RATE0; the head's own
     confidence in a chained draft is not used: it does not know its input is
@@ -144,6 +149,9 @@ class MTPDraft:
     BURSTS = (1, 2, 4, 8)               # plain steps of the n-th k = 0 round in a row
     RATE0, A = 0.5, 0.2                 # a chained draft's keep rate: the start, the EMA's weight
     PROBE = 8                           # every PROBE-th drafting round: all the drafts
+    BINS, SEED0, B = 5, 0.8, 0.1        # the seed's keep rate per confidence bin: the start (at least), the EMA's weight
+    PROBE0 = 16                         # every PROBE0-th no-draft decision: one draft
+    said = False                        # the lm_head's path over a block: logged once
     CHUNK = 512                         # head rows per forward (flush)
 
     def __init__(self, model, lm, k=None):
@@ -185,6 +193,8 @@ class MTPDraft:
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
         self.low = 0                    # k = 0 rounds in a row
         self.nround = 0                 # drafting rounds (the gate's)
+        self.nzero = 0                  # no-draft decisions
+        self.bin = None                 # the confidence bin of the round's seed (the gate's rounds)
         self.ks = [0] * (max(self.KMAX, cfg.MTP_K) + 1)     # rounds by draft count (0: bursts)
         self.burst_tokens = 0           # tokens of the k = 0 rounds' plain steps
         self.dropped = 0                # drafts computed and not verified
@@ -329,17 +339,27 @@ class MTPDraft:
 
     def depth(self, c1, T, top):
         """Drafts of the next round, 0..top: the count with the most expected
-        tokens per ms, gain(k) / T[k] (0: a plain step), from the seed's
-        confidence `c1` and the class's measured keep rates of the chained
-        drafts; every PROBE-th drafting round all `top`."""
-        rate = self._clock().rate
-        ps = [c1] + [rate.get(i, self.RATE0) for i in range(2, top + 1)]
+        tokens per ms, gain(k) / T[k] (0: a plain step), from the measured
+        keep rates of seeds of confidence `c1` and of the chained drafts
+        (the request's class); every PROBE0-th no-draft decision one draft,
+        every PROBE-th drafting round all `top`."""
+        ck = self._clock()
+        b = min(self.BINS - 1, int(c1 * self.BINS))
+        ps = [ck.seed.get(b, self._seed0(b))] + [ck.rate.get(i, self.RATE0) for i in range(2, top + 1)]
         k = max(range(top + 1), key=lambda j: self.gain(ps, j, 0.0) / T[j])
-        if k:
-            self.nround += 1
-            if self.nround % self.PROBE == 0:
-                k = top
+        if not k:
+            self.nzero += 1
+            if self.nzero % self.PROBE0:
+                return 0
+            k = 1
+        self.bin = b
+        self.nround += 1
+        if self.nround % self.PROBE == 0:
+            k = top
         return k
+
+    def _seed0(self, b):
+        return max(self.SEED0, (b + 0.5) / self.BINS)
 
     def draft(self, n):
         """(1, n) draft tokens (lazy): the seed, then n - 1 chained steps
@@ -401,7 +421,11 @@ class MTPDraft:
         accepted, drafted = int(accepted), int(drafted)
         self.accept_lens.append(accepted)
         self.draft_lens.append(drafted)
-        rate = self._clock().rate
+        ck = self._clock()
+        rate, b, self.bin = ck.rate, self.bin, None
+        if b is not None and drafted:
+            r = ck.seed.get(b, self._seed0(b))
+            ck.seed[b] = r + self.B * ((accepted >= 1) - r)
         for i in range(2, min(drafted, accepted + 1) + 1):      # depths reached: the ones before kept
             r = rate.get(i, self.RATE0)
             rate[i] = r + self.A * ((accepted >= i) - r)
@@ -428,6 +452,10 @@ class MTPDraft:
     def _head(self, h):
         """-> (argmax (1, n) int32, top-1 probability (1, n) fp32) of the
         lm_head over h (1, n, H)."""
+        if h.shape[1] > 1 and not MTPDraft.said:
+            MTPDraft.said = True
+            log.info("mtp: the head's lm_head over a %d-row block: input %s, mrqmv mark %s, QWEN_VERIFY_QMV %s",
+                     h.shape[1], h.dtype, bool(self.lm.lm_head.__dict__.get("_qmv")), cfg.VERIFY_QMV)
         logits = _rows_linear(self.lm.lm_head, h).astype(mx.float32)
         m = mx.max(logits, axis=-1)
         return (mx.argmax(logits, axis=-1).astype(mx.int32),
