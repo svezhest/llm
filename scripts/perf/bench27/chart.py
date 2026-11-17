@@ -35,7 +35,10 @@ LABEL = {"ours-dflash": "ours, DFlash", "ours-plain": "ours, plain", "llama-q4_0
          # the 9B (Ornith 1.5, MLX 8-bit / GGUF Q8_0)
          "ours9-auto": "ours, auto", "ours9-plain": "ours, plain", "ours9-dflash": "ours, DFlash",
          "ours9-mtp": "ours, MTP head", "mlx-vlm9": "mlx-vlm", "llama9-q8_0": "llama.cpp (Q8_0)",
-         "llama9-q8_0-mtp": "llama.cpp + MTP (Q8_0)"}
+         "llama9-q8_0-mtp": "llama.cpp + MTP (Q8_0)",
+         # oMLX (the 27B: oQ4e; the 9B: the same MLX 8-bit)
+         "omlx": "oMLX oQ4e", "omlx-mtp": "oMLX oQ4e + MTP", "omlx-dflash": "oMLX oQ4e + DFlash",
+         "omlx9": "oMLX", "omlx9-mtp": "oMLX + MTP", "omlx9-dflash": "oMLX + DFlash"}
 # the oQ4e rows reuse their 4-bit twin's hue; hatched (secondary encoding, not a 9th hue)
 # only in a chart that also shows another system of that hue
 TWIN = {"ours-oq4e-dflash": "ours-dflash", "ours-oq4e-plain": "ours-plain", "ours-oq4e-auto": "ours-dflash",
@@ -43,12 +46,17 @@ TWIN = {"ours-oq4e-dflash": "ours-dflash", "ours-oq4e-plain": "ours-plain", "our
         # the 9B systems take the hue of their 27B counterpart (the charts never mix the two models)
         "ours9-auto": "ours-dflash", "ours9-dflash": "ours-dflash", "ours9-plain": "ours-plain",
         "ours9-mtp": "llama-q4_0-dflash", "mlx-vlm9": "mlx-vlm", "llama9-q8_0": "llama-q4_0",
-        "llama9-q8_0-mtp": "llama-q4_0-mtp"}
+        "llama9-q8_0-mtp": "llama-q4_0-mtp",
+        # oMLX takes the slots the 9B charts leave free (green, purple; DFlash = MTP's hue, hatched)
+        "omlx": "llama-q4kxl", "omlx-mtp": "mlx-vlm-dflash", "omlx-dflash": "mlx-vlm-dflash",
+        "omlx9": "llama-q4kxl", "omlx9-mtp": "mlx-vlm-dflash", "omlx9-dflash": "mlx-vlm-dflash"}
 # the model a system serves, for the default title
 MODEL = {**{s: "Qwen3.8-27B (4-bit class)" for s in ORDER + ["ours-oq4e-dflash", "ours-oq4e-plain",
-                                                             "ours-oq4e-auto", "ours-oq4e-mtp"]},
+                                                             "ours-oq4e-auto", "ours-oq4e-mtp", "omlx", "omlx-mtp",
+                                                             "omlx-dflash"]},
          **{s: "Ornith-1.5-9B (8-bit)" for s in ("ours9-auto", "ours9-plain", "ours9-dflash", "ours9-mtp",
-                                                 "mlx-vlm9", "llama9-q8_0", "llama9-q8_0-mtp")}}
+                                                 "mlx-vlm9", "llama9-q8_0", "llama9-q8_0-mtp", "omlx9", "omlx9-mtp",
+                                                 "omlx9-dflash")}}
 THEMES = {"light": {"bg": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "grid": "#e4e3df"},
           "dark": {"bg": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "grid": "#3a3a37"}}
 CLASSES = [("code", "code"), ("en", "English prose"), ("ru", "Russian prose")]

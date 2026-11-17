@@ -52,11 +52,16 @@ SYSTEMS = {
     "llama-q4kxl": ("llama", "llama.cpp UD-Q4_K_XL"), "llama-q4_0-dflash": ("llama-dflash", "llama.cpp + DFlash"),
     "mlx-vlm": ("mlx-vlm", "mlx-vlm"), "mlx-vlm9": ("mlx-vlm", "mlx-vlm"),
     "mlx-vlm-dflash": ("mlx-vlm-dflash", "mlx-vlm + DFlash"),
+    "omlx": ("omlx", "oMLX"), "omlx9": ("omlx", "oMLX"),
+    "omlx-mtp": ("omlx-mtp", "oMLX + MTP"), "omlx9-mtp": ("omlx-mtp", "oMLX + MTP"),
+    "omlx-dflash": ("omlx-dflash", "oMLX + DFlash"), "omlx9-dflash": ("omlx-dflash", "oMLX + DFlash"),
 }
-ROLES = ["auto", "llama-mtp", "plain", "mlx-vlm", "llama", "dflash", "mtp", "llama-dflash", "mlx-vlm-dflash"]
+ROLES = ["auto", "llama-mtp", "omlx-mtp", "plain", "mlx-vlm", "llama", "omlx", "dflash", "mtp", "llama-dflash",
+         "mlx-vlm-dflash", "omlx-dflash"]
 PAIRS = [("auto", "llama-mtp"), ("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama"), ("auto", "plain"),
-         ("llama-mtp", "llama")]
-PREFILL_PAIRS = [("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama-mtp")]
+         ("llama-mtp", "llama"), ("auto", "omlx-mtp"), ("plain", "omlx"), ("mtp", "omlx-mtp"), ("dflash", "omlx-dflash"),
+         ("omlx-mtp", "omlx")]
+PREFILL_PAIRS = [("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama-mtp"), ("plain", "omlx")]
 CLS = {"code": "code", "en": "English", "ru": "Russian"}
 MODE = {"greedy": "greedy", "sample": "sampling"}
 BLOCKS = ["setup", "tokens", "medians", "ratios", "cells", "warmup", "prefill", "ctx-decode", "ctx-ratios",
@@ -185,7 +190,7 @@ def b_setup(M, C):
     for m in sess:
         v, p = m.get("versions") or {}, m.get("preflight") or {}
         llama = v.get("llama.cpp")
-        for k, val in (("mlx / mlx-vlm", v.get("mlx/mlx_vlm")),
+        for k, val in (("mlx / mlx-vlm", v.get("mlx/mlx_vlm")), ("oMLX", v.get("omlx")),
                        ("llama.cpp", llama[0] if isinstance(llama, list) and llama else llama),
                        ("chip", v.get("chip")), ("GPU cores", (v.get("gpu_cores") or "").split("=")[-1].strip()),
                        ("iogpu.wired_limit_mb", p.get("wired_limit_mb")),
