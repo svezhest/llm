@@ -27,9 +27,12 @@ LABEL = {"ours-dflash": "ours, DFlash", "ours-plain": "ours, plain", "llama-q4_0
          "llama-q4kxl": "llama.cpp UD-Q4_K_XL", "llama-q4_0-mtp": "llama.cpp Q4_0 + MTP",
          "llama-q4_0-dflash": "llama.cpp Q4_0 + DFlash", "mlx-vlm": "mlx-vlm 0.7.6",
          "mlx-vlm-dflash": "mlx-vlm 0.7.6 + DFlash", "ours-oq4e-dflash": "ours oQ4e, DFlash",
-         "ours-oq4e-plain": "ours oQ4e, plain"}
-# the oQ4e rows reuse their 4-bit twin's hue + a hatch (secondary encoding, not a 9th hue)
-TWIN = {"ours-oq4e-dflash": "ours-dflash", "ours-oq4e-plain": "ours-plain"}
+         "ours-oq4e-plain": "ours oQ4e, plain", "ours-oq4e-auto": "ours oQ4e, auto (DFlash + MTP)",
+         "ours-oq4e-mtp": "ours oQ4e, MTP"}
+# the oQ4e rows reuse their 4-bit twin's hue; hatched (secondary encoding, not a 9th hue)
+# only in a chart that also shows another system of that hue
+TWIN = {"ours-oq4e-dflash": "ours-dflash", "ours-oq4e-plain": "ours-plain", "ours-oq4e-auto": "ours-dflash",
+        "ours-oq4e-mtp": "llama-q4_0-dflash"}
 THEMES = {"light": {"bg": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "grid": "#e4e3df"},
           "dark": {"bg": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "grid": "#3a3a37"}}
 CLASSES = [("code", "code"), ("en", "English prose"), ("ru", "Russian prose")]
@@ -39,11 +42,12 @@ def base(system):
     return system.split("[")[0]
 
 
-def style(system, theme):
+def style(system, theme, systems=()):
     b = base(system)
     key = TWIN.get(b, b)
     i = ORDER.index(key) if key in ORDER else len(ORDER) - 1
-    return SLOTS[i][0 if theme == "light" else 1], ("///" if b in TWIN else None)
+    shared = any(base(x) != b and TWIN.get(base(x), base(x)) == key for x in systems)
+    return SLOTS[i][0 if theme == "light" else 1], ("///" if b in TWIN and shared else None)
 
 
 def sort_key(system):
@@ -73,7 +77,7 @@ def bars(plt, rows, theme, out, title):
     w = 0.8 / len(systems)
     for ax, mode in zip(axes[0], modes):
         for j, s in enumerate(systems):
-            color, hatch = style(s, theme)
+            color, hatch = style(s, theme, systems)
             for i, (cls, _) in enumerate(CLASSES):
                 r = next((x for x in sel if x["system"] == s and x["cls"] == cls and x["mode"] == mode), None)
                 if not r:
@@ -118,7 +122,7 @@ def lines(plt, rows, theme, out, title):
             pts = sorted((r["ctx"], r["decode_tps"]) for r in sel if r["system"] == s and r["cls"] == cls)
             if len(pts) < 2:
                 continue
-            color, hatch = style(s, theme)
+            color, hatch = style(s, theme, systems)
             ax.plot([p[0] for p in pts], [p[1] for p in pts], color=color, linewidth=2,
                     linestyle="--" if hatch else "-", marker="o", markersize=6, markeredgecolor=th["bg"],
                     markeredgewidth=2, label=LABEL.get(base(s), s), zorder=3)
