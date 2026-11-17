@@ -1111,9 +1111,9 @@ def test_gate_burst_catch_up_equals_per_step(dense, spec, monkeypatch):
 def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     """QWEN_DRAFT=auto's setup - DFlash + the gated head, the Chooser with
     its probes and DFlash's shadow drafts - == the head alone == plain
-    greedy, the gate deciding (the class's first-draft keep rate set to 0:
-    one draft a round until the Oracle's kept drafts move it, a probe round
-    all four; a burst after every round that keeps none)."""
+    greedy, the gate deciding (the class's first-draft keep rate held at 0:
+    one draft a round, the Oracle's wrong every other one, a probe round
+    another depth; a burst after every round that keeps none)."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker.Clock, "add", lambda self, kind, ms: None)
@@ -1122,6 +1122,8 @@ def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     monkeypatch.setattr(worker.MTPDraft, "BURSTS", (1, 2))
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 3)
     monkeypatch.setattr(worker.MTPDraft, "B", 0.0)
+    monkeypatch.setattr(worker.MTPDraft, "N", 10 ** 9)   # (the keep rates held: else the Oracle's kept
+    monkeypatch.setattr(worker.MTPDraft, "PRIOR", 10 ** 9)   # drafts take the depth to 2+, never a miss)
     rounds = [0, 0, 0]
     for ids in prompts([25, 40, 7], 37):
         ref = plain(dense, ids, 40)
