@@ -23,7 +23,8 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   byte-identical to `stream_generate` at temperature 0. When bumping mlx-vlm,
   diff `generate/ar.py::generate_step` against `_prefill`/`_iterate`/`_sample`,
   `Qwen3_5Attention.__call__`/`_prepare_projected_qkv` against `_rows_attention`, and
-  `Qwen3_5GatedDeltaNet.__call__` against `_gdn_call`. 0.7 returns `position_ids`/
+  `Qwen3_5GatedDeltaNet.__call__` against `_gdn_call`, and `speculative/common.py::_speculative_walk`
+  against `sched_spec._queued_walk` (`test_queued_walk_is_the_library_walk`). 0.7 returns `position_ids`/
   `rope_deltas` from `get_input_embeddings` (counted from 0): text drops them (a
   prompt-cache suffix would land at 0), vision slices them per slab. DFlash verify
   is `speculative_verify=True` + `commit_/abort_speculative_round` every round.
