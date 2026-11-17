@@ -223,7 +223,9 @@ class _Guide:
             tail = len(b) - len(b.rstrip(b" \t\r\n"))
             self.ws_run = self.ws_run + len(b) if tail == len(b) else tail
 
-    def sample(self, logits, sampler):
+    def sample(self, logits, sampler, pos=None):
+        """The masked draw: `sampler` on the logits the grammar allows, its
+        key the token's absolute position `pos`."""
         import llguidance.mlx
         import llguidance.numpy
         if self.active:
@@ -237,7 +239,7 @@ class _Guide:
                     mask = capped
         else:
             mask = self.no_eos
-        return sampler(llguidance.mlx.apply_token_bitmask(logits, mask))
+        return sampler(llguidance.mlx.apply_token_bitmask(logits, mask), pos)
 
 
 def _ws_masks(llg_tok, cap):

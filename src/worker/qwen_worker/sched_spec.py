@@ -53,7 +53,9 @@ class _SpecMixin:
         and drafts are kept while they equal the target's own sample. Each
         emitted token is therefore a target sample given an accepted prefix,
         i.e. the same distribution as the plain loop; temperature only lowers
-        the acceptance rate.
+        the acceptance rate. The draw's noise is keyed by (seed, position)
+        (sampler.POS_KEYS, `pick`): the same tokens as the plain loop, at any
+        block size, where the verify's logits equal the plain step's.
 
         Thinking budget (req.thinking): the criteria sees every emitted token,
         as in the plain loop. A round's block is cut at the token after which
@@ -126,9 +128,20 @@ class _SpecMixin:
         sampling, sampler, pen, max_tokens = req.sampling, row.sampler, row.pen, req.max_tokens
         dtype = input_ids.dtype
 
-        def pick(logits, fed):
+        def pick(logits, fed, at):
             """Target tokens for every row of `logits` (1, T, V); row i follows
-            the output so far plus the drafts fed[1:i+1]."""
+            the output so far plus the drafts fed[1:i+1] and is the token at
+            absolute position at + i, drawn with that position's key (the key
+            the plain loop draws it with: _sample). Exact: the walk reads row
+            i only when every draft before it was kept, i.e. when its prefix
+            is the emitted text, so every emitted token is the draw of its
+            position's noise on its true prefix's logits -- the plain loop's
+            draw, whatever the drafts were (they only decide how many
+            positions a forward settles). A row past the first mismatch is
+            discarded unread; the next round draws that position again with
+            the same noise, now on the right prefix. Hence the target's
+            distribution, and with bit-identical logits the plain loop's
+            very tokens."""
             logits = logits[0]
             if pen.active:
                 extra = None
@@ -139,12 +152,13 @@ class _SpecMixin:
                 logits = pen(logits, extra)
             if sampling["temperature"] <= 0:
                 return mx.argmax(logits, axis=-1)[None]
-            return sampler(logits)[None]
+            return sampler(logits, at)[None]
 
-        def one(logits):
+        def one(logits, at):
             """A plain step's token from its (1, V) logits, as the plain loop
-            draws it (_sample: penalties, then the request's sampler)."""
-            return sampler(pen(logits) if pen.active else logits)
+            draws it (_sample: penalties, then the request's sampler with the
+            key of absolute position `at`)."""
+            return sampler(pen(logits) if pen.active else logits, at)
 
         def _wide(h):
             return h.astype(mx.float32) if wide else h
@@ -230,6 +244,7 @@ class _SpecMixin:
             return
         on_prefilled(cache, tail=tail_end())
         on_ckpt = on_prefilled = None           # nothing of the prefill outlives it here
+        at = cache[fa].offset + 1               # the first token's position (= len(req.ids))
         if layers is not None:
             out = lm(input_ids[:, -1:], cache=cache, capture_layer_ids=layers, return_hidden=fin)
         else:                                   # as the plain loop's first step (_step)
@@ -241,10 +256,10 @@ class _SpecMixin:
             if mt is not None:
                 mt.push(out.hidden_states[-1])
             hidden = mx.concatenate(hidden, axis=1)[:, -win:]
-            first = pick(out.logits[:, -1:, :], input_ids[0, -1:])
+            first = pick(out.logits[:, -1:, :], input_ids[0, -1:], at)
         else:
             hidden = None
-            first = one(out.logits[:, -1, :])
+            first = one(out.logits[:, -1, :], at)
         mx.eval(first, hidden)
         first = first.item()
         on = LOOKUP in ("1", "splice") or (LOOKUP == "draft" and (draft is not None or mt is not None))
@@ -337,11 +352,12 @@ class _SpecMixin:
             """One plain target step for `tok` (quantized KV: the last fp16
             position, quantized_kv_start - 1, which no verify block may
             cross) -> (its hidden states, [the target's token])."""
+            at = cache[fa].offset + 1
             o = lm(mx.array([[tok]], dtype=dtype), cache=cache, capture_layer_ids=layers,
                    return_hidden=fin)
             requant()
             h = mx.concatenate(o.hidden_states, axis=-1) if layers is not None else None
-            t = pick(o.logits[:, -1:, :], mx.array([tok], dtype=dtype))
+            t = pick(o.logits[:, -1:, :], mx.array([tok], dtype=dtype), at)
             mx.eval(t, h, [c.state for c in cache])
             return h, [t.item()]
 
@@ -375,8 +391,9 @@ class _SpecMixin:
             loop's call (_step at B = 1) and sampler (_sample) -> the next
             token, lazy (1,). `x`: the input token, an int or a lazy (1,)."""
             inp = mx.array([[x]], dtype=dtype) if isinstance(x, int) else x.reshape(1, 1)
-            o = lm(inp, cache=cache, position_ids=mx.array([[cache[fa].offset]], dtype=mx.int32))
-            return one(o.logits[:, -1, :])
+            at = cache[fa].offset + 1
+            o = lm(inp, cache=cache, position_ids=mx.array([[at - 1]], dtype=mx.int32))
+            return one(o.logits[:, -1, :], at)
 
         def burst(b):
             """Plain steps from `b` (emitted, not in the cache), the next one
@@ -421,12 +438,13 @@ class _SpecMixin:
             here, as _logits). -> (the next token, lazy (1,); the hidden
             states of x's position)."""
             lazy = not isinstance(x, int)
+            at = cache[fa].offset + 1
             o = lm(x.reshape(1, 1) if lazy else mx.array([[x]], dtype=dtype), cache=cache,
                    capture_layer_ids=layers, return_hidden=fin)
             if lazy and pen.active:
                 pen.add(x)
             requant()
-            return one(o.logits[:, -1, :]), mx.concatenate(o.hidden_states, axis=-1)
+            return one(o.logits[:, -1, :], at), mx.concatenate(o.hidden_states, axis=-1)
 
         def pburst(b, steps, before=None):
             """Plain steps (the plain arm of mtp.Chooser, the head's k = 0
@@ -700,6 +718,7 @@ class _SpecMixin:
                     cut = None
                 else:
                     fed = mx.concatenate([mx.array([[b]], dtype=dtype), drafts], axis=1)
+                    at = cache[fa].offset + 1   # row 0's token: the one after b
                     txn = None
                     try:
                         # the verify forward opens a cache transaction (out.gdn_states)
@@ -708,7 +727,7 @@ class _SpecMixin:
                                  speculative_verify=True, return_hidden=fin)
                         txn = out.gdn_states
                         hidden = mx.concatenate(out.hidden_states, axis=-1) if layers is not None else None
-                        targets = pick(out.logits, fed[0])
+                        targets = pick(out.logits, fed[0], at)
                         # the head's own round: it runs over the block's rows
                         # (the next seed), evaluated with the verify
                         ahead = mt.verify(hidden[..., -H:], targets) if mine else []

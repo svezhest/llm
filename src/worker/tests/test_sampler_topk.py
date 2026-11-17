@@ -5,8 +5,7 @@ softmax(filtered(x)) — the same support, probabilities to fp32 rounding —
 with ties of the k-th value (inside and outside the k, cut by top_p),
 min_p / top_p boundaries, -inf rows (grammar masks) and fewer finite logits
 than k; seeded draws are reproducible and their frequencies match; the knob
-off leaves the old path (and its random stream) bit for bit; sample_rows'
-grouped draw == each row alone. CPU (the Metal check at the real vocabulary
+off leaves the full-vocab path; sample_rows' grouped draw == each row alone. CPU (the Metal check at the real vocabulary
 is tests/test_gpu_verify_sampler.py, VERIFY_GPU=1)."""
 import mlx.core as mx
 import numpy as np
@@ -172,17 +171,24 @@ def test_draw_frequencies_and_seed(monkeypatch):
 
 
 def test_off_is_the_old_path(monkeypatch):
-    """Knob off: prepare() is filtered(), the draw the full-vocab categorical
-    with the same key stream — the tokens equal the pre-knob sampler's."""
+    """Knob off: prepare() is filtered(), the draw the full-vocab Gumbel-max
+    with each position's noise (sampler.POS_KEYS); with POS_KEYS off, the
+    categorical over the key split per draw — the pre-POS_KEYS tokens."""
     x = (mx.random.normal((3, 512), key=mx.random.key(2)) * 3).astype(mx.float16)
     s = sampler(monkeypatch, fast=False, seed=9, **CARD)
     assert not s.fast
+    for p in (0, 3, 6, 1000):
+        keys = mx.array([worker._words(9, p + i) for i in range(3)], dtype=mx.uint32)
+        want = mx.argmax(worker._gumbel_rows(s.filtered(x), keys, worker._cols(512)), axis=-1)
+        assert s(x, p).tolist() == want.tolist()
+    monkeypatch.setattr(worker, "POS_KEYS", False)
+    s = sampler(monkeypatch, fast=False, seed=9, **CARD)
     ref_key = mx.random.key(9)
     out = []
     for _ in range(4):
         ref_key, sub = mx.random.split(ref_key)
         want = mx.random.categorical(s.filtered(x), key=sub)
-        out.append((s(x).tolist(), want.tolist()))
+        out.append((s(x, 7).tolist(), want.tolist()))
     assert all(a == b for a, b in out)
     assert isinstance(s.prepare(x), mx.array)
 

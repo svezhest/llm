@@ -22,6 +22,8 @@ Variants (comma separated):
   <v>+h        the MTP head of --alt-head instead of the loaded one (two heads, one target, one process)
   <v>+q        verify blocks of 2..N tokens through mrqmv (load with QWEN_VERIFY_QMV=N; without
                +q the variant runs with it off)
+  <v>+o        the old random stream (sampler.POS_KEYS off: the request's key split per draw, a
+               verify block drawn with one key) instead of noise keyed by (seed, position)
 Prompt sets: --set bench27 (the cross-framework prompts: code / en / ru, ~2K tokens of
 context; BENCH27 = the dir with prompts.py + prompts/manifest.json of
 scripts/perf/bench27), --set wtest (scripts/perf/prof/wtest.py TASKS, short prompts),
@@ -32,6 +34,11 @@ decode tok/s = (n - 1) / (t_last - t_first), rounds (bursts included), tokens pe
 accepted drafts per round per drafter, the rounds and tokens per arm (spec_stats["arms"]); the
 head's gate (spec_stats["mtp"]): rounds by draft count k (0: a plain burst), by accepted drafts,
 tokens of the plain bursts, drafts computed and dropped. The gate's tables: gate_table.py.
+--golden: every speed request feeds the tokens plain (POS_KEYS on) generated for its cell (_Req.golden,
+max_tokens = their count): the draws still run, the trajectory is the same for every variant (an A/B
+of the sampler itself, e.g. plain,plain+o; speculative variants take no golden request: plain).
+--ident-mode sampling: the identity check at T 0.6 / top_p 0.95 / top_k 20 / --ident-seed against
+plain sampling with the same stream (+o variants against plain+o): first divergence per task.
 
   cd src/worker && QWEN_MODEL=../../weights/qwen38-27b-mlx-4bit QWEN_TEXT_ONLY=1 QWEN_MRQMM4=1 \\
     QWEN_KV_BITS=0 QWEN_MAX_BATCH=1 QWEN_WIRED_LIMIT_GB=27 QWEN_PRESENCE_PENALTY=0 \\
@@ -70,6 +77,9 @@ ap.add_argument("--modes", default="", help="greedy,sampling: the cells are mode
 ap.add_argument("--speed-cells", default="", help="the speed rounds' cells (default: every cell)")
 ap.add_argument("--ident", default="", help="variants checked against plain greedy (wtest TASKS)")
 ap.add_argument("--ident-tasks", type=int, default=16)
+ap.add_argument("--ident-mode", default="greedy", choices=["greedy", "sampling"])
+ap.add_argument("--ident-seed", type=int, default=7)
+ap.add_argument("--golden", action="store_true", help="speed requests feed plain's tokens (see above)")
 ap.add_argument("--skip-speed", action="store_true")
 ap.add_argument("--alt-head", default="", help="a second MTP drafter dir, taken by the +h variants")
 ap.add_argument("--json", default="")
@@ -126,6 +136,7 @@ def set_variant(v, sampling=False):
     if v in ("auto", "pplain"):
         flags |= {"p", "q"} if QMV0 else {"p"}
     W.SPEC_PLAIN = "p" in flags
+    W.POS_KEYS = "o" not in flags
     W.SPEC_TRACE = a.trace
     W.MTP_KMAX = next((int(f[1:]) for f in flags if f.startswith("k")), KMAX0)
     W.VERIFY_MR, W.VERIFY_MR_HEAD = (False, False) if "x" in flags else MR0
@@ -199,6 +210,9 @@ def sv(v, cell):
 MSGS = {}
 
 
+GOLD = {}                               # --golden: (cell, seed) -> plain's tokens
+
+
 def request(cell, rid, seed=0, max_tokens=0):
     key, _, mode = cell.partition("@")
     if key not in MSGS:
@@ -218,8 +232,9 @@ def request(cell, rid, seed=0, max_tokens=0):
         if p.HasField(f):
             sampling[f] = getattr(p, f)
     ctl = W._Control(p, tok.stopping_criteria.eos_token_ids, tok, eng.vocab)
-    return W._Req(id=rid, p=p, ids=ids, max_tokens=eng._limit(p, len(ids)), sampling=sampling, ctl=ctl,
-                  formatted=formatted)
+    gold = GOLD.get((cell, seed))
+    return W._Req(id=rid, p=p, ids=ids, max_tokens=len(gold) if gold else eng._limit(p, len(ids)),
+                  sampling=sampling, ctl=ctl, formatted=formatted, golden=gold)
 
 
 def stats(dr):
@@ -307,6 +322,11 @@ if not a.skip_speed:
             sv(v, key)
             o = run(key, f"warm-{v}", v, max_tokens=a.warm_tokens)
             print(f"warm {key} {v}: n={o['n']} tps={o['tps']:.2f} arms={o.get('arms', '')}", flush=True)
+if not a.skip_speed and a.golden:
+    for rnd in range(a.rounds):
+        for ki, key in enumerate(SPEED):
+            sv("plain", key)
+            GOLD[(key, 1000 * rnd + ki)] = run(key, f"g{rnd}-{key}", "plain", seed=1000 * rnd + ki)["tokens"]
 if not a.skip_speed:
     for rnd in range(a.rounds):
         for ki, key in enumerate(SPEED):
@@ -366,16 +386,25 @@ if a.ident:
     a.set = "wtest"
     MSGS.clear()
     KEYS = [str(i) for i in range(a.ident_tasks)]
-    print(f"\n== identity vs plain greedy, {a.ident_tasks} wtest tasks ==", flush=True)
+    smp = a.ident_mode == "sampling"
+    GOLD.clear()
+    print(f"\n== identity vs plain {a.ident_mode}"
+          f"{f' (seed {a.ident_seed})' if smp else ''}, {a.ident_tasks} wtest tasks ==", flush=True)
     for ti in range(a.ident_tasks):
-        set_variant("plain")
-        ref = run(str(ti), f"i-t{ti}-plain", "plain")["tokens"]
+        cell = str(ti) + ("@s" if smp else "")
+        refs = {}
         for v in a.ident.split(","):
-            set_variant(v)
-            got = run(str(ti), f"i-t{ti}-{v}", v)["tokens"]
+            old = "o" in v.split("+")[1:]       # +o: against plain on the old stream too
+            if old not in refs:
+                set_variant("plain+o" if old else "plain", smp)
+                refs[old] = run(cell, f"i-t{ti}-plain{'+o' if old else ''}", "plain", seed=a.ident_seed)["tokens"]
+            ref = refs[old]
+            set_variant(v, smp)
+            got = run(cell, f"i-t{ti}-{v}", v, seed=a.ident_seed)["tokens"]
             div = next((i for i, (x, y) in enumerate(zip(ref, got)) if x != y),
                        None if len(ref) == len(got) else min(len(ref), len(got)))
-            res["ident"].append(dict(task=ti, variant=v, same=div is None, diverge=div, n=len(ref)))
+            res["ident"].append(dict(task=ti, variant=v, mode=a.ident_mode, same=div is None, diverge=div,
+                                     n=len(ref)))
             print(f"t{ti} {v}: {'same' if div is None else f'diverges at {div}'} (n={len(ref)})", flush=True)
             dump()
     for v in a.ident.split(","):

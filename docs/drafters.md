@@ -19,6 +19,11 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   step, 3–5 rows ×1.48–1.55 (the kernels' floor on this machine), which caps the head at
   about (1 + keep rate) / 1.5.
 - Prompt lookup (`QWEN_LOOKUP=draft`) pays on turns that copy earlier text; default off.
+- Sampling: each token's noise is keyed by (seed, absolute position) ([api.md](api.md)), so a
+  seeded request's speculative text is the plain loop's whatever the arm and block size (CPU
+  tests; on the GPU within the verify's exactness class). Before (2026-11-17), the verify drew a
+  block's rows with one key and sampled text left plain's within a few tokens: trajectory noise
+  of up to 27 % per request in T 0.6 speed gates.
 - The verify attention is the one-pass kernel (`QWEN_VERIFY_ATT=2`, `QWEN_VATT_Q8=1`,
   [kernels.md](kernels.md)). DFlash is not bit-equal to plain greedy (near-ties) but is
   deterministic run to run.

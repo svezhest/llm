@@ -119,8 +119,8 @@ class AllowAll:
         if self.bad is not None and len(self.seen) == self.bad:
             raise RuntimeError(f"grammar: token {tok} rejected")
 
-    def sample(self, logits, sampler):
-        return sampler(logits)
+    def sample(self, logits, sampler, pos=None):
+        return sampler(logits, pos)
 
 
 def test_sync_mode_and_row_error(dense):

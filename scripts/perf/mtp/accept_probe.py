@@ -417,7 +417,9 @@ def main():
         ids, cls = ids_of(key)
         t = time.time()
         if mode == "sampled":
-            smp.key = mx.random.key(a.seed)     # each text: the same draws whatever ran before
+            # each text: the same draws whatever ran before (keyed by position
+            # from the prompt's end, as the worker; .key: sampler.POS_KEYS off)
+            smp.key, smp.next = mx.random.key(a.seed), len(ids)
         tr = trajectory(lm, ids, a.gen, greedy if mode == "greedy" else smp, smp.filtered, eng.stopping)
         print(f"trajectory {key} {mode}: prompt {tr['n0']}, generated {len(tr['seq']) - tr['n0']} "
               f"in {time.time() - t:.1f} s", flush=True)

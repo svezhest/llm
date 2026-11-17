@@ -508,7 +508,7 @@ def test_plain_bursts_penalties_exact(dense, spec, monkeypatch, order, burst):
 def test_sampling_takes_every_arm(dense, spec, monkeypatch):
     """A sampling request through the three arms (QWEN_DRAFT=auto: sampling
     requests are speculative): it runs to its length; the same seed gives the
-    same tokens again (the draws: the request's key, split per call)."""
+    plain loop's seeded tokens (the draws: keyed by the token's position)."""
     from test_kvq8 import spec_arms
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
@@ -517,6 +517,7 @@ def test_sampling_takes_every_arm(dense, spec, monkeypatch):
     ids = prompts([25], 34)[0]
     kw = dict(temperature=0.8, top_p=0.95, top_k=20, seed=11)
     ref = plain(dense, ids, 40, temperature=0.0)
+    want = plain(dense, ids, 40, **kw)
     outs = []
     for _ in range(2):
         took = []
@@ -527,7 +528,7 @@ def test_sampling_takes_every_arm(dense, spec, monkeypatch):
         outs.append(run(sched, [x])["a"])
         assert len(outs[-1][0]) == 40 and {"dflash", "mtp", "plain"} <= set(took)
         assert x.spec_stats["plain_steps"] >= 6
-    assert outs[0] == outs[1] and outs[0] != ref
+    assert outs[0] == outs[1] == want and outs[0] != ref
 
 
 def test_auto_drafters(tmp_path):
@@ -667,7 +668,7 @@ def test_plain_bursts_thinking_budget(dense, spec, monkeypatch, order, burst):
 def test_sampling_exact_distribution_path(dense, spec, monkeypatch):
     """QWEN_DRAFT_SAMPLING with MTP drafts: the seeded sample-match answer
     equals the plain loop's seeded answer (the drafts only decide how many
-    target samples a round keeps)."""
+    target samples a round keeps; each is drawn with its position's key)."""
     monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
     monkeypatch.setattr(worker, "MTP_K", 3)
     ids = prompts([25], 33)[0]
@@ -676,9 +677,7 @@ def test_sampling_exact_distribution_path(dense, spec, monkeypatch):
     mt = Oracle(head(dense), dense, ids + ref[0], wrong=False)
     out = with_mtp(dense, ids, 24, mt, **kw)
     assert mt.accept_lens
-    # the spec loop draws its samples per verify row (a different RNG walk
-    # than the plain loop's): only the length and the vocabulary range hold
-    assert len(out[0]) == len(ref[0]) and all(0 <= t < 512 for t in out[0])
+    assert out == ref
 
 
 def test_prompt_cache_context(dense, spec, monkeypatch):
@@ -812,7 +811,7 @@ def test_gate_draft_count(dense, monkeypatch, clock):
 def test_gate_plain_rounds_are_the_plain_loop(dense, spec, monkeypatch, kw, bursts):
     """Rounds with no draft (k = 0) are the plain loop's steps: every round
     a plain burst gives the plain loop's tokens - greedy, with penalties, and
-    a seeded sampling request (one draw per step from the request's key)."""
+    a seeded sampling request (one draw per step, keyed by its position)."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker, "DRAFT_SAMPLING", True)
     monkeypatch.setattr(worker.MTPDraft, "BURSTS", bursts)
