@@ -5,6 +5,13 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
 - Never compare two separate runs: the GPU drifts ±20–30 % over minutes. A/B inside one
   process, interleaved, medians over ≥ 3 rounds.
 - Nothing else on the GPU, and no `BG_NICE` on the measured processes.
+- Systems that cannot share a process (ours, llama.cpp, mlx-vlm) are compared cell by cell at
+  the same position of sessions with one fixed cell order: a session loses 16–23 % of its
+  speed in its first 2–4 minutes of load, repeatably (two sessions agree within a few %), and
+  the memory-bandwidth probe does not see it. A plan must interleave the classes it reports
+  (`scripts/perf/bench27/plans.json` `headline2`; [perf/2026-11-17/decode_27b_bench.md](perf/2026-11-17/decode_27b_bench.md)).
+- CPU work beside a GPU measurement distorts it too (pytest shares the memory bandwidth): the
+  CPU suite gets its own slot.
 - Reports and raw data go to `docs/perf/<date>/`; conclusions to the topic file.
 
 ## Measuring performance on this machine (lessons from 2026-10-11/12)

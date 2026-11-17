@@ -26,6 +26,35 @@ prompt cache, and `docs/perf/` — every change's measurements, raw data and the
 ends. Much of the code and the reports were written with AI coding agents (Claude
 Code); `CLAUDE.md` and the topic notes in `docs/` (index: `docs/MAP.md`) are the project memory they worked from.
 
+## Benchmarks
+
+Qwen3.8-27B (4-bit class) on an M1 Max, 32 GB: decode tokens/s at the HTTP API, 2K-token
+prompts, 256 generated tokens, against llama.cpp and stock mlx-vlm on the same machine in
+the same harness (2026-11-17, two sessions per system).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/perf/2026-11-17/decode_2k_dark.png">
+  <img alt="Decode tokens/s at 2K context: this server (auto, plain), llama.cpp (plain, + MTP), mlx-vlm; greedy and sampling; code, English, Russian" src="docs/perf/2026-11-17/decode_2k_light.png">
+</picture>
+
+| greedy, tok/s | code | English | Russian |
+|---|---|---|---|
+| this server, `QWEN_DRAFT=auto` (DFlash + the model's MTP head) | 27.7 | 21.2 | 19.0 |
+| llama.cpp Q4_0 + MTP drafter | 26.3 | 19.1 | 17.7 |
+| this server, plain | 18.2 | 17.1 | 16.2 |
+| mlx-vlm 0.7.6 | 15.1 | 14.8 | 14.8 |
+| llama.cpp Q4_0 | 15.4 | 14.3 | 13.7 |
+
+Cell by cell at the same minute of a session (the machine slows 16–23 % as it warms up, so
+only that comparison is fair): plain decode is ×1.15 of llama.cpp (ahead in 19 of 19 cells)
+and ×1.08 of mlx-vlm; with speculation ×1.10 of llama.cpp + MTP (ahead in 17 of 19; behind
+on sampled English) and ×1.59 of plain llama.cpp; a cold 2K prefill is ×1.09 of llama.cpp
+and ×1.44 of mlx-vlm. Each system runs the 4-bit-class file its ecosystem ships (not the
+same weights), answer quality is not compared, one machine. Method, every cell and the raw
+sessions: [docs/perf/2026-11-17/decode_27b_bench.md](docs/perf/2026-11-17/decode_27b_bench.md);
+how `auto` chooses a drafter and where it still loses to the best single one:
+[docs/perf/2026-11-17/auto_gate.md](docs/perf/2026-11-17/auto_gate.md).
+
 ## Models (`weights/`)
 
 | dir | model | quant | size | arch |

@@ -78,4 +78,6 @@ the 9B; the 27B and 35B need recipe values listed there.
 ## Measuring — [measuring.md](measuring.md)
 
 GPU drift ±20–30 % over minutes: only in-process interleaved A/B counts; no other GPU work,
-no `BG_NICE`. Firm.
+no `BG_NICE`. Firm. Across systems (`scripts/perf/bench27/`): cell by cell at the same
+position of a session; 27B at 2K on 2026-11-17 — plain ×1.15 of llama.cpp and ×1.08 of
+mlx-vlm, `auto` ×1.10 of llama.cpp + MTP ([perf/2026-11-17/decode_27b_bench.md](perf/2026-11-17/decode_27b_bench.md)).
