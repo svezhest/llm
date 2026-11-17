@@ -547,7 +547,7 @@ class _SpecMixin:
                     draft.lm_head = (lambda x, head=draft.lm_head, hd=self._hidden_dtype():
                                      head(x.astype(hd)))
             # the drafter's context: every position the target cache took since its last block
-            dctx = _DraftCtx(win, draft_cache)
+            dctx = _DraftCtx(win, draft_cache, on=draft is not None)
             if hidden is not None:
                 dctx.add(dfl(hidden))
             # QWEN_DRAFT_HYBRID: both drafters, one per round (mtp.Chooser);

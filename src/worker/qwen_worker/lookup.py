@@ -119,18 +119,23 @@ class _DraftCtx:
     only the last `win` are kept and the caches' offsets move on by the rest
     at `take` — what the drafter itself does with a longer context
     (DFlashAttention: `cache.offset += skip`); a drafter with a full-attention
-    layer (the 9B's) gets them all."""
+    layer (the 9B's) gets them all. `on` False (no DFlash drafter: the MTP
+    head alone, lookup alone): nothing is held — each chunk is a view that
+    keeps its verify block's hidden states alive to the request's end, and
+    nothing would take it."""
 
-    __slots__ = ("chunks", "win", "trim", "skip")
+    __slots__ = ("chunks", "win", "trim", "skip", "on")
 
-    def __init__(self, win, draft_cache):
-        self.chunks, self.win, self.skip = [], win, 0
+    def __init__(self, win, draft_cache, on=True):
+        self.chunks, self.win, self.skip, self.on = [], win, 0, on
         self.trim = bool(draft_cache) and all(hasattr(c, "max_size") for c in draft_cache)
 
     def __bool__(self):
         return bool(self.chunks)
 
     def add(self, h):
+        if not self.on:
+            return
         self.chunks.append(h)
         if self.trim:
             while sum(t.shape[1] for t in self.chunks[1:]) >= self.win:
