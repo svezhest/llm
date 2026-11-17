@@ -57,6 +57,7 @@ class Clock:
         self.sub = {}
         self.rate = {}                  # MTPDraft: depth i >= 2 -> P(draft i kept | the ones before kept)
         self.seed = {}                  # MTPDraft: bin of the seed's confidence -> P(the seed kept)
+        self.keep = None                # MTPDraft: P(a round keeps a draft) outside runs of misses
         self.arm = None                 # Chooser: the head's arm as last measured (tokens, ms per round, g)
 
     def at(self, tag):
@@ -72,7 +73,7 @@ class Clock:
             near = next((x for t, x in self.sub.items() if t[0] == tag[0]), self)
             c = self.sub[tag] = Clock()
             c.g, c.c, c.rate, c.seed = near.g, dict(near.c), dict(near.rate), dict(near.seed)
-            c.arm = near.arm
+            c.arm, c.keep = near.arm, near.keep
         return c
 
     def ms(self, kind):
@@ -149,16 +150,24 @@ class MTPDraft:
     step it took a third of short Russian prose and ran 4-14 % behind one
     fixed draft; in prose an unlikely seed is a word's first token, the next
     ones its sure continuation). Plain steps are for text the head cannot
-    draft: after LOW rounds in a row with no draft kept, a burst of BURSTS[0]
-    plain steps with step-ahead (the head catches up in one flush queued with
-    its last step), then one drafting round; while that one keeps nothing the
-    bursts lengthen (BURSTS), a kept draft ends them: the plain loop's speed
-    within ~3 % on text where every draft fails."""
+    draft: after `run` rounds in a row with no draft kept, a burst of
+    BURSTS[0] plain steps with step-ahead (the head catches up in one flush
+    queued with its last step), then one drafting round; while that one keeps
+    nothing the bursts lengthen (BURSTS), a kept draft ends them: the plain
+    loop's speed within ~3 % on text where every draft fails. `run` (need(),
+    set at a run's first miss) is the shortest run of misses less likely
+    than EPS at the class's measured keep rate (Clock.keep), within
+    LOW..LOW_MAX. A fixed LOW fitted the 27B (keep ~0.75: (1/4)^4 = 1/256);
+    on the 9B (keep 0.5-0.65) four misses came by chance every 40-70 rounds,
+    and with the bursts' doubling 9-59 % of the tokens went to plain steps
+    where one draft a round was 15-20 % faster. Bursts are not priced by the
+    Clock: its ("mtp", 0) reads a burst token at 1/1.55 of a 1-draft round
+    on both models, end to end about 1/1.3."""
 
     kind = "mtp"
     R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
     BURSTS = (8, 16, 32)                # plain steps of the n-th burst in a row
-    LOW = 4                             # rounds in a row with no draft kept: a burst
+    LOW, LOW_MAX, EPS = 4, 8, 1 / 256   # rounds in a row with no draft kept before a burst; need()
     RATE0, A = 0.5, 0.2                 # a chained draft's keep rate: the start, the EMA's weight
     PROBE, PROBE_MAX = 8, 64            # drafting rounds between two probes (all the drafts): the first, the most
     BINS, SEED0, B = 5, 0.8, 0.1        # the seed's keep rate per confidence bin: the start (at least), the EMA's weight
@@ -204,6 +213,7 @@ class MTPDraft:
         self.KMAX = cfg.MTP_KMAX        # QWEN_MTP_KMAX
         self.low = 0                    # bursts in a row (no draft kept between them)
         self.miss = 0                   # drafting rounds in a row with no draft kept
+        self.run = self.LOW             # ... that make a burst (need() at the run's first miss)
         self.nround = 0                 # drafting rounds (the gate's) since the last probe
         self.every = self.PROBE         # ... and how many until the next
         self.probe = False              # the round under way is one
@@ -341,7 +351,7 @@ class MTPDraft:
         if k == 0:                      # (the seed's confidence: evaluated with the last round)
             self.low += 1
             self.ks[0] += 1
-            self.miss = self.LOW - 1    # one drafting round after the burst
+            self.miss = self.run - 1    # one drafting round after the burst
             return self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
         toks = [tok]
         self.appended = 0
@@ -360,7 +370,7 @@ class MTPDraft:
         most expected tokens per ms, gain(k) / T[k], from the measured keep
         rates of seeds of confidence `c1` and of the chained drafts (the
         request's class); a probe round all `top`."""
-        if self.miss >= self.LOW:
+        if self.miss >= self.run:
             return 0
         ck = self._clock()
         b = min(self.BINS - 1, int(c1 * self.BINS))
@@ -373,6 +383,20 @@ class MTPDraft:
             self.nround = 0
             k = top
         return k
+
+    def need(self):
+        """Rounds in a row with no draft kept before a burst: the fewest
+        whose chance at the class's keep rate p (Clock.keep, SEED0 until
+        measured) is below EPS, (1 - p)^n < EPS, within LOW..LOW_MAX (a
+        head that keeps nothing still bursts after LOW_MAX)."""
+        p = self._clock().keep
+        p = self.SEED0 if p is None else p
+        if p >= 1.0:
+            return self.LOW
+        if p <= 0.0:
+            return self.LOW_MAX
+        n = math.ceil(math.log(self.EPS) / math.log(1.0 - p) - 1e-9)
+        return min(self.LOW_MAX, max(self.LOW, n))
 
     def _seed0(self, b):
         return max(self.SEED0, (b + 0.5) / self.BINS)
@@ -437,6 +461,14 @@ class MTPDraft:
         accepted, drafted = int(accepted), int(drafted)
         self.accept_lens.append(accepted)
         self.draft_lens.append(drafted)
+        ck = self._clock()
+        if not accepted and not self.miss:
+            self.run = self.need()      # (at the rate before the run)
+        if drafted and not self.low and self.miss < self.LOW:
+            # the keep rate outside runs of misses (rounds deep in one, and
+            # the ones after a burst, are the text need() tests for)
+            p = self.SEED0 if ck.keep is None else ck.keep
+            ck.keep = p + self.B * ((accepted >= 1) - p)
         if accepted:
             self.miss = self.low = 0
         else:
@@ -444,7 +476,6 @@ class MTPDraft:
         if self.probe:
             self.probe = False
             self.every = self.PROBE if accepted > 2 else min(2 * self.every, self.PROBE_MAX)
-        ck = self._clock()
         rate, b, self.bin = ck.rate, self.bin, None
         if b is not None and drafted:
             r = ck.seed.get(b, self._seed0(b))

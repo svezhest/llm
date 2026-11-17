@@ -15,9 +15,11 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   load; a prose-only load is still 4–9 % faster on the head with one fixed draft.
 - The MTP head's draft count is its own gate (`QWEN_MTP_K=0`): at least one draft a round,
   all `KMAX` where the measured keep rates pay for the matrix kernel's block (code), plain
-  steps only after four rounds that kept nothing. A 2-row verify block costs ×1.17 of a
-  step, 3–5 rows ×1.48–1.55 (the kernels' floor on this machine), which caps the head at
-  about (1 + keep rate) / 1.5.
+  steps only after a run of rounds that kept nothing which is unlikely (< 1/256) at the
+  class's measured keep rate: 4 at the 27B's ~0.75, 7–8 at the 9B's 0.5–0.55, at most 8
+  (a fixed 4 sent 9–59 % of the 9B's prose tokens to plain steps). A 2-row verify block
+  costs ×1.17 of a step, 3–5 rows ×1.48–1.55 (the kernels' floor on this machine), which
+  caps the head at about (1 + keep rate) / 1.5.
 - Prompt lookup (`QWEN_LOOKUP=draft`) pays on turns that copy earlier text; default off.
 - The verify attention is the one-pass kernel (`QWEN_VERIFY_ATT=2`, `QWEN_VATT_Q8=1`,
   [kernels.md](kernels.md)). DFlash is not bit-equal to plain greedy (near-ties) but is

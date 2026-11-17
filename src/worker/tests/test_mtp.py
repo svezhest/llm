@@ -715,12 +715,13 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     of seeds of this confidence (Clock.seed) and of the chained drafts
     (Clock.rate), both moved by record(); a probe round takes all the room
     (every PROBE-th, rarer after probes that kept at most two drafts); LOW
-    rounds in a row with no draft kept: a burst of plain steps, then one
-    drafting round, the bursts longer (BURSTS) until a draft is kept; an
-    unmeasured T scaled by 1 + R * k from the nearest measured k;
-    QWEN_MTP_KMAX the ceiling."""
+    rounds in a row with no draft kept (LOW_MAX = LOW: the run's length
+    fixed, need() below): a burst of plain steps, then one drafting round,
+    the bursts longer (BURSTS) until a draft is kept; an unmeasured T scaled
+    by 1 + R * k from the nearest measured k; QWEN_MTP_KMAX the ceiling."""
     monkeypatch.setattr(worker, "MTP_K", 0)
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
+    monkeypatch.setattr(worker.MTPDraft, "LOW_MAX", worker.MTPDraft.LOW)
     T = [100.0, 137.0, 176.0, 193.0, 210.0]              # the 27B: verify 1.29 / 1.6 / 1.7 / 1.8 + ~7 ms a draft
     for k, ms in enumerate(T):
         clock.add(worker.MTPDraft.kind_of(k), ms)
@@ -807,6 +808,88 @@ def test_gate_draft_count(dense, monkeypatch, clock):
     assert mt.KMAX == 7 and mt.round(9).shape == (1, 7)
 
 
+def test_gate_burst_needs_an_unlikely_run(dense, monkeypatch, clock):
+    """need(): a burst after the shortest run of rounds with no draft kept
+    whose chance at the class's keep rate (Clock.keep) is below EPS, within
+    LOW..LOW_MAX - LOW at the 27B's ~0.75 (the fixed rule it was tuned
+    with), 7-8 at the 9B's 0.5-0.55, set at a run's first miss; the rate
+    moves by record() outside runs of misses only (not deep in a run, nor
+    after a burst). A 9B-like stream (each draft kept with p 0.55): a few
+    bursts where the fixed run of LOW sent over a fifth of the tokens to
+    plain steps; a head that keeps nothing still bursts after LOW misses."""
+    import random
+    monkeypatch.setattr(worker, "MTP_K", 0)
+    monkeypatch.setattr(worker.MTPDraft, "PROBE", 10 ** 9)
+    for k, ms in enumerate([100.0, 137.0, 176.0, 193.0, 210.0]):     # (one draft a round below)
+        clock.add(worker.MTPDraft.kind_of(k), ms)
+    mt = worker.MTPDraft(head(dense), dense)
+    assert clock.keep is None and mt.need() == mt.LOW               # SEED0 until measured
+    for p, n in ((1.0, 4), (0.9, 4), (0.75, 4), (0.72, 5), (0.65, 6), (0.55, 7), (0.5, 8), (0.3, 8), (0.0, 8)):
+        clock.keep = p
+        assert mt.need() == n, p
+        if mt.LOW < n < mt.LOW_MAX:
+            assert (1 - p) ** n < mt.EPS <= (1 - p) ** (n - 1)
+    clock.keep = None
+    mt.record(1, 1)
+    assert clock.keep == pytest.approx(0.82)                         # SEED0 + B * (1 - SEED0)
+    mt.record(0, 1)
+    assert mt.run == 4 and clock.keep == pytest.approx(0.738)        # (the run tested at 0.82)
+    for _ in range(mt.LOW - 1):
+        mt.record(0, 1)
+    keep = clock.keep
+    assert keep == pytest.approx(0.82 * 0.9 ** mt.LOW) and mt.miss == mt.LOW and mt.run == 4
+    mt.record(0, 1)                                                  # deep in a run: not counted
+    assert clock.keep == keep
+    confs = []
+    real = worker.MTPDraft._head
+
+    def scripted(self, h):                               # the head's tokens, scripted confidences
+        return real(self, h)[0], mx.array([[confs.pop(0)]] * h.shape[1], dtype=mx.float32).reshape(1, -1)
+    monkeypatch.setattr(worker.MTPDraft, "_head", scripted)
+    H = COMMON["hidden_size"]
+    at = [0]
+
+    def seed():                                          # one more position and its successor
+        mt.round_end(0, None)
+        confs[:] = [0.5] + [0.0] * 8
+        mt.push(mx.random.normal((1, 1, H)))
+        mt.emit_ids([at[0] % 97 + 1])
+        at[0] += 1
+
+    def go(hits):
+        got = []
+        for hit in hits:
+            while True:
+                seed()
+                r = mt.round(9)
+                if not isinstance(r, int):
+                    break
+                got.append(r)
+            mt.record(int(hit), r.shape[1])
+            got.append("d")
+        return got
+
+    mt.start(0)
+    clock.keep = 0.5                                     # the 9B's short prose
+    got = go([0] * 8 + [0, 0, 1])
+    assert got == ["d"] * 8 + [8, "d", 16, "d", 32, "d"]
+    assert clock.keep == pytest.approx(0.5 * 0.9 ** mt.LOW)         # (the run's first LOW only)
+    clock.keep = 0.8                                     # the 27B's: the fixed rule's run
+    assert go([0] * 4 + [1]) == ["d"] * 4 + [8, "d"]
+    clock.keep = 0.8
+    assert go([0] * 12)[:12] == ["d"] * 4 + [8, "d", 16, "d", 32, "d", 32, "d"]  # a head that keeps nothing
+    tokens = {}
+    for fixed in (True, False):
+        monkeypatch.setattr(worker.MTPDraft, "LOW_MAX", mt.LOW if fixed else 8)
+        rng = random.Random(3)
+        clock.keep = 0.55
+        mt.start(0)
+        got = go([rng.random() < 0.55 for _ in range(400)])
+        tokens[fixed] = sum(x for x in got if x != "d")
+    assert tokens[True] > 0.2 * (400 * 1.55 + tokens[True])         # (~1.55 tokens a drafting round)
+    assert tokens[False] * 3 < tokens[True]
+
+
 @pytest.mark.parametrize("bursts", [(1,), (1, 2, 4, 8)])
 @pytest.mark.parametrize("kw", ["greedy", "penalties", "sampling"])
 def test_gate_plain_rounds_are_the_plain_loop(dense, spec, monkeypatch, kw, bursts):
@@ -866,6 +949,7 @@ def test_auto_equals_mtp_equals_plain(dense, spec, monkeypatch, clock):
     monkeypatch.setattr(worker, "SPEC_PLAIN", True)
     monkeypatch.setattr(worker.Clock, "add", lambda self, kind, ms: None)
     monkeypatch.setattr(worker.MTPDraft, "LOW", 1)
+    monkeypatch.setattr(worker.MTPDraft, "LOW_MAX", 1)
     monkeypatch.setattr(worker.MTPDraft, "BURSTS", (1, 2))
     monkeypatch.setattr(worker.MTPDraft, "PROBE", 3)
     monkeypatch.setattr(worker.MTPDraft, "B", 0.0)
