@@ -24,6 +24,27 @@ from .rprof import RoundProf
 # the GPU still computes the head's verify. Off: one eval for both, read
 # through a reshape (a new op: it waits for everything queued before it).
 ROUND_OVERLAP = True
+# The prefill of a row with a drafter (not QWEN_ knobs: ab_spf.py's "+seed",
+# "+eager" turn them off for the in-process A/B; neither changes a token, a
+# stored entry or a drafter's context, only when the GPU computes them):
+# PREFILL_NO_SEED: a slab's eval takes the MTP head's cache, not the seed its
+# flush builds (the lm_head over the slab's last row, the head's attention /
+# MLP / norm over its last chunk), which the next push drops unread (a slab's
+# K / V never need them: the head's cache holds its layer's K / V only).
+PREFILL_NO_SEED = True
+# PREFILL_DEFER: the drafters' share of the slabs within the prompt's last
+# `win` positions (the drafter's context window, which the row holds anyway:
+# DFlash's sliding_window - 1, the head's QWEN_DRAFT_TAIL_END) - the target's
+# last layer's MLP and norm for the head, the head's flush, the captured
+# layers' concatenate - and the copies of the drafter's context for the
+# stored entry's checkpoints, its end and reply KV are left lazy; the first
+# step's token is read without them and emitted, then they go to the GPU
+# (one async_eval) ahead of the first round, which needs them. A prompt
+# within the window (2K): the first token at about the plain loop's time; a
+# hit: the stored context's copy and the head's catch-up over it after the
+# first token. Slabs further back are evaluated as they go (their captured
+# states would be held past the window).
+PREFILL_DEFER = True
 
 
 def _queued_row(a):
@@ -112,6 +133,13 @@ class _SpecMixin:
         last one: _DraftCtx), or ("splice") in place of its block when they
         agree on the first token. Without a drafter (eng.draft None) the
         rounds where nothing matches are plain steps (_plain_burst).
+
+        The drafters' prefill work (PREFILL_NO_SEED, PREFILL_DEFER): every
+        slab builds the same graphs, in the same pieces, as without the
+        switches; they decide only what a slab's eval takes (not the head's
+        seed, which nothing reads) and when the drafter share of the prompt's
+        last `win` positions is computed (after the first token is emitted:
+        it does not feed it).
         """
         from mlx_vlm.speculative.cache_state import (abort_speculative_round,
                                                      commit_speculative_round)
@@ -199,7 +227,13 @@ class _SpecMixin:
         # the drafter's context so far: what the entry the row resumed from
         # holds for the resume point (QWEN_DRAFT_TAIL), then every prefilled
         # position
-        tail0 = (_resume_tail(row.parent or (row.own.husk if row.own is not None else None), pos)
+        # PREFILL_DEFER: the drafters' work not evaluated with a slab (a hit's
+        # restored context and the head's catch-up over it, the prompt's last
+        # `win` positions) is evaluated after the first token is emitted
+        # (`later`)
+        defer = PREFILL_DEFER and layers is not None
+        tail0 = (_resume_tail(row.parent or (row.own.husk if row.own is not None else None), pos,
+                              sync=not defer)
                  if layers is not None else None)
         if tail0 is not None and tail0.shape[-1] != width:
             tail0 = None                        # stored by another drafter setup
@@ -217,12 +251,22 @@ class _SpecMixin:
             QWEN_DRAFT_TAIL)."""
             return _tail_copy(hidden, n, tail0)
 
-        def tail_end():                         # an entry's end: QWEN_DRAFT_TAIL_END
-            return tail(min(DRAFT_TAIL_END, win))
+        def tail_end(sync=True):                # an entry's end: QWEN_DRAFT_TAIL_END
+            return _tail_copy(hidden, min(DRAFT_TAIL_END, win), tail0, sync)
 
         # A prefill that stops early stores the prefix it holds, as _prefill
         # (the partial store: prompt[:pos], pos the last completed slab's end)
         start, intact, cancelled = pos, True, False
+        # PREFILL_DEFER: the drafters' work of the slabs from `since` on is
+        # left lazy once the prompt's end is within `win` positions of it (the
+        # context the row holds anyway: their captured states replace the
+        # chunks `hidden` would hold), else evaluated with each slab
+        end, since, held = pos + ctx.shape[1], pos, []
+
+        def ckpt_tail():                        # (a checkpoint inside the deferred part)
+            t = _tail_copy(hidden, DRAFT_TAIL, tail0, False)
+            held.append(t)
+            return t
         try:
             while ctx.shape[1] > 0:
                 if req.cancel.is_set():
@@ -250,11 +294,19 @@ class _SpecMixin:
                     # short slab alone, e.g. slabs 2048 + 2048 + 40 -> 40 positions)
                     while sum(t.shape[1] for t in hidden[1:]) >= win:
                         hidden.pop(0)
-                mx.eval(h, [c.state for c in cache], mt.state() if mt is not None else [])
+                lazy = defer and end - since <= win
+                if lazy:
+                    # the target's caches only, as the plain loop's slab (the
+                    # drafters' share: `later`, after the first token)
+                    mx.eval([c.state for c in cache])
+                else:
+                    mx.eval(h, [c.state for c in cache],
+                            mt.state(seed=not PREFILL_NO_SEED) if mt is not None else [])
+                    since = pos + n
                 pos += n
                 intact = True
                 if pos in cuts:
-                    on_ckpt(pos, cache, tail)
+                    on_ckpt(pos, cache, ckpt_tail if lazy else tail)
                 ctx = ctx[:, n:]
                 if CLEAR_CACHE:
                     mx.clear_cache()
@@ -269,7 +321,8 @@ class _SpecMixin:
                 self._store_prefix(row, on_prefilled, cache, pos, "cancelled", tail_end)
             self._finish(row, "cancelled")
             return
-        on_prefilled(cache, tail=tail_end())
+        stored = tail_end(not defer)
+        on_prefilled(cache, tail=stored)
         on_ckpt = on_prefilled = None           # nothing of the prefill outlives it here
         at = cache[fa].offset + 1               # the first token's position (= len(req.ids))
         if layers is not None:
@@ -287,7 +340,15 @@ class _SpecMixin:
         else:
             hidden = None
             first = one(out.logits[:, -1, :], at)
-        mx.eval(first, hidden)
+        if defer:
+            # the first token without the drafters' work (PREFILL_DEFER),
+            # which goes to the GPU once it is emitted (below)
+            later = [hidden, *held, stored, *(mt.state() if mt is not None else ())]
+            mx.eval(first)
+        else:
+            later = None
+            mx.eval(first, hidden)
+        stored = None
         first = first.item()
         on = LOOKUP in ("1", "splice") or (LOOKUP == "draft" and (draft is not None or mt is not None))
         lk = _Lookup(req.ids, LOOKUP_N, LOOKUP_NMAX) if on and max_tokens > 1 else None
@@ -300,7 +361,9 @@ class _SpecMixin:
         gen = row.fed
         recent, keep = None, min(DRAFT_TAIL_END, win)
         if gen is not None and PROMPT_CACHE_REPLY and keep > 0 and hidden is not None:
-            recent = [_tail_copy([hidden], keep)]
+            recent = [_tail_copy([hidden], keep, sync=not defer)]
+            if later is not None:
+                later.append(recent[0])
 
         def seen(h):
             """`h`: the hidden states of the positions the cache just took."""
@@ -575,7 +638,11 @@ class _SpecMixin:
             m, p = lk.propose(gate.size(left))
             return p if gate.ok(m, p) else None
 
-        if max_tokens > 0 and not emit(first):
+        stopped = max_tokens > 0 and not emit(first)
+        if later is not None:                   # PREFILL_DEFER: the drafters' share, after the first token
+            mx.async_eval(later)
+            later = None
+        if stopped:
             finish = "stop"
         elif max_tokens > 0:
             n = 1

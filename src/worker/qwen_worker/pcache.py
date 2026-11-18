@@ -72,11 +72,12 @@ def _with_tail(states, tail):
     return states + [[tail]] if tail is not None else states
 
 
-def _tail_copy(chunks, n, whole=None):
+def _tail_copy(chunks, n, whole=None, sync=True):
     """The last `n` positions of the (1, t, D) `chunks` (in order) as one
     array in a buffer of its own: a slice would keep its chunk's whole buffer
     alive in the cache entry. `whole`: a chunk that already is such an array
-    (returned as it is when it is all there is)."""
+    (returned as it is when it is all there is). `sync` False: the copy is
+    left lazy (the caller queues it: sched_spec.PREFILL_DEFER)."""
     if n <= 0 or not chunks:
         return None
     if len(chunks) == 1 and chunks[0] is whole and whole.shape[1] <= n:
@@ -90,7 +91,8 @@ def _tail_copy(chunks, n, whole=None):
             break
     # (a concatenate of several parts writes a new buffer)
     t = mx.concatenate(parts, axis=1) if len(parts) > 1 else _own_slice(parts[0], 0, k)
-    mx.eval(t)
+    if sync:
+        mx.eval(t)
     return t
 
 
@@ -100,7 +102,7 @@ def _state_tail(states, layout):
     return states[n][0] if states is not None and len(states) > n else None
 
 
-def _resume_tail(entry, at):
+def _resume_tail(entry, at, sync=True):
     """The drafter's context for a DFlash row resuming at `at` of `entry`
     (None: no entry): what the state there carries, or, when that is more,
     the part before `at` of the entry's END context (QWEN_DRAFT_TAIL_END: the
@@ -111,7 +113,8 @@ def _resume_tail(entry, at):
     the reply is not stored: thinking on), start the drafter with nearly the
     cold run's context; a checkpoint's own shorter one (QWEN_DRAFT_TAIL) is
     for those further back. An array of its own (a slice would keep the
-    entry's buffer alive in the row's next entry)."""
+    entry's buffer alive in the row's next entry; `sync` False: a lazy one,
+    as _tail_copy)."""
     if entry is None:
         return None
     L = len(entry.ids)
@@ -120,7 +123,7 @@ def _resume_tail(entry, at):
         end = _state_tail(entry.end, entry.layout)
         k = end.shape[1] - (L - at) if end is not None else 0
         if k > (tail.shape[1] if tail is not None else 0):
-            tail = _tail_copy([end[:, :k]], k)
+            tail = _tail_copy([end[:, :k]], k, sync=sync)
     return tail
 
 

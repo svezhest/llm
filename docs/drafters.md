@@ -26,6 +26,24 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   tests; on the GPU within the verify's exactness class). Before (2026-11-17), the verify drew a
   block's rows with one key and sampled text left plain's within a few tokens: trajectory noise
   of up to 27 % per request in T 0.6 speed gates.
+- A speculative row's prefill (2026-11-18, `sched_spec.PREFILL_NO_SEED` / `PREFILL_DEFER`, module
+  switches, `scripts/perf/mtp/ab_spf.py` `+seed` / `+eager`, `+old` = both off). What it pays beyond
+  the plain loop's slabs, by code (9B, share of a slab's GEMM FLOPs, estimated from the shapes): the
+  target's last layer's MLP + final norm (the head's input; the plain prefill never computes them),
+  ~2.2 %; the head's fc + K / V per position, ~0.6 %; the head's seed per slab (its lm_head over one
+  row, its attention / MLP over the slab's last chunk of <= 512 rows: read by nothing, the next push
+  drops it), ~0.7 %; the captured layers' concatenate (9 x 4096 per position, 150 MB per 2K slab)
+  and the drafter-context copies of the stored entry, ~0.1-0.3 %. The captures themselves are free
+  (references to the layers' outputs). `PREFILL_NO_SEED`: a slab's eval takes the head's cache, not
+  its seed. `PREFILL_DEFER`: the drafters' share of the prompt's last `win` positions (DFlash's
+  window, the head's `QWEN_DRAFT_TAIL_END`: the context the row holds anyway) and a hit's catch-up
+  of its stored context (the copy, the head's pass over it) stay lazy until the first token is
+  emitted, then go to the GPU before the first round: a prompt within the window (2K) or a hit gets
+  its first token at the plain loop's time, the work moves behind it (total time unchanged). Both
+  exact: the same graphs in the same pieces; tokens, stored entries and drafter contexts
+  bit-identical with either switch on or off, a row without a drafter on the old path
+  (`tests/test_spec_prefill.py`). Expected: cold 2K auto TTFT ~6 % lower, hits ~plain's; 8K / 32K
+  only the last window and the seed (not measured on this base yet).
 - The verify attention is the one-pass kernel (`QWEN_VERIFY_ATT=2`, `QWEN_VATT_Q8=1`,
   [kernels.md](kernels.md)). DFlash is not bit-equal to plain greedy (near-ties) but is
   deterministic run to run.

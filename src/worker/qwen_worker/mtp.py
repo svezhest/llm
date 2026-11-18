@@ -352,10 +352,11 @@ class MTPDraft:
         if self.seed is not None:
             mx.async_eval(self.seed[0])
 
-    def state(self):
-        """Arrays to evaluate with a step (the head's cache and seed)."""
+    def state(self, seed=True):
+        """Arrays to evaluate with a step (the head's cache and seed; `seed`
+        False: the cache only, sched_spec.PREFILL_NO_SEED)."""
         out = [c.state for c in (self.cache or []) if c.keys is not None]
-        if self.seed is not None:
+        if seed and self.seed is not None:
             out += list(self.seed[:2])
         return out
 
