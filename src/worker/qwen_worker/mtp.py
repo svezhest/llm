@@ -48,15 +48,20 @@ class Clock:
     taken is not measured, so a time is kept as g * c[kind]: a sample moves
     the common factor g (weight G) more than its own c (weight C), and the
     other kinds' times follow the drift instead of going stale. A sample
-    counts within [1/2, 2] of the expectation (a pause is not the kind's cost)."""
+    counts within [1/2, 2] of the expectation (a pause is not the kind's cost).
+    A kind's time is set by the median of its first NEW samples, which do not
+    move g (until 2026-11-18 by its first alone: one slow first 3-draft round
+    priced the 9B's depth 3 at 117 ms against 75 for depth 4, and with depth
+    3 never taken again the price stood for the whole run)."""
 
     G, C = 0.2, 0.05
+    NEW = 3
 
     def __init__(self, ms=None):
         self.g, self.c = 1.0, dict(ms or {})
+        self.first = {}                 # kind -> its first samples / g (until NEW)
         self.sub = {}
-        self.rate = {}                  # MTPDraft: depth i >= 2 -> P(draft i kept | the ones before kept)
-        self.seed = {}                  # MTPDraft: bin of the seed's confidence -> P(the seed kept)
+        self.rate = {}                  # MTPDraft: depth i -> P(draft i kept | the ones before kept), the last request's
         self.keep = None                # MTPDraft: P(a round keeps a draft) outside runs of misses
         self.arm = None                 # Chooser: the head's arm as last measured (tokens, ms per round, g)
 
@@ -72,7 +77,8 @@ class Clock:
         if c is None:
             near = next((x for t, x in self.sub.items() if t[0] == tag[0]), self)
             c = self.sub[tag] = Clock()
-            c.g, c.c, c.rate, c.seed = near.g, dict(near.c), dict(near.rate), dict(near.seed)
+            c.g, c.c = near.g, dict(near.c)
+            c.rate = dict(near.rate)
             c.arm, c.keep = near.arm, near.keep
         return c
 
@@ -83,8 +89,10 @@ class Clock:
     def add(self, kind, ms):
         if ms <= 0.0:
             return
-        if kind not in self.c:
-            self.c[kind] = ms / self.g
+        f = self.first.setdefault(kind, [])
+        if len(f) < self.NEW:
+            f.append(ms / self.g)
+            self.c[kind] = sorted(f)[(len(f) - 1) // 2]
             return
         r = min(2.0, max(0.5, ms / (self.g * self.c[kind])))
         self.g *= r ** self.G
@@ -136,26 +144,31 @@ class MTPDraft:
     """A loaded MTP head (`model`: mlx-vlm's Qwen3_5MTPDraftModel) bound to
     the target language model `lm`; per-request state in start().
 
-    The draft count of a round (QWEN_MTP_K=0: round()): k = argmax over
-    1..KMAX of E(k) / T(k), the expected tokens per ms. E(k) = 1 + p1 +
-    p1 p2 + ...: p1 is the measured rate at which seeds of this confidence
-    were kept (the seed's top-1 probability, evaluated with the previous
-    round - verify() runs the head over the verify block's rows on the
-    target's tokens, so after the walk the seed and its confidence are read
-    at no extra sync - in BINS bins, Clock.seed of the request's class: under
-    greedy a seed of confidence 0.4 is kept far more often than 0.4), p_i for
-    the chained drafts the measured rate at which draft i was kept when the
-    ones before it were (Clock.rate of the class, an EMA from RATE0; the
-    head's own confidence in a chained draft is not used: it does not know
-    its input is an approximation, and on prose "seed above 0.8" took four
-    drafts where three or more were kept in 1 round of 10). A probe round
-    takes all the drafts there is room for, so the rates of depths the rule
-    does not take stay measured: every PROBE-th drafting round, and twice as
-    rarely (up to PROBE_MAX) after each probe that kept at most two drafts (a
-    probe costs half a round on the 27B: every 8th was 6 % of prose). T(k): the measured wall time of a
-    k-draft round (Clock, per class of requests); unmeasured ones scaled from
-    the nearest measured by the prior 1 + R * k. The drafts and the verify
-    are queued together: one sync per round.
+    The draft count of a round (QWEN_MTP_K=0: round()) is one depth per
+    class of requests, the k in 1..KMAX with the most expected tokens per
+    ms, E(k) / T(k), kept until another one's is MARGIN higher. E(k) = 1 +
+    q1 + q1 q2 + ..., q_i the keep rate of draft i given the ones before it
+    kept (Clock.rate of the class; a request starts from the class's last
+    values with the weight of PRIOR samples, then their running mean, an
+    EMA of weight 1 / N past N samples): every round measures the depths up
+    to its own, deeper ones are measured by probes. T(k): the measured wall
+    time of a k-draft round (Clock, per class); unmeasured ones scaled from
+    the nearest measured by the prior 1 + R * k. A probe round takes another
+    depth: every other one all KMAX drafts (every depth's keep rate), the
+    ones between the other depths in turn (their round times); every
+    PROBE-th drafting round, twice as rarely after each probe (up to
+    PROBE_MAX) unless it kept two drafts more than the depth takes, every
+    PROBE-th again after the depth changes. No read of the head's
+    confidence: the drafts and the verify are queued together, one sync per
+    round. (Until 2026-11-18 the depth was chosen per round from the seed's
+    confidence bin: on the 9B 0.92-0.98 of the better of one and three
+    fixed drafts, taking two drafts on prose where a 3-row block costs about
+    a 4-row one and splitting code between two and four. Ideal per-round
+    gating, the bins' keep rates known in hindsight, beats the best fixed
+    depth by 0-2.4 % on prose and 1.6-6.5 % on code (9B, q8 head): less
+    than its estimates' noise costs; replayed on recorded acceptance
+    (scripts/perf/mtp/depth_sim.py) it ran code at 0.92 of three drafts,
+    one depth for the class at 0.99.)
 
     A round with no draft is never the choice of that rule: one plain step
     between two rounds has a round's host time and the head's catch-up but
@@ -165,25 +178,33 @@ class MTPDraft:
     ones its sure continuation). Plain steps are for text the head cannot
     draft: after `run` rounds in a row with no draft kept, a burst of
     BURSTS[0] plain steps with step-ahead (the head catches up in one flush
-    queued with its last step), then one drafting round; while that one keeps
-    nothing the bursts lengthen (BURSTS), a kept draft ends them: the plain
-    loop's speed within ~3 % on text where every draft fails. `run` (need(),
-    set at a run's first miss) is the shortest run of misses less likely
-    than EPS at the class's measured keep rate (Clock.keep), within
-    LOW..LOW_MAX. A fixed LOW fitted the 27B (keep ~0.75: (1/4)^4 = 1/256);
-    on the 9B (keep 0.5-0.65) four misses came by chance every 40-70 rounds,
-    and with the bursts' doubling 9-59 % of the tokens went to plain steps
-    where one draft a round was 15-20 % faster. Bursts are not priced by the
-    Clock: its ("mtp", 0) reads a burst token at 1/1.55 of a 1-draft round
-    on both models, end to end about 1/1.3."""
+    queued with its last step), then drafting rounds again; after again()
+    of them in a row with no draft kept the next burst, longer (BURSTS), a
+    kept draft ends them: on text where every draft fails the plain loop's
+    speed within ~4 % over 300 tokens, ~2 % past 1000 (depth_sim.py
+    --none). `run` (need(), set at a run's first miss) is the shortest run
+    of misses less likely than EPS at the class's measured keep rate
+    (Clock.keep), within LOW..LOW_MAX; again() (set with it) the shortest
+    one at most as likely as EPS2, within 1..LOW (2 rounds at 0.75, 4 at
+    0.5). A fixed LOW fitted the 27B (keep ~0.75: (1/4)^4 = 1/256); on the
+    9B (keep 0.5-0.65) four misses came by chance every 40-70 rounds, and
+    with the bursts' doubling 9-59 % of the tokens went to plain steps
+    where one draft a round was 15-20 % faster. Until 2026-11-18 one missed
+    round after a burst started the next one, a coin flip at the 9B's
+    sampled keep rate: chains of up to six bursts (152 of 256 tokens of a
+    request). Bursts are not priced by the Clock: its ("mtp", 0) reads a
+    burst token at 1/1.55 of a 1-draft round on both models, end to end
+    about 1/1.3."""
 
     kind = "mtp"
     R = 0.25                            # prior: a k-draft round costs 1 + R * k plain steps
-    BURSTS = (8, 16, 32)                # plain steps of the n-th burst in a row
+    BURSTS = (8, 16, 32, 64, 128)       # plain steps of the n-th burst in a row
     LOW, LOW_MAX, EPS = 4, 8, 1 / 256   # rounds in a row with no draft kept before a burst; need()
-    RATE0, A = 0.5, 0.2                 # a chained draft's keep rate: the start, the EMA's weight
-    PROBE, PROBE_MAX = 8, 64            # drafting rounds between two probes (all the drafts): the first, the most
-    BINS, SEED0, B = 5, 0.8, 0.1        # the seed's keep rate per confidence bin: the start (at least), the EMA's weight
+    EPS2 = 1 / 16                       # ... before the next burst after one; again()
+    KEEP0, B = 0.8, 0.1                 # the keep rate (Clock.keep): the start, the EMA's weight
+    PRIOR, N = 2, 16                    # the keep rates per depth: the class's weight at a request's start, 1 / the EMA's
+    MARGIN = 0.02                       # E / T over the current depth's to take another
+    PROBE, PROBE_MAX = 8, 64            # drafting rounds between two probes: the first, the most
     said = False                        # the lm_head's path over a block: logged once
     CHUNK = 512                         # head rows per forward (flush)
     prof = None                         # QWEN_SPEC_PROF: the request's rprof.RoundProf (set by _spec)
@@ -217,7 +238,7 @@ class MTPDraft:
         self.succ = []                  # successors not paired yet (ints, or lazy (1,) arrays)
         self.skip = 0                   # emitted successors already paired (verify / burst)
         self.appended = 0               # chained entries of the current round
-        self.seed = None                # (token (1, 1), hidden (1, 1, H), confidence (1, 1)) or None
+        self.seed = None                # (token (1, 1), hidden (1, 1, H), None) or None
         self.block = None               # verify(): the head over the block's rows
         self.prof = None
         self.fresh()
@@ -229,10 +250,13 @@ class MTPDraft:
         self.low = 0                    # bursts in a row (no draft kept between them)
         self.miss = 0                   # drafting rounds in a row with no draft kept
         self.run = self.LOW             # ... that make a burst (need() at the run's first miss)
+        self.after = 1                  # ... that make the next one after a burst (again(), as `run`)
+        self.cur = None                 # the depth taken (the gate's)
         self.nround = 0                 # drafting rounds (the gate's) since the last probe
         self.every = self.PROBE         # ... and how many until the next
-        self.probe = False              # the round under way is one
-        self.bin = None                 # the confidence bin of the round's seed (the gate's rounds)
+        self.turn = 0                   # probes so far (which depth the next one takes)
+        self.probe = None               # the round under way is one: the depth it stands in for
+        self.seen = {}                  # depth i -> samples of its keep rate in this request
         self.ks = [0] * (max(self.KMAX, cfg.MTP_K) + 1)     # rounds by draft count (0: bursts)
         self.burst_tokens = 0           # tokens of the k = 0 rounds' plain steps
         self.dropped = 0                # drafts computed and not verified
@@ -271,16 +295,6 @@ class MTPDraft:
             j, m = min(known, key=lambda x: abs(x[0] - k))
             return m * (1.0 + self.R * k) / (1.0 + self.R * j)
         return 1.0 + self.R * k
-
-    @staticmethod
-    def gain(confs, k, last):
-        """Expected tokens of a k-draft round: 1 + sum_i prod_{j<=i} c_j, the
-        confidences `confs` known, `last` for the drafts past them."""
-        e, p = 1.0, 1.0
-        for i in range(k):
-            p *= confs[i] if i < len(confs) else last
-            e += p
-        return e
 
     def push(self, h):
         """Hidden states (1, n, H, the target's post-norm) of the next n
@@ -331,19 +345,18 @@ class MTPDraft:
         self.seed = None
         if not self.npend:
             last = out[:, -1:, :]
-            tok, conf = self._head(last)
-            self.seed = (tok, last, conf)
+            self.seed = (self._head(last)[0], last, None)
 
     def prime(self):
-        """Queue the seed and its confidence (after a flush)."""
+        """Queue the seed (after a flush)."""
         if self.seed is not None:
-            mx.async_eval(self.seed[0], self.seed[2])
+            mx.async_eval(self.seed[0])
 
     def state(self):
         """Arrays to evaluate with a step (the head's cache and seed)."""
         out = [c.state for c in (self.cache or []) if c.keys is not None]
         if self.seed is not None:
-            out += list(self.seed)
+            out += list(self.seed[:2])
         return out
 
     # ---- a round ----
@@ -360,67 +373,89 @@ class MTPDraft:
         self.flush()
         if self.seed is None:
             raise RuntimeError("mtp: no seed (a pushed position without its successor)")
-        tok, h, conf = self.seed
-        top = min(self.KMAX, room)
-        prof = self.prof
-        if prof is not None:
-            prof.lap("flush")
-        c1 = conf.item()
-        if prof is not None:
-            prof.wait("seed")
-        k = self.depth(c1, [self._ms(k) for k in range(top + 1)], top)
-        if k == 0:                      # (the seed's confidence: evaluated with the last round)
-            self.low += 1
-            self.ks[0] += 1
-            self.miss = self.run - 1    # one drafting round after the burst
-            return self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
-        toks = [tok]
-        self.appended = 0
-        for _ in range(k - 1):
-            h = self._forward(tok, h)
-            self.appended += 1
-            tok = self._head(h)[0]
-            toks.append(tok)
-        self.seed = None
+        if self.prof is not None:
+            self.prof.lap("flush")
+        k, steps = self.plan(min(self.KMAX, room))
+        if not k:
+            return steps
         self.ks[k] += 1
-        return mx.concatenate(toks, axis=1) if len(toks) > 1 else toks[0]
+        return self.draft(k)
 
-    def depth(self, c1, T, top):
-        """Drafts of the next round: 0 (a burst of plain steps) after LOW
-        rounds in a row that kept no draft; else 1..top, the count with the
-        most expected tokens per ms, gain(k) / T[k], from the measured keep
-        rates of seeds of confidence `c1` and of the chained drafts (the
-        request's class); a probe round all `top`."""
+    def plan(self, top):
+        """(k, 0): the next round takes k drafts (1..top), or (0, n): a
+        burst of n plain steps (host statistics only: no sync)."""
+        k = self.depth(top)
+        if k:
+            return k, 0
+        self.low += 1
+        self.ks[0] += 1
+        self.miss = self.run - self.after               # drafting rounds before the next one
+        return 0, self.BURSTS[min(self.low, len(self.BURSTS)) - 1]
+
+    def depth(self, top):
+        """Drafts of the next round: 0 (a burst of plain steps) after `run`
+        rounds in a row that kept no draft; else the class's depth (best()),
+        within `top`; a probe round another one."""
         if self.miss >= self.run:
             return 0
-        ck = self._clock()
-        b = min(self.BINS - 1, int(c1 * self.BINS))
-        ps = [ck.seed.get(b, self._seed0(b))] + [ck.rate.get(i, self.RATE0) for i in range(2, top + 1)]
-        k = max(range(1, top + 1), key=lambda j: self.gain(ps, j, 0.0) / T[j])
-        self.bin = b
+        k = self.best(top)
         self.nround += 1
-        self.probe = k < top and self.nround >= self.every
-        if self.probe:
-            self.nround = 0
-            k = top
+        if top > 1 and self.nround >= self.every:
+            self.nround, self.probe = 0, k
+            self.turn += 1
+            if k < top and self.turn % 2:
+                return top              # (every depth's keep rate)
+            others = [j for j in range(top, 0, -1) if j != k]
+            return others[self.turn // (1 if k == top else 2) % len(others)]   # (their round times)
         return k
+
+    def best(self, top):
+        """The depth in 1..top with the most measured tokens per ms, E(k) /
+        T(k); the current one kept unless another is MARGIN above it (a
+        change: probes every PROBE-th round again)."""
+        v = [0.0] + [self.expect(j) / self._ms(j) for j in range(1, top + 1)]
+        b = max(range(1, top + 1), key=v.__getitem__)
+        if self.cur is None:
+            self.cur = b
+        k = min(self.cur, top)
+        if v[b] > v[k] * (1.0 + self.MARGIN):
+            self.cur, k, self.nround, self.every = b, b, 0, self.PROBE
+        return k
+
+    def expect(self, k):
+        """E(k): the class's mean tokens of a k-draft round, 1 + q1 + q1 q2
+        + ..., q_i = P(draft i kept | the ones before kept) (Clock.rate)."""
+        rate = self._clock().rate
+        e = p = 1.0
+        for i in range(1, k + 1):
+            p *= rate.get(i, self.KEEP0)
+            e += p
+        return e
 
     def need(self):
         """Rounds in a row with no draft kept before a burst: the fewest
-        whose chance at the class's keep rate p (Clock.keep, SEED0 until
+        whose chance at the class's keep rate p (Clock.keep, KEEP0 until
         measured) is below EPS, (1 - p)^n < EPS, within LOW..LOW_MAX (a
         head that keeps nothing still bursts after LOW_MAX)."""
+        return min(self.LOW_MAX, max(self.LOW, self._runs(self.EPS)))
+
+    def again(self):
+        """Rounds in a row with no draft kept after a burst before the next
+        one: the fewest whose chance at the class's keep rate is at most
+        EPS2, 1..LOW (below a keep rate of 1/2 a drafting round hardly
+        beats a plain step: a burst by chance costs little)."""
+        return min(self.LOW, max(1, self._runs(self.EPS2)))
+
+    def _runs(self, eps):
+        """The fewest n with (1 - p)^n <= eps, p the class's keep rate
+        (Clock.keep, KEEP0 until measured)."""
         p = self._clock().keep
-        p = self.SEED0 if p is None else p
+        p = self.KEEP0 if p is None else p
         if p >= 1.0:
-            return self.LOW
+            return 1
         if p <= 0.0:
             return self.LOW_MAX
-        n = math.ceil(math.log(self.EPS) / math.log(1.0 - p) - 1e-9)
-        return min(self.LOW_MAX, max(self.LOW, n))
-
-    def _seed0(self, b):
-        return max(self.SEED0, (b + 0.5) / self.BINS)
+        return math.ceil(math.log(eps) / math.log(1.0 - p) - 1e-9)
 
     def draft(self, n):
         """(1, n) draft tokens (lazy): the seed, then n - 1 chained steps
@@ -449,21 +484,20 @@ class MTPDraft:
         with the verify."""
         self._trim(self.appended)
         out = self._forward(targets.reshape(1, -1).astype(mx.int32), h)
-        tok, conf = self._head(out)
-        self.block = (out, tok, conf, out.shape[1])
-        return [tok, conf]
+        tok = self._head(out)[0]
+        self.block = (out, tok, out.shape[1])
+        return [tok]
 
     def settle(self, kept, h):
         """After the walk of a verify(): the first `kept` rows had their real
         successor (the rest leave the head's cache); `h` (1, n, H): the
         positions the commit kept, those past `kept` pushed (a thinking
         budget's cut: the last one, its successor forced after it)."""
-        out, tok, conf, t = self.block
+        out, tok, t = self.block
         self.block = None
         self._trim(t - kept)
         self.skip += kept               # their successors: the first tokens emitted
-        self.seed = ((tok[:, kept - 1:kept], out[:, kept - 1:kept], conf[:, kept - 1:kept])
-                     if kept else None)
+        self.seed = (tok[:, kept - 1:kept], out[:, kept - 1:kept], None) if kept else None
         self.push(h[:, kept:])
 
     def round_end(self, accepted, h=None):
@@ -484,26 +518,23 @@ class MTPDraft:
         self.draft_lens.append(drafted)
         ck = self._clock()
         if not accepted and not self.miss:
-            self.run = self.need()      # (at the rate before the run)
+            self.run, self.after = self.need(), self.again()    # (at the rate before the run)
         if drafted and not self.low and self.miss < self.LOW:
             # the keep rate outside runs of misses (rounds deep in one, and
             # the ones after a burst, are the text need() tests for)
-            p = self.SEED0 if ck.keep is None else ck.keep
+            p = self.KEEP0 if ck.keep is None else ck.keep
             ck.keep = p + self.B * ((accepted >= 1) - p)
         if accepted:
             self.miss = self.low = 0
         else:
             self.miss += 1
-        if self.probe:
-            self.probe = False
-            self.every = self.PROBE if accepted > 2 else min(2 * self.every, self.PROBE_MAX)
-        rate, b, self.bin = ck.rate, self.bin, None
-        if b is not None and drafted:
-            r = ck.seed.get(b, self._seed0(b))
-            ck.seed[b] = r + self.B * ((accepted >= 1) - r)
-        for i in range(2, min(drafted, accepted + 1) + 1):      # depths reached: the ones before kept
-            r = rate.get(i, self.RATE0)
-            rate[i] = r + self.A * ((accepted >= i) - r)
+        if self.probe is not None:      # one that kept 2 more than the depth's drafts: soon again
+            self.every = self.PROBE if accepted >= self.probe + 2 else min(2 * self.every, self.PROBE_MAX)
+            self.probe = None
+        for i in range(1, min(drafted, accepted + 1) + 1):     # the depths reached: the ones before kept
+            n = self.seen[i] = self.seen.get(i, 0) + 1
+            r = ck.rate.get(i, self.KEEP0)
+            ck.rate[i] = r + ((accepted >= i) - r) / min(self.N, n + self.PRIOR)
 
     # ---- the head ----
 
@@ -526,7 +557,8 @@ class MTPDraft:
 
     def _head(self, h):
         """-> (argmax (1, n) int32, top-1 probability (1, n) fp32) of the
-        lm_head over h (1, n, H)."""
+        lm_head over h (1, n, H), lazy (the gate reads no confidence: only
+        tools evaluate it)."""
         if h.shape[1] > 1 and not MTPDraft.said:
             MTPDraft.said = True
             log.info("mtp: the head's lm_head over a %d-row block: input %s, mrqmv mark %s, QWEN_VERIFY_QMV %s",
