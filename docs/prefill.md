@@ -9,6 +9,12 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   from 32K keys; pfqmm for the GEMMs (bit-identical). The policy is frozen at load.
 - A long slab runs uninterrupted, so a >64K prefill stretches every decode row's gap.
 - The dead ends below were measured: do not retry them without new evidence.
+- Across systems (9B, 2K, cold): ×1.09–1.11 of llama.cpp, ×1.44 of mlx-vlm; at 32K ×1.12–1.16 of
+  llama.cpp. `QWEN_DRAFT=auto` adds 6–7 % at 2K and 9–10 % at 32K–80K (the drafters' work over the
+  prompt) and its cache hit is 0.28 s against plain's 0.11 s
+  ([perf/2026-11-18/decode_9b_bench.md](perf/2026-11-18/decode_9b_bench.md)); deferring the
+  drafters' last window behind the first token (branch spec-prefill, exact) brings them to
+  1.00–1.06 × plain cold and 0.97–1.01 on a hit ([auto_gate_9b.md](perf/2026-11-18/auto_gate_9b.md)).
 
 ## Performance notes
 

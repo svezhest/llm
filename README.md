@@ -56,6 +56,34 @@ sessions: [docs/perf/2026-11-17/decode_27b_bench.md](docs/perf/2026-11-17/decode
 how `auto` chooses a drafter and where it still loses to the best single one:
 [docs/perf/2026-11-17/auto_gate.md](docs/perf/2026-11-17/auto_gate.md).
 
+Ornith-1.5-9B (8-bit) on the same machine and harness, also against oMLX 0.8.0rc1 (2026-11-18,
+two sessions per system; the MTP head alone one):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/perf/2026-11-18/decode_9b_2k_dark.png">
+  <img alt="Decode tokens/s at 2K context, Ornith-1.5-9B: this server (auto, MTP head, plain), llama.cpp (plain, + MTP), oMLX (plain, + MTP, + DFlash), mlx-vlm; greedy and sampling; code, English, Russian" src="docs/perf/2026-11-18/decode_9b_2k_light.png">
+</picture>
+
+| greedy, tok/s | code | English | Russian |
+|---|---|---|---|
+| this server, `QWEN_DRAFT=auto` (DFlash + the model's MTP head) | 58.3 | 45.7 | 43.5 |
+| this server, the MTP head alone | 58.1 | 47.6 | 45.0 |
+| llama.cpp Q8_0 + MTP | 52.7 | 41.7 | 39.5 |
+| oMLX + MTP (the same head weights) | 46.5 | 41.0 | 39.1 |
+| this server, plain | 37.5 | 37.5 | 37.5 |
+| oMLX | 36.6 | 36.7 | 36.6 |
+| mlx-vlm 0.7.6 | 36.2 | 36.2 | 36.2 |
+| llama.cpp Q8_0 | 35.4 | 35.4 | 35.3 |
+
+Plain decode is a tie: ×1.04 of llama.cpp and of mlx-vlm, ×1.01 of oMLX. With speculation
+`auto` is ×1.13 of llama.cpp + MTP (ahead in 18 of 19 cells, behind on one sampled Russian
+cell, ×1.01–1.06 on sampled prose) and ×1.19 of oMLX + MTP; on prose the head alone is 3–5 % faster
+than `auto`. A repeated prompt answers in 0.11 s (plain) and 0.28 s (`auto`) against llama.cpp's
+0.04 s; a cold 2K prefill is ×1.09–1.11 of llama.cpp. At 32K `auto` decodes code at 58 tok/s
+(llama.cpp + MTP 42), Russian at 32 (our plain 32). Method, every cell and the raw sessions:
+[docs/perf/2026-11-18/decode_9b_bench.md](docs/perf/2026-11-18/decode_9b_bench.md); the
+in-process gate of `auto`: [docs/perf/2026-11-18/auto_gate_9b.md](docs/perf/2026-11-18/auto_gate_9b.md).
+
 ## Models (`weights/`)
 
 | dir | model | quant | size | arch |

@@ -12,6 +12,10 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   (`scripts/perf/bench27/plans.json` `headline2`; [perf/2026-11-17/decode_27b_bench.md](perf/2026-11-17/decode_27b_bench.md)).
 - CPU work beside a GPU measurement distorts it too (pytest shares the memory bandwidth): the
   CPU suite gets its own slot.
+- Compare whole passes before pooling them (`report.py passes`): on the 9B two day passes agreed
+  within 0–2 % but a night pass ran ×0.76–0.87 cell by cell with probes only 2–4 % lower, and the
+  9B shows no in-session warm-up at all; the 27B's 16–23 % is that model's
+  ([perf/2026-11-18/decode_9b_bench.md](perf/2026-11-18/decode_9b_bench.md#method)).
 - Reports and raw data go to `docs/perf/<date>/`; conclusions to the topic file.
 
 ## Measuring performance on this machine (lessons from 2026-10-11/12)

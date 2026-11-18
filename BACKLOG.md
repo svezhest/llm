@@ -174,6 +174,12 @@ message Ack {} message Empty {}
 - [ ] mrqmm at 16 rows is MMA-bound (46 ms of linears vs 33 at 8): the remaining lever there is fewer MMAs (e.g. B=9..12 in an MB=2 tile pays for 16).
 - [ ] `QWEN_DRAFT=auto` on the 27B (2026-11-17, `docs/perf/2026-11-17/auto_gate.md`): the rule as shipped holds 0.97 of the best single setting in 1 of 5 greedy cells (0.91–0.98), 2 of 5 at T 0.6 (0.92–1.01), 2 of 2 on q8 KV; the floor 4 of 4. Open: (1) the head is not sampled while DFlash runs — a shadow of its first draft (needs the head's catch-up per round) or a periodic short trial; (2) a class prior for DFlash's tokens per round (the first code request of a class), arms that tie under sampling (English: the request is split, 0.95), 80K context; (3) per-class keep rates mix code and prose requests; (4) verify blocks of 3–5 rows cost ×1.48–1.55 of a step (the matrix kernel's fixed work per weight): a kernel that scales with rows below 8 is what would lift the head past ×1.3 on prose.
 
+- [ ] `QWEN_DRAFT=auto` on the 9B (2026-11-18, `docs/perf/2026-11-18/auto_gate_9b.md`): main's rule 1 of 6 cells at 0.97 (0.755–1.033); behind the head alone on prose. Next: (1) merge the parts of branch integ2 that paid (sampled code 0.755 → 0.992 at 1024 tokens) after the 27B gate; (2) the fixed per-request cost on prose: skip DFlash's start rounds when the class prior says prose, bound the shadow drafts; (3) why `auto`'s head rounds keep fewer tokens per ms than the fixed head's (`scripts/perf/mtp/auto_tax.py` on a new trace).
+- [ ] spec-prefill (branch, 0918548 / 31ac3d8): the drafters' last window deferred behind the first token; `auto`'s cold TTFT 1.06–1.09 → 1.00–1.06 × plain, hits 1.36–1.41 → 0.97–1.01, exact. Merge with the CPU suite and the 27B gate.
+- [ ] The repeated 32K code prompt under `auto` missed the prompt cache in the 9B benchmark (cached 0, 84 s) while plain hit: find why (eviction under the drafters' memory?).
+- [ ] Cache-hit TTFT on the 9B: 0.11 s plain against llama.cpp's 0.04 s at 2K; profile where the 70 ms go.
+- [ ] KV for the 9B at long context: q8 + fp16 tail of 1024 (×0.23–0.34 of q8's KL, emulated) and K8 / V6 + rotation + tail (15 KiB/token) need a kernel and a speed A/B before any change; 6-bit fails at 32K.
+
 ## Open / later
 - TLS + auth on the public API if exposed beyond localhost.
 - **Case B**: Windows + another model as a second gRPC worker behind the SAME gateway; inference Dockerizable there via WSL2 + CUDA. Reuses proto, gateway, metrics, Grafana unchanged.

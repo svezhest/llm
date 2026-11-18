@@ -8,6 +8,10 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   4 / 5 / 6-bit kernels to be fast ([kernels.md](kernels.md)).
 - KV format per model: 9B fp16, 27B q8, 35B q4. The 35B and long-context 27B need the
   wired-limit dance on 32 GB.
+- Below 8 bits nothing passes on the 9B (KL harness, emulated): 4 / 5-bit fail at 8K, 6-bit +
+  rotation + fp16 tail passes at 8K and fails at 32K on code (×2.0 / ×2.4 of q8's KL); q8 with the
+  newest 1024 tokens fp16 has 3–4× lower KL than q8, not built
+  ([perf/2026-11-18/auto_gate_9b.md](perf/2026-11-18/auto_gate_9b.md#experiments-that-did-not-pay), `raw/kvq4/`).
 - Model cards' benchmarks are not trusted: evaluate empirically.
 - Downloads: aria2c with per-file sha256, Xet off, never hard-killed (recipe below).
 
