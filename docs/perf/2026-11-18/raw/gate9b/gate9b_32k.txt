@@ -1,0 +1,35 @@
+loaded in 6 s; active 10.50 GB; dflash DFlashDraftModel mtp MTPDraft; DRAFT_BLOCK 8 VERIFY_MR True
+warm code-32k-0@s plain: n=16 tps=28.53 arms=
+warm code-32k-0@s dflash: n=16 tps=23.67 arms={'dflash': [4, 15]}
+warm code-32k-0@s mtp1+q: n=16 tps=34.44 arms={'mtp': [9, 15]}
+warm code-32k-0@s auto: n=16 tps=18.90 arms={'mtp': [7, 13], 'lookup': [1, 2]}
+r0 code-32k-0@s plain   n=256 tps= 22.94 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 code-32k-0@s dflash  n=256 tps= 35.79 tok/round=3.59 round_ms= 100.4 dflash=71r/37.7% mtp=0r/ 0.0% plain=0 arms={'dflash': [71, 255]} shadows= switches=
+r0 code-32k-0@s mtp1+q  n=256 tps= 32.84 tok/round=1.78 round_ms=  54.3 dflash=0r/ 0.0% mtp=143r/79.0% k=[0, 143, 0, 0, 0] acc=[30, 113] burst_tok=0 dropped=0 plain=0 arms={'mtp': [143, 255]} shadows= switches=
+r0 code-32k-0@s auto    n=256 tps= 41.09 tok/round=4.11 round_ms= 100.1 dflash=62r/44.1% mtp=0r/ 0.0% k=[0, 0, 0, 0, 0] acc=[0] burst_tok=0 dropped=0 plain=0 arms={'dflash': [62, 251], 'lookup': [2, 4]} shadows={'dflash': 0, 'mtp': 0} switches=0
+r1 code-32k-0@s plain   n=256 tps= 23.37 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r1 code-32k-0@s auto    n=256 tps= 28.33 tok/round=2.90 round_ms= 102.3 dflash=79r/28.8% mtp=8r/27.3% k=[1, 7, 0, 0, 1] acc=[5, 3, 0, 0, 0] burst_tok=8 dropped=0 plain=8 arms={'dflash': [79, 233], 'mtp': [9, 19], 'lookup': [2, 3]} shadows={'dflash': 2, 'mtp': 0} switches=6
+r1 code-32k-0@s mtp1+q  n=256 tps= 33.95 tok/round=1.83 round_ms=  54.0 dflash=0r/ 0.0% mtp=139r/83.5% k=[0, 139, 0, 0, 0] acc=[23, 116] burst_tok=0 dropped=0 plain=0 arms={'mtp': [139, 255]} shadows= switches=
+r1 code-32k-0@s dflash  n=256 tps= 35.57 tok/round=3.59 round_ms= 101.0 dflash=71r/37.8% mtp=0r/ 0.0% plain=0 arms={'dflash': [71, 255]} shadows= switches=
+
+== median decode tok/s per prompt (median over rounds) ==
+plain   code-32k-0@s  23.16 | tok/round 0.00 round    0.0 ms mtp acc  0.0% dfl acc  0.0% mtp share 0.00 == plain 2/2
+dflash  code-32k-0@s  35.68 | tok/round 3.59 round  100.7 ms mtp acc  0.0% dfl acc 37.8% mtp share 0.00 == plain 0/2
+mtp1+q  code-32k-0@s  33.39 | tok/round 1.81 round   54.2 ms mtp acc 81.2% dfl acc  0.0% mtp share 1.00 == plain 0/2 | gate k [0, 282, 0, 0, 0] accepted [53, 229] burst tokens 0/510 dropped 0
+auto    code-32k-0@s  34.71 | tok/round 3.51 round  101.2 ms mtp acc 27.3% dfl acc 36.4% mtp share 0.05 == plain 0/2 | gate k [1, 7, 0, 0, 1] accepted [5, 3, 0, 0, 0] burst tokens 8/510 dropped 0
+peak 15.53 GB, active 10.64 GB
+wrote $PERF_OUT/gate9b/gate9b_32k.json
+| cell | dflash tok/s | x plain | mtp1+q tok/s | x plain | auto tok/s | x plain | plain tok/s | pairs | auto / best | |
+|---|---|---|---|---|---|---|---|---|---|---|
+| code-32k-0@s | 35.7 | 1.54 | 33.4 | 1.44 | 34.7 | 1.50 | 23.2 | 2 | 0.975 of dflash | pass |
+
+1 of 1 cells pass
+
+| cell | requests | rounds: dflash / mtp / plain / lookup | tokens: dflash / mtp / plain / lookup | shadow drafts per request (dflash / mtp) | switches |
+|---|---|---|---|---|---|
+| code-32k-0@s | 2 | 92 % / 6 % / 0 % / 3 % | 95 % / 4 % / 0 % / 1 % | 1 / 0 | 3 |
+
+| cell | variant | requests | rounds by k (0 = burst) | rounds by accepted drafts | burst tokens | dropped |
+|---|---|---|---|---|---|---|
+| code-32k-0@s | mtp1+q | 2 | [0, 282, 0, 0, 0] | [53, 229] | 0 % | 0 |
+| code-32k-0@s | auto | 2 | [1, 7, 0, 0, 1] | [5, 3, 0, 0, 0] | 2 % | 0 |

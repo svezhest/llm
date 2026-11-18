@@ -1,0 +1,23 @@
+loaded in 5 s; active 10.24 GB; dflash DFlashDraftModel mtp None; DRAFT_BLOCK 8 VERIFY_MR True
+warm code-2k-0 plain: n=32 tps=35.75 arms=
+warm code-2k-0 dflash: n=32 tps=50.57 arms={'dflash': [7, 31]}
+warm code-2k-0@s plain: n=32 tps=34.41 arms=
+warm code-2k-0@s dflash: n=32 tps=40.38 arms={'dflash': [7, 31]}
+r0 code-2k-0  plain   n=256 tps= 27.04 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 code-2k-0  dflash  n=256 tps= 44.01 tok/round=3.64 round_ms=  82.8 dflash=70r/38.4% mtp=0r/ 0.0% plain=0 arms={'dflash': [70, 255]} shadows= switches=
+r0 en-2k-0    dflash  n=256 tps= 25.15 tok/round=2.06 round_ms=  81.8 dflash=124r/15.1% mtp=0r/ 0.0% plain=0 arms={'dflash': [124, 255]} shadows= switches=
+r0 en-2k-0    plain   n=256 tps= 27.13 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 ru-2k-0    plain   n=256 tps= 27.20 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 ru-2k-0    dflash  n=256 tps= 20.23 tok/round=1.62 round_ms=  80.3 dflash=157r/ 9.1% mtp=0r/ 0.0% plain=0 arms={'dflash': [157, 255]} shadows= switches=
+r0 code-2k-0@s dflash  n=256 tps= 47.08 tok/round=3.98 round_ms=  84.6 dflash=64r/43.6% mtp=0r/ 0.0% plain=0 arms={'dflash': [64, 255]} shadows= switches=
+r0 code-2k-0@s plain   n=256 tps= 26.47 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 en-2k-0@s  plain   n=256 tps= 24.89 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+r0 en-2k-0@s  dflash  n=256 tps= 22.96 tok/round=1.95 round_ms=  84.8 dflash=131r/13.6% mtp=0r/ 0.0% plain=0 arms={'dflash': [131, 255]} shadows= switches=
+r0 ru-2k-0@s  dflash  n=256 tps= 16.60 tok/round=1.52 round_ms=  91.4 dflash=168r/ 7.5% mtp=0r/ 0.0% plain=0 arms={'dflash': [168, 255]} shadows= switches=
+r0 ru-2k-0@s  plain   n=256 tps= 23.67 tok/round=0.00 round_ms=   0.0 dflash=0r/ 0.0% mtp=0r/ 0.0% plain=0 arms= shadows= switches=
+
+== median decode tok/s per prompt (median over rounds) ==
+plain   code-2k-0  27.04 en-2k-0  27.13 ru-2k-0  27.20 code-2k-0@s  26.47 en-2k-0@s  24.89 ru-2k-0@s  23.67 | tok/round 0.00 round    0.0 ms mtp acc  0.0% dfl acc  0.0% mtp share 0.00 == plain 6/6
+dflash  code-2k-0  44.01 en-2k-0  25.15 ru-2k-0  20.23 code-2k-0@s  47.08 en-2k-0@s  22.96 ru-2k-0@s  16.60 | tok/round 2.00 round   83.7 ms mtp acc  0.0% dfl acc 14.4% mtp share 0.00 == plain 0/6
+peak 11.88 GB, active 10.30 GB
+wrote $PERF_OUT/dflash_causal9/causal.json

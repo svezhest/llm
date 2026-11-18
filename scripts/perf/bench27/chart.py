@@ -10,7 +10,7 @@ Colors follow the system (a fixed slot per system, never by rank). matplotlib is
 repo's envs; run it from uv's cache without a download:
 
   uv run --offline --no-project --with matplotlib python scripts/perf/bench27/chart.py \\
-      --agg agg.json --out docs/perf/2026-11-16/ [--title "..."]
+      --agg agg.json --out docs/perf/2026-11-16/ [--title "..."] [--prefix decode_9b]
 
 The title defaults to "<model> decode on <--machine>", the model named by the systems present
 (MODEL); --title replaces the whole prefix.
@@ -57,6 +57,9 @@ MODEL = {**{s: "Qwen3.8-27B (4-bit class)" for s in ORDER + ["ours-oq4e-dflash",
          **{s: "Ornith-1.5-9B (8-bit)" for s in ("ours9-auto", "ours9-plain", "ours9-dflash", "ours9-mtp",
                                                  "mlx-vlm9", "llama9-q8_0", "llama9-q8_0-mtp", "omlx9", "omlx9-mtp",
                                                  "omlx9-dflash")}}
+# the 9B charts: bars (and the legend) grouped by family, ours first; the 27B keeps ORDER
+SEQ = ["ours9-auto", "ours9-mtp", "ours9-dflash", "ours9-plain", "llama9-q8_0-mtp", "llama9-q8_0", "omlx9-mtp",
+       "omlx9-dflash", "omlx9", "mlx-vlm9"]
 THEMES = {"light": {"bg": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "grid": "#e4e3df"},
           "dark": {"bg": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "grid": "#3a3a37"}}
 CLASSES = [("code", "code"), ("en", "English prose"), ("ru", "Russian prose")]
@@ -67,17 +70,22 @@ def base(system):
 
 
 def style(system, theme, systems=()):
+    """(color, hatch): the hue of the system's slot; hatched when a system drawn before it in the
+    same chart has that hue too (the first of a hue stays solid)."""
     b = base(system)
     key = TWIN.get(b, b)
     i = ORDER.index(key) if key in ORDER else len(ORDER) - 1
-    shared = any(base(x) != b and TWIN.get(base(x), base(x)) == key for x in systems)
+    shared = any(base(x) != b and TWIN.get(base(x), base(x)) == key and sort_key(x) < sort_key(system)
+                 for x in systems)
     return SLOTS[i][0 if theme == "light" else 1], ("///" if b in TWIN and shared else None)
 
 
 def sort_key(system):
     b = base(system)
     key = TWIN.get(b, b)
-    return (ORDER.index(key) if key in ORDER else 99, b in TWIN, system)
+    if b in SEQ:
+        return (0, SEQ.index(b), False, system)
+    return (1, ORDER.index(key) if key in ORDER else 99, b in TWIN, system)
 
 
 def model_title(rows, machine):
@@ -98,7 +106,7 @@ def setup(plt, th):
                          "hatch.color": th["bg"], "hatch.linewidth": 1.5})
 
 
-def bars(plt, rows, theme, out, title):
+def bars(plt, rows, theme, out, title, prefix="decode"):
     th = THEMES[theme]
     setup(plt, th)
     sel = [r for r in rows if r["ctx"] == 2048 and r["max_tokens"] == 256 and not r["thinking"]]
@@ -135,13 +143,13 @@ def bars(plt, rows, theme, out, title):
                bbox_to_anchor=(0.5, -0.02), labelcolor=th["ink"])
     fig.suptitle(title, x=0.01, ha="left", fontsize=12, color=th["ink"])
     fig.tight_layout(rect=(0, 0.1 + 0.04 * (len(labels) > 4), 1, 0.95))
-    p = os.path.join(out, f"decode_2k_{theme}.png")
+    p = os.path.join(out, f"{prefix}_2k_{theme}.png")
     fig.savefig(p, dpi=160)
     plt.close(fig)
     return p
 
 
-def lines(plt, rows, theme, out, title):
+def lines(plt, rows, theme, out, title, prefix="decode"):
     th = THEMES[theme]
     setup(plt, th)
     sel = [r for r in rows if r["mode"] == "greedy" and r["max_tokens"] == 256 and not r["thinking"]]
@@ -181,7 +189,7 @@ def lines(plt, rows, theme, out, title):
                bbox_to_anchor=(0.5, -0.02), labelcolor=th["ink"])
     fig.suptitle(title, x=0.01, ha="left", fontsize=12, color=th["ink"])
     fig.tight_layout(rect=(0, 0.1 + 0.04 * (len(labels) > 4), 1, 0.95))
-    p = os.path.join(out, f"decode_ctx_{theme}.png")
+    p = os.path.join(out, f"{prefix}_ctx_{theme}.png")
     fig.savefig(p, dpi=160)
     plt.close(fig)
     return p
@@ -194,6 +202,7 @@ def main():
     ap.add_argument("--themes", default="light,dark")
     ap.add_argument("--title", default="", help="default: '<model of the systems> decode on <machine>'")
     ap.add_argument("--machine", default="M1 Max 32 GB")
+    ap.add_argument("--prefix", default="decode", help="file names: <prefix>_2k_<theme>.png, <prefix>_ctx_<theme>.png")
     a = ap.parse_args()
     import matplotlib
     matplotlib.use("Agg")
@@ -202,8 +211,8 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     title = a.title or model_title(rows, a.machine)
     for theme in a.themes.split(","):
-        for p in (bars(plt, rows, theme, a.out, title + ", 2K context"),
-                  lines(plt, rows, theme, a.out, title + ", by context")):
+        for p in (bars(plt, rows, theme, a.out, title + ", 2K context", a.prefix),
+                  lines(plt, rows, theme, a.out, title + ", by context", a.prefix)):
             if p:
                 print("wrote", p)
 

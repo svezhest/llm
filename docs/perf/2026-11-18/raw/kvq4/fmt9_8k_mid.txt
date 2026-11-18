@@ -1,0 +1,174 @@
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+fast paths: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+emulated attention, vec (1 queries): fused+mask ON (rms rel err vs fp32 2.09e-04; query blocks 2.09e-04)
+emulated attention, full (128 queries): fused+mask ON (rms rel err vs fp32 2.07e-04; query blocks 5.28e-04)
+loaded $WEIGHTS/ornith15-9b-mlx-8bit in 3.2 s, active 8.86 GiB; FA layers [3, 7, 11, 15, 19, 23, 27, 31], 4 kv heads x 256, fp16 KV 32 KiB/token
+text code: 8192 + 64 tokens
+  fp16: prefill 8192 in 16.5 s (4 slabs), decode 64 in 1.8 s, peak 10.86 GiB
+  q8: prefill 8192 in 17.6 s (4 slabs), decode 64 in 2.2 s, peak 10.61 GiB, body 17.0 KiB/token
+  q8 vs fp16                         prefill        8192 pos  KL mean 0.000103  med 2.85e-05  p99 0.000737  p99.9 0.00409  max 0.0958  top-1 99.73%  dNLL -0.0002
+  q8 vs fp16                         pos 0K-1K      1024 pos  KL mean 4.24e-05  med 6.62e-06  p99 0.000385  p99.9 0.00284  max 0.0035  top-1 99.90%  dNLL +0.0002
+  q8 vs fp16                         pos 1K-2K      1024 pos  KL mean 4.39e-05  med 6.11e-06  p99 0.000442  p99.9 0.00194  max 0.00245  top-1 99.80%  dNLL +0.0002
+  q8 vs fp16                         pos 2K-4K      2048 pos  KL mean 6.15e-05  med 1.65e-05  p99 0.000532  p99.9 0.000886  max 0.00735  top-1 99.90%  dNLL -0.0002
+  q8 vs fp16                         pos 4K-8K      4096 pos  KL mean 0.000153  med 4.99e-05  p99 0.00109  p99.9 0.00545  max 0.0958  top-1 99.58%  dNLL -0.0004
+  q8 vs fp16                         decode           64 pos  KL mean 0.000169  med 0.000112  p99 0.000869  p99.9 0.0011  max 0.00113  top-1 100.00%  dNLL +0.0000
+  [1/9] q8: 25 s, about 3 min left for this text
+  q6: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.2 s, peak 10.61 GiB, body 13.0 KiB/token
+  q6 vs fp16                         prefill        8192 pos  KL mean 0.00193  med 0.00029  p99 0.0097  p99.9 0.0694  max 7.22  top-1 98.57%  dNLL -0.0006
+  q6 vs fp16                         pos 0K-1K      1024 pos  KL mean 0.000449  med 7.06e-05  p99 0.004  p99.9 0.0141  max 0.0203  top-1 99.51%  dNLL +0.0012
+  q6 vs fp16                         pos 1K-2K      1024 pos  KL mean 0.000509  med 8.4e-05  p99 0.00509  p99.9 0.0135  max 0.0145  top-1 99.32%  dNLL +0.0004
+  q6 vs fp16                         pos 2K-4K      2048 pos  KL mean 0.000737  med 0.000183  p99 0.00714  p99.9 0.0283  max 0.1  top-1 99.02%  dNLL -0.0003
+  q6 vs fp16                         pos 4K-8K      4096 pos  KL mean 0.00326  med 0.000565  p99 0.0147  p99.9 0.0876  max 7.22  top-1 97.92%  dNLL -0.0014
+  q6 vs fp16                         decode           64 pos  KL mean 0.00172  med 0.00118  p99 0.00672  p99.9 0.00749  max 0.00758  top-1 96.88%  dNLL +0.0002
+  [2/9] q6: 25 s, about 3 min left for this text
+  q6+tail1024+pf: prefill 8192 in 17.9 s (4 slabs), decode 64 in 2.5 s, peak 10.62 GiB, body 13.0 KiB/token
+  q6+tail1024+pf vs fp16             prefill        8192 pos  KL mean 0.000258  med 1.33e-05  p99 0.00121  p99.9 0.00675  max 0.797  top-1 99.60%  dNLL -0.0010
+  q6+tail1024+pf vs fp16             pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+tail1024+pf vs fp16             pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+tail1024+pf vs fp16             pos 2K-4K      2048 pos  KL mean 8.12e-05  med 1.88e-05  p99 0.000833  p99.9 0.00264  max 0.00657  top-1 99.85%  dNLL -0.0006
+  q6+tail1024+pf vs fp16             pos 4K-8K      4096 pos  KL mean 0.000476  med 7.45e-05  p99 0.00173  p99.9 0.0297  max 0.797  top-1 99.27%  dNLL -0.0018
+  q6+tail1024+pf vs fp16             decode           64 pos  KL mean 0.000235  med 0.000151  p99 0.00108  p99.9 0.00113  max 0.00114  top-1 100.00%  dNLL -0.0016
+  [3/9] q6+tail1024+pf: 25 s, about 3 min left for this text
+  q6+rot+tail1024+pf: prefill 8192 in 17.8 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 13.0 KiB/token
+  q6+rot+tail1024+pf vs fp16         prefill        8192 pos  KL mean 0.000108  med 8.92e-06  p99 0.000976  p99.9 0.00334  max 0.146  top-1 99.69%  dNLL +0.0003
+  q6+rot+tail1024+pf vs fp16         pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+rot+tail1024+pf vs fp16         pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+rot+tail1024+pf vs fp16         pos 2K-4K      2048 pos  KL mean 5.16e-05  med 1.28e-05  p99 0.000471  p99.9 0.00123  max 0.0053  top-1 99.85%  dNLL -0.0001
+  q6+rot+tail1024+pf vs fp16         pos 4K-8K      4096 pos  KL mean 0.000189  med 5.08e-05  p99 0.00147  p99.9 0.00454  max 0.146  top-1 99.46%  dNLL +0.0007
+  q6+rot+tail1024+pf vs fp16         decode           64 pos  KL mean 0.000177  med 9.29e-05  p99 0.00108  p99.9 0.00145  max 0.00149  top-1 100.00%  dNLL +0.0050
+  [4/9] q6+rot+tail1024+pf: 25 s, about 2 min left for this text
+  q5+rot+tail1024+pf: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.8 s, peak 10.65 GiB, body 11.0 KiB/token
+  q5+rot+tail1024+pf vs fp16         prefill        8192 pos  KL mean 0.000754  med 2.6e-05  p99 0.0029  p99.9 0.011  max 3.73  top-1 99.46%  dNLL -0.0010
+  q5+rot+tail1024+pf vs fp16         pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q5+rot+tail1024+pf vs fp16         pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q5+rot+tail1024+pf vs fp16         pos 2K-4K      2048 pos  KL mean 0.000159  med 3.24e-05  p99 0.00173  p99.9 0.0039  max 0.00468  top-1 99.66%  dNLL +0.0001
+  q5+rot+tail1024+pf vs fp16         pos 4K-8K      4096 pos  KL mean 0.00143  med 0.000152  p99 0.00414  p99.9 0.0314  max 3.73  top-1 99.10%  dNLL -0.0020
+  q5+rot+tail1024+pf vs fp16         decode           64 pos  KL mean 0.000625  med 0.000485  p99 0.00251  p99.9 0.00346  max 0.00356  top-1 100.00%  dNLL -0.0013
+  [5/9] q5+rot+tail1024+pf: 25 s, about 2 min left for this text
+  k8v6+rot+tail1024+pf: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 15.0 KiB/token
+  k8v6+rot+tail1024+pf vs fp16       prefill        8192 pos  KL mean 6.35e-05  med 4.66e-06  p99 0.000391  p99.9 0.0017  max 0.13  top-1 99.77%  dNLL +0.0004
+  k8v6+rot+tail1024+pf vs fp16       pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v6+rot+tail1024+pf vs fp16       pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v6+rot+tail1024+pf vs fp16       pos 2K-4K      2048 pos  KL mean 2.74e-05  med 7.55e-06  p99 0.000265  p99.9 0.000719  max 0.00175  top-1 99.90%  dNLL +0.0001
+  k8v6+rot+tail1024+pf vs fp16       pos 4K-8K      4096 pos  KL mean 0.000113  med 2.5e-05  p99 0.000566  p99.9 0.00444  max 0.13  top-1 99.58%  dNLL +0.0007
+  k8v6+rot+tail1024+pf vs fp16       decode           64 pos  KL mean 6.38e-05  med 3.91e-05  p99 0.000322  p99.9 0.000448  max 0.000462  top-1 100.00%  dNLL +0.0003
+  [6/9] k8v6+rot+tail1024+pf: 25 s, about 1 min left for this text
+  k6v4+rot+tail1024+pf: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 11.0 KiB/token
+  k6v4+rot+tail1024+pf vs fp16       prefill        8192 pos  KL mean 0.000548  med 2.7e-05  p99 0.00365  p99.9 0.0177  max 2.01  top-1 99.49%  dNLL -0.0006
+  k6v4+rot+tail1024+pf vs fp16       pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k6v4+rot+tail1024+pf vs fp16       pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k6v4+rot+tail1024+pf vs fp16       pos 2K-4K      2048 pos  KL mean 0.000203  med 3.64e-05  p99 0.00217  p99.9 0.00528  max 0.0106  top-1 99.71%  dNLL -0.0002
+  k6v4+rot+tail1024+pf vs fp16       pos 4K-8K      4096 pos  KL mean 0.000994  med 0.00014  p99 0.00559  p99.9 0.0304  max 2.01  top-1 99.12%  dNLL -0.0011
+  k6v4+rot+tail1024+pf vs fp16       decode           64 pos  KL mean 0.000722  med 0.000416  p99 0.00365  p99.9 0.00471  max 0.00483  top-1 100.00%  dNLL +0.0017
+  [7/9] k6v4+rot+tail1024+pf: 25 s, about 1 min left for this text
+  k8v4+rot+tail1024+pf: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 13.0 KiB/token
+  k8v4+rot+tail1024+pf vs fp16       prefill        8192 pos  KL mean 0.000496  med 2.28e-05  p99 0.00297  p99.9 0.0126  max 2.03  top-1 99.52%  dNLL -0.0005
+  k8v4+rot+tail1024+pf vs fp16       pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v4+rot+tail1024+pf vs fp16       pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v4+rot+tail1024+pf vs fp16       pos 2K-4K      2048 pos  KL mean 0.000181  med 3.02e-05  p99 0.00203  p99.9 0.00453  max 0.0114  top-1 99.80%  dNLL +0.0000
+  k8v4+rot+tail1024+pf vs fp16       pos 4K-8K      4096 pos  KL mean 0.000901  med 0.000116  p99 0.00452  p99.9 0.0233  max 2.03  top-1 99.15%  dNLL -0.0010
+  k8v4+rot+tail1024+pf vs fp16       decode           64 pos  KL mean 0.000583  med 0.000316  p99 0.00305  p99.9 0.00321  max 0.00323  top-1 100.00%  dNLL +0.0034
+  [8/9] k8v4+rot+tail1024+pf: 25 s, about 0 min left for this text
+  q8+tail1024+pf: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.3 s, peak 10.63 GiB, body 17.0 KiB/token
+  q8+tail1024+pf vs fp16             prefill        8192 pos  KL mean 2.54e-05  med 3e-06  p99 0.000198  p99.9 0.000877  max 0.0169  top-1 99.89%  dNLL +0.0002
+  q8+tail1024+pf vs fp16             pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q8+tail1024+pf vs fp16             pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q8+tail1024+pf vs fp16             pos 2K-4K      2048 pos  KL mean 2.45e-05  med 5.11e-06  p99 0.000207  p99.9 0.000739  max 0.00607  top-1 99.90%  dNLL +0.0000
+  q8+tail1024+pf vs fp16             pos 4K-8K      4096 pos  KL mean 3.86e-05  med 1.82e-05  p99 0.000267  p99.9 0.00216  max 0.0169  top-1 99.83%  dNLL +0.0004
+  q8+tail1024+pf vs fp16             decode           64 pos  KL mean 3.62e-05  med 3.54e-05  p99 0.000104  p99.9 0.000113  max 0.000114  top-1 100.00%  dNLL +0.0002
+  [9/9] q8+tail1024+pf: 25 s, about 0 min left for this text
+verdict (code, prefill positions; baseline q8: KL mean 0.000103, p99 0.000737): PASS = mean and p99 <= 2x baseline, top-1 >= 99.5 %
+  PASS  q8                                 mean x  1.00  p99 x  1.00  top-1 99.73%  body 17.0 KiB/token
+  fail  q6                                 mean x 18.83  p99 x 13.16  top-1 98.57%  body 13.0 KiB/token
+  fail  q6+tail1024+pf                     mean x  2.52  p99 x  1.64  top-1 99.60%  body 13.0 KiB/token
+  PASS  q6+rot+tail1024+pf                 mean x  1.05  p99 x  1.32  top-1 99.69%  body 13.0 KiB/token
+  fail  q5+rot+tail1024+pf                 mean x  7.35  p99 x  3.93  top-1 99.46%  body 11.0 KiB/token
+  PASS  k8v6+rot+tail1024+pf               mean x  0.62  p99 x  0.53  top-1 99.77%  body 15.0 KiB/token
+  fail  k6v4+rot+tail1024+pf               mean x  5.34  p99 x  4.95  top-1 99.49%  body 11.0 KiB/token
+  fail  k8v4+rot+tail1024+pf               mean x  4.83  p99 x  4.03  top-1 99.52%  body 13.0 KiB/token
+  PASS  q8+tail1024+pf                     mean x  0.25  p99 x  0.27  top-1 99.89%  body 17.0 KiB/token
+text en: 8192 + 64 tokens
+  fp16: prefill 8192 in 16.5 s (4 slabs), decode 64 in 1.8 s, peak 10.86 GiB
+  q8: prefill 8192 in 17.2 s (4 slabs), decode 64 in 2.3 s, peak 10.61 GiB, body 17.0 KiB/token
+  q8 vs fp16                         prefill        8192 pos  KL mean 0.000264  med 5.85e-05  p99 0.00159  p99.9 0.0248  max 0.308  top-1 99.58%  dNLL -0.0000
+  q8 vs fp16                         pos 0K-1K      1024 pos  KL mean 0.000133  med 4.56e-05  p99 0.00142  p99.9 0.00811  max 0.02  top-1 99.80%  dNLL -0.0000
+  q8 vs fp16                         pos 1K-2K      1024 pos  KL mean 0.00027  med 5.23e-05  p99 0.00302  p99.9 0.0297  max 0.0437  top-1 99.71%  dNLL -0.0031
+  q8 vs fp16                         pos 2K-4K      2048 pos  KL mean 0.000394  med 5.76e-05  p99 0.00252  p99.9 0.0446  max 0.308  top-1 99.56%  dNLL -0.0009
+  q8 vs fp16                         pos 4K-8K      4096 pos  KL mean 0.00023  med 6.54e-05  p99 0.00136  p99.9 0.0182  max 0.234  top-1 99.51%  dNLL +0.0012
+  q8 vs fp16                         decode           64 pos  KL mean 0.000142  med 7.75e-05  p99 0.00127  p99.9 0.00256  max 0.00271  top-1 100.00%  dNLL -0.0065
+  [1/9] q8: 24 s, about 3 min left for this text
+  q6: prefill 8192 in 17.4 s (4 slabs), decode 64 in 2.3 s, peak 10.61 GiB, body 13.0 KiB/token
+  q6 vs fp16                         prefill        8192 pos  KL mean 0.00507  med 0.00065  p99 0.0269  p99.9 0.469  max 7.55  top-1 98.16%  dNLL +0.0011
+  q6 vs fp16                         pos 0K-1K      1024 pos  KL mean 0.0017  med 0.000479  p99 0.0151  p99.9 0.0894  max 0.243  top-1 97.66%  dNLL -0.0003
+  q6 vs fp16                         pos 1K-2K      1024 pos  KL mean 0.00302  med 0.000612  p99 0.066  p99.9 0.165  max 0.477  top-1 99.02%  dNLL +0.0030
+  q6 vs fp16                         pos 2K-4K      2048 pos  KL mean 0.00917  med 0.000659  p99 0.0355  p99.9 0.957  max 7.55  top-1 98.14%  dNLL +0.0037
+  q6 vs fp16                         pos 4K-8K      4096 pos  KL mean 0.00437  med 0.000707  p99 0.0204  p99.9 0.151  max 6.81  top-1 98.07%  dNLL -0.0003
+  q6 vs fp16                         decode           64 pos  KL mean 0.00243  med 0.000775  p99 0.0287  p99.9 0.0538  max 0.0566  top-1 98.44%  dNLL +0.0416
+  [2/9] q6: 25 s, about 3 min left for this text
+  q6+tail1024+pf: prefill 8192 in 17.7 s (4 slabs), decode 64 in 2.5 s, peak 10.62 GiB, body 13.0 KiB/token
+  q6+tail1024+pf vs fp16             prefill        8192 pos  KL mean 0.000793  med 4.28e-05  p99 0.00352  p99.9 0.0857  max 2.32  top-1 99.50%  dNLL -0.0009
+  q6+tail1024+pf vs fp16             pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+tail1024+pf vs fp16             pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+tail1024+pf vs fp16             pos 2K-4K      2048 pos  KL mean 0.000965  med 6.17e-05  p99 0.00762  p99.9 0.153  max 0.501  top-1 99.66%  dNLL -0.0033
+  q6+tail1024+pf vs fp16             pos 4K-8K      4096 pos  KL mean 0.0011  med 0.000119  p99 0.00392  p99.9 0.0637  max 2.32  top-1 99.17%  dNLL -0.0001
+  q6+tail1024+pf vs fp16             decode           64 pos  KL mean 0.000162  med 0.000102  p99 0.00108  p99.9 0.00119  max 0.0012  top-1 100.00%  dNLL -0.0038
+  [3/9] q6+tail1024+pf: 25 s, about 2 min left for this text
+  q6+rot+tail1024+pf: prefill 8192 in 17.8 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 13.0 KiB/token
+  q6+rot+tail1024+pf vs fp16         prefill        8192 pos  KL mean 0.000299  med 2.98e-05  p99 0.00212  p99.9 0.041  max 0.338  top-1 99.63%  dNLL +0.0006
+  q6+rot+tail1024+pf vs fp16         pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+rot+tail1024+pf vs fp16         pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q6+rot+tail1024+pf vs fp16         pos 2K-4K      2048 pos  KL mean 0.000392  med 4.17e-05  p99 0.00376  p99.9 0.0607  max 0.16  top-1 99.61%  dNLL -0.0002
+  q6+rot+tail1024+pf vs fp16         pos 4K-8K      4096 pos  KL mean 0.000403  med 7.94e-05  p99 0.00246  p99.9 0.0315  max 0.338  top-1 99.46%  dNLL +0.0013
+  q6+rot+tail1024+pf vs fp16         decode           64 pos  KL mean 0.000105  med 6.37e-05  p99 0.00077  p99.9 0.0011  max 0.00114  top-1 100.00%  dNLL +0.0010
+  [4/9] q6+rot+tail1024+pf: 25 s, about 2 min left for this text
+  q5+rot+tail1024+pf: prefill 8192 in 17.8 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 11.0 KiB/token
+  q5+rot+tail1024+pf vs fp16         prefill        8192 pos  KL mean 0.0024  med 8.62e-05  p99 0.00875  p99.9 0.3  max 8.6  top-1 99.22%  dNLL +0.0013
+  q5+rot+tail1024+pf vs fp16         pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q5+rot+tail1024+pf vs fp16         pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q5+rot+tail1024+pf vs fp16         pos 2K-4K      2048 pos  KL mean 0.00154  med 0.000101  p99 0.00972  p99.9 0.261  max 0.762  top-1 99.17%  dNLL -0.0022
+  q5+rot+tail1024+pf vs fp16         pos 4K-8K      4096 pos  KL mean 0.00404  med 0.000293  p99 0.0119  p99.9 0.606  max 8.6  top-1 98.85%  dNLL +0.0036
+  q5+rot+tail1024+pf vs fp16         decode           64 pos  KL mean 0.0005  med 0.000228  p99 0.00386  p99.9 0.00621  max 0.00648  top-1 100.00%  dNLL -0.0027
+  [5/9] q5+rot+tail1024+pf: 25 s, about 2 min left for this text
+  k8v6+rot+tail1024+pf: prefill 8192 in 17.9 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 15.0 KiB/token
+  k8v6+rot+tail1024+pf vs fp16       prefill        8192 pos  KL mean 0.000162  med 1.51e-05  p99 0.000775  p99.9 0.0174  max 0.148  top-1 99.69%  dNLL -0.0004
+  k8v6+rot+tail1024+pf vs fp16       pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v6+rot+tail1024+pf vs fp16       pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v6+rot+tail1024+pf vs fp16       pos 2K-4K      2048 pos  KL mean 0.000268  med 2.3e-05  p99 0.00155  p99.9 0.0485  max 0.148  top-1 99.56%  dNLL -0.0011
+  k8v6+rot+tail1024+pf vs fp16       pos 4K-8K      4096 pos  KL mean 0.00019  med 3.98e-05  p99 0.00103  p99.9 0.017  max 0.147  top-1 99.61%  dNLL -0.0003
+  k8v6+rot+tail1024+pf vs fp16       decode           64 pos  KL mean 4.02e-05  med 3.2e-05  p99 0.000167  p99.9 0.000169  max 0.000169  top-1 100.00%  dNLL -0.0001
+  [6/9] k8v6+rot+tail1024+pf: 25 s, about 1 min left for this text
+  k6v4+rot+tail1024+pf: prefill 8192 in 17.8 s (4 slabs), decode 64 in 2.6 s, peak 10.65 GiB, body 11.0 KiB/token
+  k6v4+rot+tail1024+pf vs fp16       prefill        8192 pos  KL mean 0.00403  med 9.87e-05  p99 0.0102  p99.9 0.526  max 6.5  top-1 99.11%  dNLL +0.0037
+  k6v4+rot+tail1024+pf vs fp16       pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k6v4+rot+tail1024+pf vs fp16       pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k6v4+rot+tail1024+pf vs fp16       pos 2K-4K      2048 pos  KL mean 0.00516  med 0.000116  p99 0.0139  p99.9 1.31  max 4.22  top-1 99.02%  dNLL +0.0012
+  k6v4+rot+tail1024+pf vs fp16       pos 4K-8K      4096 pos  KL mean 0.00547  med 0.000351  p99 0.0125  p99.9 0.982  max 6.5  top-1 98.71%  dNLL +0.0067
+  k6v4+rot+tail1024+pf vs fp16       decode           64 pos  KL mean 0.000386  med 0.000218  p99 0.00206  p99.9 0.00214  max 0.00215  top-1 100.00%  dNLL -0.0018
+  [7/9] k6v4+rot+tail1024+pf: 25 s, about 1 min left for this text
+  k8v4+rot+tail1024+pf: prefill 8192 in 18.1 s (4 slabs), decode 64 in 2.8 s, peak 10.65 GiB, body 13.0 KiB/token
+  k8v4+rot+tail1024+pf vs fp16       prefill        8192 pos  KL mean 0.00266  med 8.42e-05  p99 0.00736  p99.9 0.385  max 3.33  top-1 99.10%  dNLL +0.0032
+  k8v4+rot+tail1024+pf vs fp16       pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v4+rot+tail1024+pf vs fp16       pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  k8v4+rot+tail1024+pf vs fp16       pos 2K-4K      2048 pos  KL mean 0.00413  med 9.74e-05  p99 0.00699  p99.9 1.41  max 2.13  top-1 99.12%  dNLL -0.0004
+  k8v4+rot+tail1024+pf vs fp16       pos 4K-8K      4096 pos  KL mean 0.00325  med 0.000322  p99 0.0102  p99.9 0.317  max 3.33  top-1 98.63%  dNLL +0.0066
+  k8v4+rot+tail1024+pf vs fp16       decode           64 pos  KL mean 0.000305  med 0.000188  p99 0.00148  p99.9 0.00219  max 0.00227  top-1 100.00%  dNLL +0.0015
+  [8/9] k8v4+rot+tail1024+pf: 26 s, about 0 min left for this text
+  q8+tail1024+pf: prefill 8192 in 18.5 s (4 slabs), decode 64 in 2.4 s, peak 10.63 GiB, body 17.0 KiB/token
+  q8+tail1024+pf vs fp16             prefill        8192 pos  KL mean 7.07e-05  med 1.02e-05  p99 0.000369  p99.9 0.00879  max 0.0853  top-1 99.74%  dNLL +0.0002
+  q8+tail1024+pf vs fp16             pos 0K-1K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q8+tail1024+pf vs fp16             pos 1K-2K      1024 pos  KL mean 0  med 0  p99 0  p99.9 0  max 0  top-1 100.00%  dNLL +0.0000
+  q8+tail1024+pf vs fp16             pos 2K-4K      2048 pos  KL mean 0.000124  med 2.06e-05  p99 0.000571  p99.9 0.0193  max 0.0639  top-1 99.76%  dNLL -0.0000
+  q8+tail1024+pf vs fp16             pos 4K-8K      4096 pos  KL mean 7.95e-05  med 2.64e-05  p99 0.000457  p99.9 0.00285  max 0.0853  top-1 99.61%  dNLL +0.0005
+  q8+tail1024+pf vs fp16             decode           64 pos  KL mean 3.7e-05  med 2.87e-05  p99 0.000185  p99.9 0.000233  max 0.000238  top-1 100.00%  dNLL -0.0005
+  [9/9] q8+tail1024+pf: 26 s, about 0 min left for this text
+verdict (en, prefill positions; baseline q8: KL mean 0.000264, p99 0.00159): PASS = mean and p99 <= 2x baseline, top-1 >= 99.5 %
+  PASS  q8                                 mean x  1.00  p99 x  1.00  top-1 99.58%  body 17.0 KiB/token
+  fail  q6                                 mean x 19.21  p99 x 16.95  top-1 98.16%  body 13.0 KiB/token
+  fail  q6+tail1024+pf                     mean x  3.01  p99 x  2.22  top-1 99.50%  body 13.0 KiB/token
+  PASS  q6+rot+tail1024+pf                 mean x  1.13  p99 x  1.34  top-1 99.63%  body 13.0 KiB/token
+  fail  q5+rot+tail1024+pf                 mean x  9.11  p99 x  5.51  top-1 99.22%  body 11.0 KiB/token
+  PASS  k8v6+rot+tail1024+pf               mean x  0.61  p99 x  0.49  top-1 99.69%  body 15.0 KiB/token
+  fail  k6v4+rot+tail1024+pf               mean x 15.26  p99 x  6.40  top-1 99.11%  body 11.0 KiB/token
+  fail  k8v4+rot+tail1024+pf               mean x 10.08  p99 x  4.63  top-1 99.10%  body 13.0 KiB/token
+  PASS  q8+tail1024+pf                     mean x  0.27  p99 x  0.23  top-1 99.74%  body 17.0 KiB/token
+done in 8.2 min

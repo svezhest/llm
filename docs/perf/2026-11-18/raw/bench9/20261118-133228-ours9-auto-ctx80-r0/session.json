@@ -1,0 +1,1291 @@
+{
+ "session": "20261118-133228-ours9-auto-ctx80-r0",
+ "system": "ours9-auto",
+ "plan": "ctx80",
+ "tag": "r0",
+ "set": {},
+ "env_overrides": {
+  "QWEN_DRAFT_DFLASH": "$WEIGHTS/_staging/ornith15-9b-dflash",
+  "QWEN_DRAFT_MTP": "$WEIGHTS/_staging/ornith15-9b-mtp-q8"
+ },
+ "code": "$CODE",
+ "started": "2026-11-18T13:32:28",
+ "status": "ok",
+ "preflight": {
+  "model_processes": [],
+  "nice": 0,
+  "wired_limit_mb": "27648",
+  "powermode": [
+   "powermode            2"
+  ],
+  "power_source": [
+   "Now drawing from 'AC Power'"
+  ],
+  "memory_pressure": [
+   "System-wide memory free percentage: 84%"
+  ],
+  "vm_stat": [
+   "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+   "Pages free:                                   596231.",
+   "Pages active:                                 279565.",
+   "Pages inactive:                               839952.",
+   "Pages speculative:                             11577.",
+   "Pages throttled:                                   0."
+  ],
+  "loadavg": [
+   0.73828125,
+   0.7509765625,
+   0.87451171875
+  ]
+ },
+ "versions": {
+  "mlx/mlx_vlm": "0.32.3 0.7.6",
+  "llama.cpp": [
+   "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "built with AppleClang 21.0.0.21000401 for Darwin arm64"
+  ],
+  "code_commit": "2df454b03f444f865404fcec1ac6e83bc54516dc",
+  "code_dirty": false,
+  "bench_commit": "f4e9ae1db8f00c69c49583da071601a3a8526abe",
+  "gpu_cores": "\"gpu-core-count\" = 32",
+  "chip": "Apple M1 Max"
+ },
+ "probe": {
+  "sum_gbs": 337.8,
+  "copy_gbs": 359.9,
+  "sum_max": 351.3,
+  "sum_min": 100.4,
+  "n": 3258,
+  "seconds": 30.0,
+  "gib": 1.0,
+  "mlx": "0.32.3",
+  "device": "Device(gpu, 0)",
+  "time": "2026-11-18T13:34:29"
+ },
+ "sys_used_before_gib": 13.836,
+ "procs": [
+  {
+   "name": "worker",
+   "argv": [
+    "$CODE/src/worker/.venv/bin/python",
+    "worker.py",
+    "--addr",
+    "127.0.0.1:9095",
+    "--model",
+    "$WEIGHTS/ornith15-9b-mlx-8bit"
+   ],
+   "env": {
+    "QWEN_KV_BITS": "0",
+    "QWEN_MAX_BATCH": "1",
+    "QWEN_MAX_CONTEXT": "131072",
+    "QWEN_PROMPT_CACHE": "1",
+    "QWEN_PROMPT_CACHE_GB": "4",
+    "QWEN_PROMPT_CACHE_REPLY": "0",
+    "QWEN_PRESENCE_PENALTY": "0",
+    "LOG_LEVEL": "INFO",
+    "QWEN_MODEL": "$WEIGHTS/ornith15-9b-mlx-8bit",
+    "QWEN_DRAFT": "auto",
+    "QWEN_DRAFT_DFLASH": "$WEIGHTS/_staging/ornith15-9b-dflash",
+    "QWEN_DRAFT_MTP": "$WEIGHTS/_staging/ornith15-9b-mtp-q8"
+   },
+   "pid": 48188
+  },
+  {
+   "name": "gateway",
+   "argv": [
+    "$CODE/target/release/qwen-gateway"
+   ],
+   "env": {
+    "WORKER_ADDR": "127.0.0.1:9095",
+    "GATEWAY_ADDR": "127.0.0.1:8095",
+    "RUST_LOG": "info"
+   },
+   "pid": 48189
+  }
+ ],
+ "ready_s": 8.0,
+ "model": "ornith15-9b-mlx-8bit",
+ "plan_def": {
+  "rounds": 2,
+  "cells": [
+   {
+    "prompts": "code-80k-0",
+    "modes": [
+     "greedy"
+    ],
+    "max_tokens": 256,
+    "turn2": true,
+    "turn2_max_tokens": 32
+   }
+  ]
+ },
+ "manifest_commit": "7437e623f186e4ecf85d595386d94d0543fd312a",
+ "results": [
+  {
+   "status": 200,
+   "error": null,
+   "finish": "stop",
+   "completion_tokens": 5,
+   "prompt_tokens": 18,
+   "cached_tokens": 0,
+   "n_chunks": 3,
+   "timings": null,
+   "chars": 23,
+   "reasoning_chars": 0,
+   "ttft_s": 1.0126,
+   "t_last_s": 1.1068,
+   "decode_s": 0.0942,
+   "decode_tps_raw": 42.465,
+   "first_chunk_tokens": 2,
+   "decode_tps": 31.848,
+   "decode_tps_stop_adj": 21.232,
+   "tokens_per_chunk": 1.667,
+   "decode_tps_chunks": 21.232,
+   "prefill_tps": 17.78,
+   "gap_ms": {
+    "p50": 48.29,
+    "p90": 48.29,
+    "max": 48.29
+   },
+   "arrivals_ms": [
+    0.0,
+    45.9,
+    94.2
+   ],
+   "chunk_chars": [
+    6,
+    10,
+    7
+   ],
+   "kind": "warmup"
+  },
+  {
+   "kind": "cell",
+   "system": "ours9-auto",
+   "prompt": "code-80k-0",
+   "cls": "code",
+   "ctx": 81920,
+   "thinking": false,
+   "expected_prompt_tokens": 81919,
+   "mode": "greedy",
+   "max_tokens": 256,
+   "round": 0,
+   "tag": "00",
+   "seed": 253198640,
+   "status": 200,
+   "error": null,
+   "finish": "length",
+   "completion_tokens": 256,
+   "prompt_tokens": 81919,
+   "cached_tokens": 0,
+   "n_chunks": 97,
+   "timings": null,
+   "chars": 756,
+   "reasoning_chars": 0,
+   "ttft_s": 239.9422,
+   "t_last_s": 244.6328,
+   "decode_s": 4.6906,
+   "decode_tps_raw": 54.364,
+   "first_chunk_tokens": 1,
+   "decode_tps": 54.364,
+   "decode_tps_stop_adj": 54.364,
+   "tokens_per_chunk": 2.639,
+   "decode_tps_chunks": 20.466,
+   "prefill_tps": 341.41,
+   "gap_ms": {
+    "p50": 0.81,
+    "p90": 116.78,
+    "max": 580.13
+   },
+   "arrivals_ms": [
+    0.0,
+    69.4,
+    69.5,
+    140.0,
+    140.1,
+    222.2,
+    223.6,
+    223.7,
+    340.4,
+    411.2,
+    411.3,
+    411.4,
+    479.3,
+    684.1,
+    684.2,
+    684.3,
+    684.3,
+    684.3,
+    754.2,
+    754.3,
+    822.3,
+    822.5,
+    822.5,
+    895.8,
+    967.3,
+    1039.4,
+    1040.2,
+    1041.2,
+    1110.8,
+    1184.2,
+    1185.0,
+    1460.9,
+    1461.2,
+    1461.3,
+    2041.5,
+    2049.0,
+    2319.7,
+    2391.2,
+    2392.2,
+    2612.1,
+    2613.9,
+    2833.4,
+    2834.2,
+    2909.3,
+    2916.4,
+    3278.2,
+    3278.3,
+    3348.2,
+    3348.3,
+    3348.3,
+    3348.4,
+    3418.2,
+    3418.2,
+    3486.5,
+    3486.6,
+    3487.0,
+    3487.1,
+    3703.8,
+    3704.8,
+    3705.4,
+    3705.9,
+    3706.2,
+    3706.5,
+    3776.5,
+    3777.1,
+    3847.9,
+    3848.6,
+    3849.1,
+    3849.5,
+    3850.0,
+    3917.0,
+    3917.1,
+    3917.3,
+    3917.5,
+    3917.6,
+    4001.4,
+    4001.5,
+    4070.9,
+    4071.0,
+    4071.1,
+    4144.5,
+    4145.6,
+    4216.6,
+    4363.4,
+    4364.1,
+    4364.8,
+    4365.1,
+    4365.8,
+    4435.2,
+    4435.6,
+    4435.9,
+    4515.6,
+    4516.2,
+    4587.6,
+    4658.5,
+    4658.6,
+    4690.6
+   ],
+   "chunk_chars": [
+    1,
+    9,
+    9,
+    15,
+    2,
+    9,
+    5,
+    7,
+    9,
+    9,
+    8,
+    5,
+    24,
+    25,
+    5,
+    3,
+    6,
+    3,
+    9,
+    3,
+    9,
+    9,
+    7,
+    5,
+    6,
+    10,
+    5,
+    3,
+    4,
+    28,
+    3,
+    7,
+    3,
+    4,
+    34,
+    3,
+    8,
+    1,
+    2,
+    10,
+    2,
+    11,
+    2,
+    9,
+    2,
+    7,
+    2,
+    7,
+    3,
+    5,
+    3,
+    3,
+    4,
+    21,
+    7,
+    7,
+    6,
+    21,
+    5,
+    3,
+    2,
+    8,
+    4,
+    29,
+    5,
+    3,
+    9,
+    2,
+    18,
+    3,
+    3,
+    4,
+    11,
+    7,
+    6,
+    18,
+    9,
+    10,
+    5,
+    3,
+    6,
+    7,
+    7,
+    18,
+    3,
+    7,
+    10,
+    3,
+    4,
+    7,
+    6,
+    21,
+    9,
+    10,
+    15,
+    5,
+    2
+   ],
+   "text": "# ISO-8601 Duration Parser\n\nHere's a function that parses ISO-8601 duration strings into seconds:\n\n```python\ndef parse_duration(duration: str) -> int:\n    \"\"\"Parse an ISO-8601 duration string into total seconds.\n    \n    >>> parse_duration('P3DT4H5M')\n    13830\n    >>> parse_duration('P1Y2M10DT2H30M')\n    8640000  # 365*86400 + 2*30*86400 + 10*86400 + 2*3600 + 30*60\n    \"\"\"\n    if not isinstance(duration, str):\n        raise TypeError(f\"duration must be a string, got {type(duration).__name__}\")\n    \n    duration = duration.strip()\n    if not duration:\n        raise ValueError(\"empty duration string\")\n    \n    try:\n        return _parse(duration)\n    except Exception as e:\n        raise ValueError(f\"invalid ISO-8601 duration: {duration!r}\") from e",
+   "reasoning": ""
+  },
+  {
+   "kind": "turn2",
+   "system": "ours9-auto",
+   "prompt": "code-80k-0",
+   "cls": "code",
+   "ctx": 81920,
+   "mode": "greedy",
+   "round": 0,
+   "tag": "00",
+   "status": 200,
+   "error": null,
+   "finish": "length",
+   "completion_tokens": 32,
+   "prompt_tokens": 82205,
+   "cached_tokens": 81873,
+   "n_chunks": 18,
+   "timings": null,
+   "chars": 161,
+   "reasoning_chars": 0,
+   "ttft_s": 1.9946,
+   "t_last_s": 2.7669,
+   "decode_s": 0.7723,
+   "decode_tps_raw": 40.138,
+   "first_chunk_tokens": 2,
+   "decode_tps": 38.844,
+   "decode_tps_stop_adj": 38.844,
+   "tokens_per_chunk": 1.778,
+   "decode_tps_chunks": 22.011,
+   "prefill_tps": 166.45,
+   "gap_ms": {
+    "p50": 47.47,
+    "p90": 131.04,
+    "max": 151.83
+   },
+   "arrivals_ms": [
+    0.0,
+    70.9,
+    134.6,
+    134.8,
+    134.8,
+    182.4,
+    182.4,
+    301.3,
+    301.5,
+    348.9,
+    349.0,
+    500.9,
+    566.8,
+    566.8,
+    697.8,
+    748.9,
+    772.3,
+    772.3
+   ],
+   "chunk_chars": [
+    6,
+    4,
+    9,
+    8,
+    5,
+    5,
+    7,
+    11,
+    4,
+    9,
+    6,
+    26,
+    11,
+    7,
+    17,
+    9,
+    7,
+    10
+   ],
+   "text": "Here's the improved version with type hints, docstring, and explicit error handling:\n\n```python\nfrom __future__ import annotations\nfrom datetime import timedelta"
+  },
+  {
+   "kind": "cell",
+   "system": "ours9-auto",
+   "prompt": "code-80k-0",
+   "cls": "code",
+   "ctx": 81920,
+   "thinking": false,
+   "expected_prompt_tokens": 81919,
+   "mode": "greedy",
+   "max_tokens": 256,
+   "round": 1,
+   "tag": "00",
+   "seed": 253198640,
+   "status": 200,
+   "error": null,
+   "finish": "length",
+   "completion_tokens": 256,
+   "prompt_tokens": 81919,
+   "cached_tokens": 81873,
+   "n_chunks": 97,
+   "timings": null,
+   "chars": 756,
+   "reasoning_chars": 0,
+   "ttft_s": 0.8796,
+   "t_last_s": 5.0392,
+   "decode_s": 4.1596,
+   "decode_tps_raw": 61.305,
+   "first_chunk_tokens": 1,
+   "decode_tps": 61.305,
+   "decode_tps_stop_adj": 61.305,
+   "tokens_per_chunk": 2.639,
+   "decode_tps_chunks": 23.079,
+   "prefill_tps": 52.3,
+   "gap_ms": {
+    "p50": 0.38,
+    "p90": 132.6,
+    "max": 463.59
+   },
+   "arrivals_ms": [
+    0.0,
+    65.8,
+    65.8,
+    133.0,
+    133.1,
+    199.0,
+    199.0,
+    199.1,
+    265.6,
+    265.6,
+    265.6,
+    332.5,
+    332.6,
+    532.8,
+    532.9,
+    532.9,
+    532.9,
+    533.0,
+    651.5,
+    651.5,
+    651.6,
+    701.3,
+    701.4,
+    769.1,
+    835.1,
+    901.1,
+    901.1,
+    901.1,
+    967.0,
+    1033.8,
+    1033.8,
+    1298.3,
+    1298.3,
+    1298.4,
+    1761.9,
+    1762.0,
+    2028.9,
+    2096.3,
+    2096.3,
+    2296.9,
+    2297.0,
+    2498.9,
+    2498.9,
+    2568.0,
+    2568.1,
+    2781.1,
+    2781.7,
+    2851.9,
+    2852.6,
+    2853.2,
+    2853.6,
+    2853.9,
+    2923.1,
+    2923.8,
+    2924.2,
+    2924.6,
+    2994.7,
+    3133.1,
+    3133.5,
+    3134.2,
+    3134.4,
+    3134.9,
+    3135.1,
+    3205.1,
+    3206.1,
+    3273.6,
+    3273.7,
+    3273.9,
+    3274.1,
+    3274.2,
+    3344.9,
+    3345.2,
+    3345.4,
+    3345.5,
+    3345.7,
+    3528.8,
+    3528.8,
+    3597.6,
+    3597.6,
+    3597.7,
+    3665.9,
+    3666.0,
+    3732.9,
+    3865.5,
+    3865.5,
+    3865.6,
+    3865.6,
+    3865.6,
+    3932.9,
+    3932.9,
+    3933.0,
+    4002.4,
+    4002.7,
+    4073.5,
+    4147.0,
+    4147.1,
+    4159.6
+   ],
+   "chunk_chars": [
+    1,
+    9,
+    9,
+    15,
+    2,
+    9,
+    5,
+    7,
+    9,
+    9,
+    8,
+    5,
+    24,
+    25,
+    5,
+    3,
+    6,
+    3,
+    9,
+    3,
+    9,
+    9,
+    7,
+    5,
+    6,
+    10,
+    5,
+    3,
+    4,
+    28,
+    3,
+    7,
+    3,
+    4,
+    34,
+    3,
+    8,
+    1,
+    2,
+    10,
+    2,
+    11,
+    2,
+    9,
+    2,
+    7,
+    2,
+    7,
+    3,
+    5,
+    3,
+    3,
+    4,
+    21,
+    7,
+    7,
+    6,
+    21,
+    5,
+    3,
+    2,
+    8,
+    4,
+    29,
+    5,
+    3,
+    9,
+    2,
+    18,
+    3,
+    3,
+    4,
+    11,
+    7,
+    6,
+    18,
+    9,
+    10,
+    5,
+    3,
+    6,
+    7,
+    7,
+    18,
+    3,
+    7,
+    10,
+    3,
+    4,
+    7,
+    6,
+    21,
+    9,
+    10,
+    15,
+    5,
+    2
+   ],
+   "text": "# ISO-8601 Duration Parser\n\nHere's a function that parses ISO-8601 duration strings into seconds:\n\n```python\ndef parse_duration(duration: str) -> int:\n    \"\"\"Parse an ISO-8601 duration string into total seconds.\n    \n    >>> parse_duration('P3DT4H5M')\n    13830\n    >>> parse_duration('P1Y2M10DT2H30M')\n    8640000  # 365*86400 + 2*30*86400 + 10*86400 + 2*3600 + 30*60\n    \"\"\"\n    if not isinstance(duration, str):\n        raise TypeError(f\"duration must be a string, got {type(duration).__name__}\")\n    \n    duration = duration.strip()\n    if not duration:\n        raise ValueError(\"empty duration string\")\n    \n    try:\n        return _parse(duration)\n    except Exception as e:\n        raise ValueError(f\"invalid ISO-8601 duration: {duration!r}\") from e",
+   "reasoning": ""
+  },
+  {
+   "kind": "turn2",
+   "system": "ours9-auto",
+   "prompt": "code-80k-0",
+   "cls": "code",
+   "ctx": 81920,
+   "mode": "greedy",
+   "round": 1,
+   "tag": "00",
+   "status": 200,
+   "error": null,
+   "finish": "length",
+   "completion_tokens": 32,
+   "prompt_tokens": 82205,
+   "cached_tokens": 82204,
+   "n_chunks": 18,
+   "timings": null,
+   "chars": 161,
+   "reasoning_chars": 0,
+   "ttft_s": 0.6202,
+   "t_last_s": 1.3999,
+   "decode_s": 0.7797,
+   "decode_tps_raw": 39.76,
+   "first_chunk_tokens": 2,
+   "decode_tps": 38.477,
+   "decode_tps_stop_adj": 38.477,
+   "tokens_per_chunk": 1.778,
+   "decode_tps_chunks": 21.804,
+   "prefill_tps": 1.61,
+   "gap_ms": {
+    "p50": 53.85,
+    "p90": 117.17,
+    "max": 132.48
+   },
+   "arrivals_ms": [
+    0.0,
+    70.7,
+    136.2,
+    137.2,
+    138.1,
+    196.4,
+    196.5,
+    329.0,
+    330.2,
+    384.9,
+    385.4,
+    498.9,
+    567.8,
+    568.0,
+    685.2,
+    739.0,
+    779.3,
+    779.7
+   ],
+   "chunk_chars": [
+    6,
+    4,
+    9,
+    8,
+    5,
+    5,
+    7,
+    11,
+    4,
+    9,
+    6,
+    26,
+    11,
+    7,
+    17,
+    9,
+    7,
+    10
+   ],
+   "text": "Here's the improved version with type hints, docstring, and explicit error handling:\n\n```python\nfrom __future__ import annotations\nfrom datetime import timedelta"
+  }
+ ],
+ "summary": [
+  {
+   "cls": "code",
+   "ctx": 81920,
+   "mode": "greedy",
+   "max_tokens": 256,
+   "thinking": false,
+   "n": 2,
+   "decode_tps_median": 57.83,
+   "min": 54.364,
+   "max": 61.305
+  }
+ ],
+ "memory": [
+  {
+   "peak_gib": 19.92,
+   "samples": 52,
+   "series": [
+    [
+     0.0,
+     0.009
+    ],
+    [
+     5.1,
+     12.521
+    ],
+    [
+     10.2,
+     11.747
+    ],
+    [
+     15.3,
+     12.703
+    ],
+    [
+     20.4,
+     13.343
+    ],
+    [
+     25.5,
+     14.011
+    ],
+    [
+     30.6,
+     13.644
+    ],
+    [
+     35.6,
+     14.315
+    ],
+    [
+     40.7,
+     15.032
+    ],
+    [
+     45.8,
+     16.229
+    ],
+    [
+     50.9,
+     14.386
+    ],
+    [
+     56.0,
+     16.353
+    ],
+    [
+     61.1,
+     13.417
+    ],
+    [
+     66.2,
+     15.655
+    ],
+    [
+     71.3,
+     15.97
+    ],
+    [
+     76.4,
+     14.065
+    ],
+    [
+     81.5,
+     14.085
+    ],
+    [
+     86.6,
+     15.919
+    ],
+    [
+     91.7,
+     15.827
+    ],
+    [
+     96.7,
+     15.706
+    ],
+    [
+     101.8,
+     15.39
+    ],
+    [
+     106.9,
+     16.28
+    ],
+    [
+     112.0,
+     16.359
+    ],
+    [
+     117.1,
+     16.119
+    ],
+    [
+     122.2,
+     15.656
+    ],
+    [
+     127.3,
+     15.182
+    ],
+    [
+     132.4,
+     17.072
+    ],
+    [
+     137.5,
+     16.598
+    ],
+    [
+     142.6,
+     16.108
+    ],
+    [
+     147.7,
+     15.578
+    ],
+    [
+     152.8,
+     17.568
+    ],
+    [
+     157.8,
+     16.769
+    ],
+    [
+     162.9,
+     16.209
+    ],
+    [
+     168.0,
+     18.25
+    ],
+    [
+     173.1,
+     17.429
+    ],
+    [
+     178.2,
+     16.495
+    ],
+    [
+     183.3,
+     18.63
+    ],
+    [
+     188.4,
+     17.762
+    ],
+    [
+     193.5,
+     16.781
+    ],
+    [
+     198.6,
+     18.693
+    ],
+    [
+     203.7,
+     17.704
+    ],
+    [
+     208.8,
+     16.668
+    ],
+    [
+     213.9,
+     18.659
+    ],
+    [
+     219.0,
+     17.615
+    ],
+    [
+     224.1,
+     19.631
+    ],
+    [
+     229.2,
+     18.593
+    ],
+    [
+     234.3,
+     17.122
+    ],
+    [
+     239.4,
+     19.23
+    ],
+    [
+     244.5,
+     18.35
+    ],
+    [
+     249.6,
+     19.92
+    ],
+    [
+     254.7,
+     18.822
+    ],
+    [
+     259.8,
+     18.342
+    ]
+   ],
+   "sys_used_peak_gib": 28.65,
+   "sys_series": [
+    [
+     0.0,
+     12.173
+    ],
+    [
+     5.1,
+     21.184
+    ],
+    [
+     10.1,
+     24.223
+    ],
+    [
+     15.2,
+     24.919
+    ],
+    [
+     20.3,
+     24.497
+    ],
+    [
+     25.4,
+     25.222
+    ],
+    [
+     30.5,
+     24.586
+    ],
+    [
+     35.6,
+     25.064
+    ],
+    [
+     40.6,
+     25.493
+    ],
+    [
+     45.7,
+     26.354
+    ],
+    [
+     50.8,
+     24.357
+    ],
+    [
+     55.9,
+     26.245
+    ],
+    [
+     61.0,
+     23.124
+    ],
+    [
+     66.1,
+     25.254
+    ],
+    [
+     71.2,
+     25.508
+    ],
+    [
+     76.3,
+     23.503
+    ],
+    [
+     81.4,
+     23.431
+    ],
+    [
+     86.5,
+     25.251
+    ],
+    [
+     91.6,
+     25.143
+    ],
+    [
+     96.7,
+     24.949
+    ],
+    [
+     101.8,
+     24.743
+    ],
+    [
+     106.8,
+     25.556
+    ],
+    [
+     111.9,
+     25.588
+    ],
+    [
+     117.0,
+     25.451
+    ],
+    [
+     122.1,
+     24.919
+    ],
+    [
+     127.2,
+     24.379
+    ],
+    [
+     132.3,
+     26.178
+    ],
+    [
+     137.4,
+     25.681
+    ],
+    [
+     142.5,
+     25.16
+    ],
+    [
+     147.6,
+     24.56
+    ],
+    [
+     152.7,
+     26.44
+    ],
+    [
+     157.8,
+     25.564
+    ],
+    [
+     162.9,
+     24.922
+    ],
+    [
+     168.0,
+     26.876
+    ],
+    [
+     173.0,
+     26.007
+    ],
+    [
+     178.1,
+     25.058
+    ],
+    [
+     183.2,
+     27.145
+    ],
+    [
+     188.3,
+     26.278
+    ],
+    [
+     193.4,
+     25.351
+    ],
+    [
+     198.5,
+     27.166
+    ],
+    [
+     203.6,
+     26.12
+    ],
+    [
+     208.7,
+     25.2
+    ],
+    [
+     213.8,
+     27.107
+    ],
+    [
+     218.9,
+     26.06
+    ],
+    [
+     224.0,
+     28.065
+    ],
+    [
+     229.1,
+     27.034
+    ],
+    [
+     234.2,
+     25.647
+    ],
+    [
+     239.3,
+     27.737
+    ],
+    [
+     244.4,
+     26.731
+    ],
+    [
+     249.5,
+     28.65
+    ],
+    [
+     254.6,
+     27.894
+    ],
+    [
+     259.7,
+     27.402
+    ]
+   ]
+  }
+ ],
+ "proc_exit": {
+  "worker": 0,
+  "gateway": 143
+ },
+ "server_stats": {
+  "worker_dflash_setup": [
+   "2026-11-18 13:34:33,730 INFO  qwen.worker dflash drafter loaded: $WEIGHTS/_staging/ornith15-9b-dflash (DFlashDraftModel 4-bit, activations as the weights, block adaptive, target layers [1, 5, 9, 13, 17, 21, 25, 29])",
+   "2026-11-18 13:34:36,395 INFO  qwen.worker DFlash through mrqmm (QWEN_VERIFY_MRQMM=1): verify blocks of 3..16 tokens + drafter lm_head (24 GDN layers fused), block 8"
+  ],
+  "worker_requests": [
+   {
+    "id": "chatcmpl-f2bead3bf48d41889f9ec76a428ea41c",
+    "finish": "stop",
+    "gen_tokens": 5,
+    "ttft_ms": 149,
+    "tps": 24.1,
+    "cached": 0,
+    "peak_gb": 11.06
+   },
+   {
+    "id": "chatcmpl-d247a1b3e17a4a3095f5e70b71f01f7c",
+    "finish": "length",
+    "gen_tokens": 256,
+    "ttft_ms": 239468,
+    "tps": 51.4,
+    "cached": 0,
+    "peak_gb": 19.34
+   },
+   {
+    "id": "chatcmpl-74e11a5b822c4ee782eb237dfdf64571",
+    "finish": "length",
+    "gen_tokens": 32,
+    "ttft_ms": 1599,
+    "tps": 33.1,
+    "cached": 81873,
+    "peak_gb": 19.06
+   },
+   {
+    "id": "chatcmpl-d4ddf4f613574d1897f904835df63685",
+    "finish": "length",
+    "gen_tokens": 256,
+    "ttft_ms": 540,
+    "tps": 58.9,
+    "cached": 81873,
+    "peak_gb": 17.62
+   },
+   {
+    "id": "chatcmpl-14b5dc83570a473280f321fca34bf643",
+    "finish": "length",
+    "gen_tokens": 32,
+    "ttft_ms": 206,
+    "tps": 31.4,
+    "cached": 82204,
+    "peak_gb": 17.1
+   }
+  ]
+ },
+ "finished": "2026-11-18T13:38:52"
+}

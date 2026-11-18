@@ -5,8 +5,10 @@ report, and the raw sessions copied into the repo without private paths (stdlib 
   tables  print every table (--h2: the 2K matrix, plan headline2; --ctx: plans ctx / ctx80)
   fill    replace the generated blocks of a report in place, each between
               <!-- report.py BLOCK -->  and  <!-- /report.py BLOCK -->
-          (blocks: setup tokens medians ratios cells warmup prefill ctx-decode ctx-ratios ctx-prefill);
+          (blocks: setup tokens medians ratios cells warmup prefill hits ctx-decode ctx-ratios ctx-prefill);
           a block whose data is missing keeps its text; prints the [[TODO ...]] left in the file
+  passes  one pass against others: per system, its session in --test against each of its sessions in --ref,
+          cell by cell (the same cell at the same position), geometric mean, min and max of the ratios
   raw     copy each listed session's session.json and the indexes to DEST, every absolute path
           of this machine replaced: a session's code tree -> $CODE, the weights -> $WEIGHTS, the
           main checkout -> $REPO, $PERF_OUT -> $PERF_OUT, home -> $HOME (+ --map PATH=NAME); writes
@@ -22,7 +24,9 @@ median over the class's prompts (aggregate.py and chart.py show the same; the ch
 round twice, so a label can read 0.1 below the table). Ratios are cell by cell: the median
 over sessions of one cell (same prompt, mode, position in the session) against the other
 system's, then the geometric mean over cells. Sessions an index marks off-probe are left
-out (as aggregate.py does) unless --keep-off-probe. A system's column name and role: SYSTEMS;
+out (as aggregate.py does) unless --keep-off-probe; --exclude SESSION leaves out one more
+session by name (repeatable; aggregate.py takes the same), e.g. a session whose system ran
+with a wrong setting. A system's column name and role: SYSTEMS;
 the ratio rows: PAIRS (by role).
 """
 from __future__ import annotations
@@ -60,11 +64,11 @@ ROLES = ["auto", "llama-mtp", "omlx-mtp", "plain", "mlx-vlm", "llama", "omlx", "
          "mlx-vlm-dflash", "omlx-dflash"]
 PAIRS = [("auto", "llama-mtp"), ("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama"), ("auto", "plain"),
          ("llama-mtp", "llama"), ("auto", "omlx-mtp"), ("plain", "omlx"), ("mtp", "omlx-mtp"), ("dflash", "omlx-dflash"),
-         ("omlx-mtp", "omlx")]
-PREFILL_PAIRS = [("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama-mtp"), ("plain", "omlx")]
+         ("omlx-mtp", "omlx"), ("auto", "mtp"), ("mtp", "llama-mtp")]
+PREFILL_PAIRS = [("plain", "llama"), ("plain", "mlx-vlm"), ("auto", "llama-mtp"), ("plain", "omlx"), ("plain", "auto")]
 CLS = {"code": "code", "en": "English", "ru": "Russian"}
 MODE = {"greedy": "greedy", "sample": "sampling"}
-BLOCKS = ["setup", "tokens", "medians", "ratios", "cells", "warmup", "prefill", "ctx-decode", "ctx-ratios",
+BLOCKS = ["setup", "tokens", "medians", "ratios", "cells", "warmup", "prefill", "hits", "ctx-decode", "ctx-ratios",
           "ctx-prefill"]
 
 
@@ -89,9 +93,10 @@ def secs(t):
 
 
 # --------------------------------------------------------------------------- loading
-def load(indexes, root="", keep_off=False):
-    """-> list of session dicts (each once, in index order) with "_index" set."""
-    out, seen = [], set()
+def load(indexes, root="", keep_off=False, exclude=()):
+    """-> list of session dicts (each once, in index order) with "_index" set; sessions named in
+    exclude are left out."""
+    out, seen = [], set(exclude)
     for ix in indexes:
         p = ix if os.path.isabs(ix) or not root else os.path.join(root, ix)
         idx = json.load(open(p))
@@ -277,7 +282,8 @@ def b_warmup(M, _):
                     v.setdefault(k, r["decode_tps"])
             vals = [v.get(M.order[i]) for i in pos]
             have = [y for y in vals if y]
-            drop = f"−{100 * (1 - have[-1] / have[0]):.0f} %" if len(have) > 1 else "–"
+            d = round(100 * (1 - have[-1] / have[0])) if len(have) > 1 else None
+            drop = "–" if d is None else f"−{d} %" if d > 0 else f"+{-d} %" if d < 0 else "0 %"
             rows.append([name(s), "ab"[j] if j < 2 else str(j + 1)]
                         + [f"{y:.1f}" if y else "–" for y in vals] + [drop])
     return table(["system", "session"] + [f"cell {i + 1} ({M.order[i][1]}"
@@ -325,6 +331,21 @@ def b_prefill(M, _):
         out += "\n\n" + table(["cold prefill speed (TTFT ratio, geometric mean, same cells and position)",
                                "session a / b"], prs)
     return out
+
+
+def b_hits(M, _):
+    """TTFT of the cells that hit the server's prompt cache (cached_tokens > 0: in headline2 the sampled
+    cell after the greedy one on the same prompt), per session."""
+    rows = []
+    for s in M.systems:
+        for j, m in enumerate(M.by_sys[s]):
+            t = sorted(r["ttft_s"] for r in m["results"] if r.get("kind") == "cell" and r.get("cached_tokens")
+                       and r.get("ttft_s") is not None)
+            rows.append([name(s), "ab"[j] if j < 2 else str(j + 1), str(len(t)),
+                         f"{t[0]:.2f} – {st.median(t):.2f} – {t[-1]:.2f}" if t else "– (no prompt cache)"])
+    if not rows:
+        return None
+    return table(["system", "session", "cells that hit the prompt cache", "TTFT s, min – median – max"], rows)
 
 
 # --------------------------------------------------------------------------- the long-context blocks
@@ -402,13 +423,13 @@ def b_ctx_prefill(_, C):
 
 
 FUNCS = {"setup": b_setup, "tokens": b_tokens, "medians": b_medians, "ratios": b_ratios, "cells": b_cells,
-         "warmup": b_warmup, "prefill": b_prefill, "ctx-decode": b_ctx_decode, "ctx-ratios": b_ctx_ratios,
+         "warmup": b_warmup, "prefill": b_prefill, "hits": b_hits, "ctx-decode": b_ctx_decode, "ctx-ratios": b_ctx_ratios,
          "ctx-prefill": b_ctx_prefill}
 
 
 def build(a):
-    M = Matrix(load(a.h2, a.root, a.keep_off_probe))
-    C = Matrix(load(a.ctx, a.root, a.keep_off_probe)) if a.ctx else None
+    M = Matrix(load(a.h2, a.root, a.keep_off_probe, a.exclude))
+    C = Matrix(load(a.ctx, a.root, a.keep_off_probe, a.exclude)) if a.ctx else None
     return {b: FUNCS[b](M, C) for b in BLOCKS}
 
 
@@ -429,6 +450,28 @@ def fill(path, blocks):
     print(f"{len(todo)} line(s) with [[TODO ...]] left in {path}")
     for ln in todo:
         print("  " + ln.strip()[:140])
+
+
+# --------------------------------------------------------------------------- passes
+def passes(a):
+    """Decode tok/s of one pass's sessions (--test) against the same systems' sessions in other passes
+    (--ref), cell by cell: how much slower or faster a whole pass ran."""
+    def cells(m):
+        return {(r["cls"], r["prompt"], r["mode"], r["max_tokens"]): r["decode_tps"] for r in m["results"]
+                if r.get("kind") == "cell" and r.get("decode_tps")}
+    test, ref = load(a.test, keep_off=True), load(a.ref, keep_off=True)
+    rows = []
+    for m in sorted(test, key=lambda m: (ROLES.index(role(m["system"])) if role(m["system"]) in ROLES else 99)):
+        ct = cells(m)
+        for o in [o for o in ref if o["system"] == m["system"] and o["plan"] == m["plan"]]:
+            co = cells(o)
+            v = [math.log(ct[k] / co[k]) for k in ct if k in co]
+            if v:
+                rows.append([name(m["system"]), m["session"][:15], f"{(m.get('probe') or {}).get('sum_gbs')}",
+                             o["session"][:15], f"{(o.get('probe') or {}).get('sum_gbs')}", str(len(v)),
+                             x(math.exp(sum(v) / len(v))), f"{math.exp(min(v)):.2f} – {math.exp(max(v)):.2f}"])
+    print(table(["system", "test session", "probe GB/s", "against", "probe GB/s", "cells", "test / ref",
+                 "min – max"], rows))
 
 
 # --------------------------------------------------------------------------- raw
@@ -510,6 +553,11 @@ def main():
         p.add_argument("--ctx", nargs="*", default=[], help="index-*.json of the long-context sessions")
         p.add_argument("--root", default="", help="where relative index paths live")
         p.add_argument("--keep-off-probe", action="store_true")
+        p.add_argument("--exclude", action="append", default=[], metavar="SESSION",
+                       help="leave out this session (its directory name); repeatable")
+    p = sub.add_parser("passes")
+    p.add_argument("--test", nargs="+", required=True, help="index-*.json of the pass under test")
+    p.add_argument("--ref", nargs="+", required=True, help="index-*.json of the passes to compare with")
     p = sub.add_parser("raw")
     p.add_argument("dest")
     p.add_argument("indexes", nargs="+")
@@ -517,6 +565,8 @@ def main():
     a = ap.parse_args()
     if a.cmd == "raw":
         return raw(a)
+    if a.cmd == "passes":
+        return passes(a)
     blocks = build(a)
     if a.cmd == "fill":
         return fill(a.report, blocks)

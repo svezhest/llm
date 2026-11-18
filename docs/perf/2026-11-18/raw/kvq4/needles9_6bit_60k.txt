@@ -1,0 +1,48 @@
+WARNING:root:Checkpoint has no weights for module(s): vision_tower. Disabling them.
+fast paths: {'sdpa_fused': True, 'gdn_fast': False, 'verify_exact_max_t': 8}
+emulated attention, vec (1 queries): fused+mask ON (rms rel err vs fp32 2.09e-04; query blocks 2.09e-04)
+emulated attention, full (128 queries): fused+mask ON (rms rel err vs fp32 2.07e-04; query blocks 5.28e-04)
+loaded $WEIGHTS/ornith15-9b-mlx-8bit in 2.5 s, active 8.86 GiB
+document with needles [0, 1, 2, 3, 4, 5, 6, 7]: 61374 tokens, shared prefix 61347, depths {0: 0.0899, 1: 0.0939, 2: 0.0954, 3: 0.0986, 4: 0.1015, 5: 0.1043, 6: 0.1068, 7: 0.1099}
+fp16: 8 / 8 in 177 s, peak 12.28 GiB
+  [0] ok   nll 5.651  'Locker 4172.'
+  [1] ok   nll 2.194  'Kuressaare.'
+  [2] ok   nll 2.734  '0.7381'
+  [3] ok   nll 6.527  "The team's mascot is a green iguana called Pickwick."
+  [4] ok   nll 6.775  '2 October.'
+  [5] ok   nll 6.535  '37 hours.'
+  [6] ok   nll 6.029  'The password hint for the old archive is the name of a river in the Far East: **Ussuri**.'
+  [7] ok   nll 10.650  'The orange one.'
+q8: 8 / 8 in 200 s, peak 12.50 GiB
+  [0] ok   nll 5.667  'Locker 4172.'
+  [1] ok   nll 2.206  'Kuressaare.'
+  [2] ok   nll 2.730  '0.7381'
+  [3] ok   nll 6.540  "The team's mascot is a green iguana called Pickwick."
+  [4] ok   nll 6.808  '2 October.'
+  [5] ok   nll 6.576  '37 hours.'
+  [6] ok   nll 6.059  'The password hint for the old archive is the name of a river in the Far East: **Ussuri**.'
+  [7] ok   nll 10.717  'The orange one.'
+q6+rot+tail1024+pf: 8 / 8 in 205 s, peak 12.54 GiB
+  [0] ok   nll 5.658  'Locker 4172.'
+  [1] ok   nll 2.186  'Kuressaare.'
+  [2] ok   nll 2.738  '0.7381'
+  [3] ok   nll 6.512  "The team's mascot is a green iguana called Pickwick."
+  [4] ok   nll 6.816  '2 October.'
+  [5] ok   nll 6.561  '37 hours.'
+  [6] ok   nll 6.030  'The password hint for the old archive is the name of a river in the Far East: **Ussuri**.'
+  [7] ok   nll 10.638  'The orange one.'
+k8v6+rot+tail1024+pf: 8 / 8 in 207 s, peak 12.54 GiB
+  [0] ok   nll 5.675  'Locker 4172.'
+  [1] ok   nll 2.194  'Kuressaare.'
+  [2] ok   nll 2.732  '0.7381'
+  [3] ok   nll 6.519  "The team's mascot is a green iguana called Pickwick."
+  [4] ok   nll 6.810  '2 October.'
+  [5] ok   nll 6.605  '37 hours.'
+  [6] ok   nll 6.022  'The password hint for the old archive is the name of a river in the Far East: **Ussuri**.'
+  [7] ok   nll 10.671  'The orange one.'
+verdict: 8 / 8 needles found by fp16 (the rest do not count); PASS = all of those found
+  PASS  fp16                               8 / 8  answer NLL vs fp16 +0.0000
+  PASS  q8                                 8 / 8  answer NLL vs fp16 +0.0257
+  PASS  q6+rot+tail1024+pf                 8 / 8  answer NLL vs fp16 +0.0055
+  PASS  k8v6+rot+tail1024+pf               8 / 8  answer NLL vs fp16 +0.0165
+done in 13.2 min
