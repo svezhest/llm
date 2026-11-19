@@ -16,6 +16,13 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   within 0–2 % but a night pass ran ×0.76–0.87 cell by cell with probes only 2–4 % lower, and the
   9B shows no in-session warm-up at all; the 27B's 16–23 % is that model's
   ([perf/2026-11-18/decode_9b_bench.md](perf/2026-11-18/decode_9b_bench.md#method)).
+- A gate of `QWEN_DRAFT=auto` runs every variant in one process, so with one process-wide class
+  state (`mtp.CLOCK`, `ab_mtp.py`'s default) the fixed variants that ran before `auto` in a cell feed
+  the state it decides from, in an order that changes per cell and round; a server running `auto`
+  alone has no such help. Gate `auto` with a state per variant (`ab_mtp.py --own-state`, branch
+  auto-arms d2101ed, not on this branch yet): the same rule read 4 of 6 cells with the shared state
+  and 3 of 6 per variant, greedy code 0.985 against 0.895 (separate runs)
+  ([perf/2026-11-19/auto_arms.md](perf/2026-11-19/auto_arms.md#the-gate)).
 - Reports and raw data go to `docs/perf/<date>/`; conclusions to the topic file.
 
 ## Measuring performance on this machine (lessons from 2026-10-11/12)

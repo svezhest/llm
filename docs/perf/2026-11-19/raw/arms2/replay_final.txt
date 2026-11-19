@@ -1,0 +1,53 @@
+
+### gate9b_arms_1k_own.json (own state; head arm mtp0+q; fixed: dflash, mtp0+q, mtp1+q, mtp3+q)
+costs: X 39 ms, shadow draft 25.6 ms + 0.070 ms per position fed, the head's catch-up after DFlash 3.4 ms
+cell          ceiling  measured     old     it1     new   (auto / best fixed; per request with --requests)
+code-2k-0@s     1.000     0.984   0.988   0.963   0.963
+en-2k-0@s       0.945     0.965   0.904   0.920   0.920
+ru-2k-0@s       0.980     0.969   0.955   0.966   0.966
+code-2k-0       1.000     0.893   0.942   0.972   0.993
+en-2k-0         1.000     0.987   0.972   0.985   0.985
+ru-2k-0         0.926     0.901   0.903   0.916   0.916
+
+### short9b_arms.json (shared state; head arm mtp0+q; fixed: dflash, mtp0+q, mtp1+q)
+costs: X 17 ms, shadow draft 19.3 ms + 0.045 ms per position fed, the head's catch-up after DFlash 5.5 ms
+cell          ceiling  measured     old     it1     new   (auto / best fixed; per request with --requests)
+short-en@s      0.949     0.942   0.891   0.932   0.930
+short-ru@s      0.963     0.935   0.911   0.931   0.931
+code-2k-0@s     1.000     0.964   0.976   0.976   0.984
+short-en        0.968     0.964   0.945   0.958   0.958
+short-ru        0.972     0.958   0.932   0.945   0.945
+code-2k-0       1.000     0.981   0.974   0.974   0.970
+
+### gate9b_arms_1k.json (shared state; head arm mtp0+q; fixed: dflash, mtp0+q, mtp1+q, mtp3+q)
+costs: X 32 ms, shadow draft 15.0 ms + 0.076 ms per position fed, the head's catch-up after DFlash 3.9 ms
+cell          ceiling  measured     old     it1     new   (auto / best fixed; per request with --requests)
+code-2k-0@s     1.000     0.996   0.946   0.946   0.946
+en-2k-0@s       0.991     0.986   0.949   0.974   0.974
+ru-2k-0@s       0.987     0.967   0.961   0.974   0.974
+code-2k-0       1.000     0.999   0.911   0.935   0.951
+en-2k-0         0.995     0.969   0.946   0.977   0.977
+ru-2k-0         0.969     0.953   0.948   0.957   0.957
+
+### gate_auto_greedy.json (shared state; head arm mtp0+q; fixed: dflash, mtp0+q, mtp2+q)
+costs: X 25 ms, shadow draft 25.3 ms + 0.070 ms per position fed, the head's catch-up after DFlash 3.9 ms
+cell          ceiling  measured     old     it1     new   (auto / best fixed; per request with --requests)
+code-2k-0       1.000     0.928   0.991   0.998   0.951
+en-2k-0         1.000     0.965   0.924   0.961   0.975
+ru-2k-0         1.000     1.032   0.973   0.948   0.982
+short-en        1.000     0.992   0.874   0.882   0.969
+short-ru        1.000     0.960   0.976   0.981   0.982
+
+### gate_auto_sampling.json (shared state; head arm mtp0+q; fixed: dflash, mtp0+q, mtp2+q)
+costs: X 27 ms, shadow draft 20.9 ms + 0.139 ms per position fed, the head's catch-up after DFlash 1.8 ms
+cell          ceiling  measured     old     it1     new   (auto / best fixed; per request with --requests)
+code-2k-0@s     1.000     0.905   0.936   0.961   0.956
+en-2k-0@s       1.000     1.000   0.973   0.982   0.983
+ru-2k-0@s       1.000     0.961   0.968   0.971   0.965
+short-en@s      1.000     0.980   0.952   0.959   0.937
+short-ru@s      1.000     0.978   0.975   0.974   0.980
+
+cells >= 0.97: ceiling 22 of 28, measured 11 of 28, old 9 of 28, it1 12 of 28, new 11 of 28
+median cell:   ceiling 1.000, measured 0.966, old 0.948, it1 0.962, new 0.965
+worst cell:    ceiling 0.926, measured 0.893, old 0.874, it1 0.882, new 0.916
+requests:      old 74: geomean 0.938, < 0.90 11, it1 74: geomean 0.950, < 0.90 7, new 74: geomean 0.954, < 0.90 6

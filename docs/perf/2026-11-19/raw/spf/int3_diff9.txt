@@ -1,0 +1,40 @@
+both+det old: 32 tokens in 19.6 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+both+det eager: 32 tokens in 18.3 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== both+det: eager vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+both+det seed: 32 tokens in 18.0 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== both+det: seed vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+both+det on: 32 tokens in 17.9 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== both+det: on vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+head+det old: 32 tokens in 17.7 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+head+det eager: 32 tokens in 18.0 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== head+det: eager vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+head+det seed: 32 tokens in 17.8 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== head+det: seed vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+head+det on: 32 tokens in 17.9 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== head+det: on vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+dflash+det old: 32 tokens in 17.6 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+dflash+det eager: 32 tokens in 17.7 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== dflash+det: eager vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+dflash+det seed: 32 tokens in 17.4 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== dflash+det: seed vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+dflash+det on: 32 tokens in 17.5 s; entries [{'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}]
+
+== dflash+det: on vs old (cache emptied before each): tokens same; 277 components equal, 0 not
+  entry 0: meta same: {'ids': 8224, 'reply': 8191, 'ckpts': [2048, 4096, 5130, 8146], 'pieces': [(0, 8191, 0, 8191), (8191, 8224, 8191, 8224)]}
+done

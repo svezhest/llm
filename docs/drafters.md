@@ -20,6 +20,13 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   worse ([perf/2026-11-18/auto_gate_9b.md](perf/2026-11-18/auto_gate_9b.md)). At the HTTP API
   `auto` is ×1.13 of llama.cpp + MTP, ×1.19 of oMLX + MTP
   ([perf/2026-11-18/decode_9b_bench.md](perf/2026-11-18/decode_9b_bench.md)).
+- Two revisions of the arm rule (branches auto-arms and auto-arms2, 2026-11-19; measured, not merged)
+  do not clearly pass the gate either: 27B 2 + 3 and 2 + 4 of 10 cells (integ3's rule here 2 + 2), 9B
+  at 1024 tokens 3 of 6 each with a class state per variant, short 9B requests 0 and 1 of 6, the
+  offline replay 9 / 12 / 11 of 28 cells for integ3 / auto-arms / auto-arms2. This branch keeps
+  integ3's rule. On 27B code `auto` is 0.85–0.94 of DFlash alone under every rule, and on greedy 9B
+  prose the head's own depth rule can sit at 0.90 of one fixed draft, below what any arm choice
+  needs ([perf/2026-11-19/auto_arms.md](perf/2026-11-19/auto_arms.md)).
 - The MTP head's draft count is its own gate (`QWEN_MTP_K=0`): at least one draft a round,
   all `KMAX` where the measured keep rates pay for the matrix kernel's block (code), plain
   steps only after a run of rounds that kept nothing which is unlikely (< 1/256) at the
@@ -49,8 +56,12 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   its first token at the plain loop's time, the work moves behind it (total time unchanged). Both
   exact: the same graphs in the same pieces; tokens, stored entries and drafter contexts
   bit-identical with either switch on or off, a row without a drafter on the old path
-  (`tests/test_spec_prefill.py`). Expected: cold 2K auto TTFT ~6 % lower, hits ~plain's; 8K / 32K
-  only the last window and the seed (not measured on this base yet).
+  (`tests/test_spec_prefill.py`). Measured on this base (branch integ3, 9B, 2026-11-19): `auto`'s
+  time to the first token × plain, both switches off → on, cold 2K 1.018 → 0.983, 8K 1.048 → 1.023,
+  32K 1.064 → 1.042; a prompt-cache hit 1.40 → 0.93, 1.38 → 1.07, 1.28 → 1.00; the whole request
+  0.98–1.00 of the old path; tokens and stored entries identical (5 of 5 identity cases, 9 of 9
+  entry comparisons, 277 of 277 components each)
+  ([perf/2026-11-19/spec_prefill_integ3.md](perf/2026-11-19/spec_prefill_integ3.md)).
 - The verify attention is the one-pass kernel (`QWEN_VERIFY_ATT=2`, `QWEN_VATT_Q8=1`,
   [kernels.md](kernels.md)). DFlash is not bit-equal to plain greedy (near-ties) but is
   deterministic run to run.

@@ -25,7 +25,8 @@ the 9B at 32K (emulated, 2026-11-18); q8 + an fp16 tail is better than q8 but no
 Compute-bound: 2048-token slabs, pfqmm GEMMs (bit-identical), fused SDPA from 32K keys,
 fp16 cast (the M1 has no fast bf16). Headline: 120K prefill ×1.27 with the fixed slab +
 pfqmm; 9B cold 2K ×1.09–1.11 of llama.cpp. Measured. Open: long-context attention is the next
-lever; `auto`'s 6–10 % on the first token (the drafters' prefill) is mostly removed on a branch, not merged.
+lever. `auto`'s 6–10 % on the first token (the drafters' prefill, main) is down to 0.98–1.04 × plain
+cold and 0.93–1.07 on a hit with spec-prefill (in this branch since integ3, 9B, exact).
 
 ## Decode and batching performance — [decode.md](decode.md)
 
@@ -47,15 +48,20 @@ DFlash (9B) and DFlash2 (27B) for a lone greedy text row: ×1.4–2 on code / En
 on Russian prose, where the target's MTP head wins (×1.2–1.3). `QWEN_DRAFT=auto` loads both
 and picks per round: 27B greedy code ×1.94, English ×1.33, Russian ×1.20, short prose ×1.09–1.13
 of plain (T 0.6: ×1.78 / ×1.23 / ×1.20 / ×1.07–1.09), above plain in every cell and
-0.91–1.01 of the best single setting; the 0.97 gate holds in 1 of 5 greedy and 2 of 5
-sampled cells at fp16 KV, 2 of 2 on q8, the floor 4 of 4. Prompt lookup pays on copy-heavy
+0.91–1.01 of the best single setting; the 0.97 gate (main's rule, 2026-11-17) holds in 1 of 5
+greedy and 2 of 5 sampled cells at fp16 KV, 2 of 2 on q8, the floor 4 of 4. Prompt lookup pays on copy-heavy
 turns, off by default. DFlash ≠ plain greedy bitwise, deterministic run to run. Sampled
 speculative text == plain sampled text (draws keyed by seed + position; CPU-tested, GPU check
 pending). On the 9B (2026-11-18): main's rule 0.755–1.033 of the best setting (1 of 6 cells),
 ×1.13 of llama.cpp + MTP at the API, but behind the head alone on prose (a fixed DFlash start and
-shadow drafts per request, slower head rounds); at 1024 tokens on a branch code 0.99–1.00, prose
-0.935–0.965. Open: the first request of a class on code (DFlash's fixed prior), tied arms under
-sampling; the head is not sampled while DFlash runs; `auto`'s per-request cost on prose.
+shadow drafts per request, slower head rounds); at 1024 tokens on branch integ2 code 0.99–1.00,
+prose 0.935–0.965. This branch's rule (integ3, 2026-11-19): 9B at 1024 tokens 1 of 6 cells
+(0.927–0.979), 27B 2 of 5 greedy + 2 of 5 sampled. Two revisions of the arm rule (branches
+auto-arms, auto-arms2) measured, not merged: neither clearly passes (27B up to 2 + 4 of 10, 9B 3 of
+6, short 9B 0–1 of 6; separate runs, differences not resolved). On 27B code `auto` is 0.85–0.94 of
+DFlash under every rule; on greedy 9B prose the head's own depth rule (0.90–1.03 of one fixed draft
+between runs) can cap `auto` below 0.97. Open: the 27B code miss, the head's depth rule on prose,
+the first request of a class on code, tied arms under sampling; `auto`'s per-request cost on prose.
 
 ## Prompt cache — [prompt-cache.md](prompt-cache.md)
 
