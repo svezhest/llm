@@ -8,7 +8,8 @@ quantization overrides under the same prefix, so it finds nothing there. This
 script takes those keys, strips the prefix, keeps the tensors as they are (no
 requantization: norms are already in MLX's +1 convention in an MLX source) and
 writes the drafter config with the overrides renamed to the drafter's module
-paths. CPU only (no Metal).
+paths. CPU only (no Metal). The source needs its config.json and the shard(s) that hold
+the head; without a model.safetensors.index.json every *.safetensors in it is read.
 
   src/worker/.venv/bin/python scripts/perf/mtp/split_mtp.py \
       weights/qwen38-27b-mlx-oq4e weights/qwen38-27b-mtp
@@ -28,15 +29,19 @@ def main(src, dst):
     with open(os.path.join(src, "config.json")) as f:
         conf = json.load(f)
     text = dict(conf.get("text_config") or conf)
-    with open(os.path.join(src, "model.safetensors.index.json")) as f:
-        wmap = json.load(f)["weight_map"]
-    files = sorted({v for k, v in wmap.items() if k.startswith(PREFIX)})
-    if not files:
-        sys.exit(f"no {PREFIX}* tensors in {src}")
+    idx = os.path.join(src, "model.safetensors.index.json")
+    if os.path.exists(idx):
+        with open(idx) as f:
+            wmap = json.load(f)["weight_map"]
+        files = sorted({v for k, v in wmap.items() if k.startswith(PREFIX)})
+    else:                   # no index (or only the shard that holds the head was pulled): every shard there is
+        files = sorted(fn for fn in os.listdir(src) if fn.endswith(".safetensors"))
     out = {}
     for fn in files:
         shard = mx.load(os.path.join(src, fn))
         out.update({k[len(PREFIX):]: v for k, v in shard.items() if k.startswith(PREFIX)})
+    if not out:
+        sys.exit(f"no {PREFIX}* tensors in {src}")
     q = conf.get("quantization") or conf.get("quantization_config")
     quant = None
     if q is not None and any(k.endswith(".scales") for k in out):

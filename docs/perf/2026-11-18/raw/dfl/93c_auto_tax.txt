@@ -1,0 +1,53 @@
+code-2k-0: 3 / 3 requests; decode wall auto 13656 ms, head alone 14560 ms: -903 ms (-6.2 %); head alone 19.03 ms per token; charges sum -1029 ms
+   DFlash, request start     -126 ms   -0.9 %   rounds   19  tokens   83
+   DFlash, later             -607 ms   -4.2 %   rounds  112  tokens  406
+   head + shadow draft       +162 ms   +1.1 %   rounds    4  tokens    7
+   head, 1 draft              +15 ms   +0.1 %   rounds    8  tokens   14
+   head, 2-4 drafts          -305 ms   -2.1 %   rounds   75  tokens  231
+   lookup                    -168 ms   -1.2 %   rounds    6  tokens   24
+code-2k-0@s: 3 / 3 requests; decode wall auto 13411 ms, head alone 14917 ms: -1506 ms (-10.1 %); head alone 19.50 ms per token; charges sum -1645 ms
+   DFlash, request start     -242 ms   -1.6 %   rounds   18  tokens   89
+   DFlash, later             -779 ms   -5.2 %   rounds  121  tokens  457
+   head + shadow draft        +93 ms   +0.6 %   rounds    4  tokens   10
+   head, 1 draft              +45 ms   +0.3 %   rounds    9  tokens   16
+   head, 2-4 drafts          -855 ms   -5.7 %   rounds   54  tokens  185
+   lookup                     +93 ms   +0.6 %   rounds    5  tokens    8
+en-2k-0: 3 / 3 requests; decode wall auto 18040 ms, head alone 16270 ms: +1769 ms (+10.9 %); head alone 21.27 ms per token; charges sum +1645 ms
+   DFlash, request start     +572 ms   +3.5 %   rounds    9  tokens   15
+   head + shadow draft       +338 ms   +2.1 %   rounds   13  tokens   22
+   head, 1 draft              +55 ms   +0.3 %   rounds  357  tokens  609
+   head, 2-4 drafts          +392 ms   +2.4 %   rounds   40  tokens   92
+   plain steps               +159 ms   +1.0 %   rounds    3  tokens   24
+   lookup                    +128 ms   +0.8 %   rounds    3  tokens    3
+en-2k-0@s: 3 / 3 requests; decode wall auto 19546 ms, head alone 17869 ms: +1677 ms (+9.4 %); head alone 23.36 ms per token; charges sum +1577 ms
+   DFlash, request start     +525 ms   +2.9 %   rounds   11  tokens   22
+   head + shadow draft       +372 ms   +2.1 %   rounds   17  tokens   28
+   head, 1 draft             +454 ms   +2.5 %   rounds  347  tokens  550
+   head, 2-4 drafts           -36 ms   -0.2 %   rounds   54  tokens  109
+   plain steps               +262 ms   +1.5 %   rounds    3  tokens   56
+ru-2k-0: 3 / 3 requests; decode wall auto 17527 ms, head alone 15733 ms: +1794 ms (+11.4 %); head alone 20.57 ms per token; charges sum +1703 ms
+   DFlash, request start     +431 ms   +2.7 %   rounds   15  tokens   39
+   head + shadow draft       +340 ms   +2.2 %   rounds   20  tokens   40
+   head, 1 draft             +546 ms   +3.5 %   rounds  351  tokens  608
+   head, 2-4 drafts          +292 ms   +1.9 %   rounds   40  tokens   75
+   lookup                     +94 ms   +0.6 %   rounds    3  tokens    3
+ru-2k-0@s: 3 / 3 requests; decode wall auto 19464 ms, head alone 17156 ms: +2308 ms (+13.5 %); head alone 22.43 ms per token; charges sum +2199 ms
+   DFlash, request start     +534 ms   +3.1 %   rounds   17  tokens   39
+   DFlash, later             +148 ms   +0.9 %   rounds    4  tokens    4
+   head + shadow draft       +240 ms   +1.4 %   rounds   13  tokens   24
+   head, 1 draft             +559 ms   +3.3 %   rounds  341  tokens  565
+   head, 2-4 drafts          +596 ms   +3.5 %   rounds   64  tokens  124
+   plain steps                +86 ms   +0.5 %   rounds    1  tokens    8
+   lookup                     +35 ms   +0.2 %   rounds    1  tokens    1
+short-ru: 3 / 3 requests; decode wall auto 18652 ms, head alone 17666 ms: +986 ms (+5.6 %); head alone 23.09 ms per token; charges sum +913 ms
+   DFlash, request start     +419 ms   +2.4 %   rounds    9  tokens    9
+   head + shadow draft       +199 ms   +1.1 %   rounds   12  tokens   20
+   head, 1 draft             +152 ms   +0.9 %   rounds  452  tokens  697
+   head, 2-4 drafts          +144 ms   +0.8 %   rounds   20  tokens   39
+short-ru@s: 3 / 3 requests; decode wall auto 20189 ms, head alone 18682 ms: +1506 ms (+8.1 %); head alone 24.42 ms per token; charges sum +1424 ms
+   DFlash, request start     +428 ms   +2.3 %   rounds    9  tokens    9
+   head + shadow draft       +274 ms   +1.5 %   rounds   17  tokens   27
+   head, 1 draft             +334 ms   +1.8 %   rounds  432  tokens  654
+   head, 2-4 drafts          +382 ms   +2.0 %   rounds   40  tokens   64
+   plain steps                +34 ms   +0.2 %   rounds    1  tokens    8
+   lookup                     -28 ms   -0.2 %   rounds    1  tokens    3

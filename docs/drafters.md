@@ -13,6 +13,13 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
   cell, on q8 KV 1.00 (Russian 8K, English 2K), the no-draft floor 0.98–0.99 of plain
   ([perf/2026-11-17/auto_gate.md](perf/2026-11-17/auto_gate.md)). One setting for a mixed
   load; a prose-only load is still 4–9 % faster on the head with one fixed draft.
+- On Ornith 1.5 9B (Ornith's own DFlash + the 8-bit MTP head, 2026-11-18): main's rule is 0.755–1.033
+  of the best single setting (1 of 6 cells at 0.97), ×1.14–1.54 of plain; on prose it trails the head
+  alone (a fixed DFlash start and shadow drafts per request, 3–6 % of a 256-token answer, plus slower
+  head rounds). The 8-bit head drafts as well as fp16; the third-party 4-bit one 0.20 drafts of 4
+  worse ([perf/2026-11-18/auto_gate_9b.md](perf/2026-11-18/auto_gate_9b.md)). At the HTTP API
+  `auto` is ×1.13 of llama.cpp + MTP, ×1.19 of oMLX + MTP
+  ([perf/2026-11-18/decode_9b_bench.md](perf/2026-11-18/decode_9b_bench.md)).
 - The MTP head's draft count is its own gate (`QWEN_MTP_K=0`): at least one draft a round,
   all `KMAX` where the measured keep rates pay for the matrix kernel's block (code), plain
   steps only after a run of rounds that kept nothing which is unlikely (< 1/256) at the
@@ -128,6 +135,14 @@ Current conclusions (the state of all topics: [MAP.md](MAP.md)):
 with fallback to plain decoding on low acceptance: loses (8-round probe ≈0.5 s,
 drafter restarts cold); spec for sampling requests is exact but only ×1.1–1.2
 on code / ×0.8 on prose → opt-in `QWEN_DRAFT_SAMPLING=1`.
+
+2026-11-18 on the 9B, each in one process against its baseline, none merged
+([perf/2026-11-18/auto_gate_9b.md](perf/2026-11-18/auto_gate_9b.md#experiments-that-did-not-pay)):
+DFlash depth from the drafter's confidence 0.992 of the full block; the whole prompt for the
+drafter's full-attention layer 0.985 at 8K, 0.93 at 32K; sampled (coupled) drafts move first-draft
+acceptance by −0.02…+0.08 (speed not measured); round overlap ×0.995–1.046, within noise; the
+Chooser's burst rule and its prior / margin fix 0 and 2 of 10 cells; the head's depth rule pass 2
+3 of 8 (pass 1: 6 of 8); a causal mask in the DFlash block changes nothing (tokens per round equal).
 
 ## Gotchas
 

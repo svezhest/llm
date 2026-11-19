@@ -13,11 +13,14 @@ Run it with the worker venv's python (stdlib otherwise): its `tokenizers` counts
 each stream's first chunk (bench_decode.decode_tps); under a plain python3 that count is 1.
 
 Systems (`--list`): ours-plain / ours-dflash (worker + gateway of --code, the 4-bit),
-ours-oq4e-plain / -dflash / -mtp / -auto (QWEN_DRAFT=auto), mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
+ours-oq4e-plain / -dflash / -mtp / -auto (QWEN_DRAFT=auto), the 9B (Ornith 1.5, MLX 8-bit): ours9-plain /
+-dflash / -mtp / -auto, mlx-vlm9, llama9-q8_0 / llama9-q8_0-mtp (one GGUF with the MTP layers); mlx-vlm / mlx-vlm-dflash (stock `python -m mlx_vlm.server`
 from the worker venv), llama-q4_0 / llama-q4kxl / llama-q4_0-mtp / llama-q4_0-dflash
 (llama-server), llama-bench-q4_0 / -q4kxl, ppl-mlx-4bit / ppl-mlx-oq4e / ppl-llama-q4_0 /
-ppl-llama-q4kxl (perplexity). --env adds/overrides process env (ours: the worker's);
---set K=V system parameters (n_max=3 for the drafters, ctx=..., model=<weights dir name>).
+ppl-llama-q4kxl (perplexity); oMLX (`omlx serve` of its own venv, $BENCH_OMLX = that venv's `omlx`):
+omlx9 / omlx9-mtp / omlx9-dflash (the 9B) and omlx / omlx-mtp / omlx-dflash (the 27B oQ4e).
+--env adds/overrides process env (ours: the worker's);
+--set K=V system parameters (n_max=3 for the drafters, ctx=..., model=<weights dir name>; oMLX: see omlx()).
 Weights: $BENCH_WEIGHTS or <main checkout>/weights. The lease: --lease NAME with
 $BENCH_LEASE = the lease script (acquire/release NAME).
 """
@@ -44,6 +47,15 @@ CODE_DEFAULT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 GGUF_DIR = "gguf-qwen38-27b"
 GGUF = {"q4_0": "Qwen3.8-27B-Q4_0.gguf", "q4kxl": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
         "mtp": "mtp-Qwen3.8-27B-Q4_0.gguf", "dflash": "dflash-Qwen3.8-27B-Q4_0.gguf"}
+GGUF9_DIR = "gguf-ornith15-9b"                # the 9B (Ornith 1.5): Q8_0 = the precision of the MLX 8-bit checkpoint;
+GGUF9 = {"q8_0": "Ornith-1.5-9B-MTP-Q8_0.gguf"}  # one file with the nextn (MTP) layers: plain and draft-mtp (md=0)
+# the 9B worker recipe: a lone row, fp16 KV (docs/models.md), the stand's cache settings without its disk tier
+OURS9_ENV = {
+    "QWEN_KV_BITS": "0", "QWEN_MAX_BATCH": "1", "QWEN_MAX_CONTEXT": "131072", "QWEN_PROMPT_CACHE": "1",
+    "QWEN_PROMPT_CACHE_GB": "4", "QWEN_PROMPT_CACHE_REPLY": "0", "QWEN_PRESENCE_PENALTY": "0", "LOG_LEVEL": "INFO",
+}
+# drafter dirs per model family: (DFlash, MTP head)
+DRAFTERS = {"qwen38-27b": ("qwen38-27b-dflash2", "qwen38-27b-mtp"), "ornith15-9b": ("_staging/ornith15-9b-dflash", "_staging/ornith15-9b-mtp-q8")}
 # the 27B worker recipe (docs/drafters.md "DFlash2 on the 27B", long context; 80K fits under a 27 GiB wired limit)
 OURS_ENV = {
     "QWEN_TEXT_ONLY": "1", "QWEN_MRQMM4": "1", "QWEN_KV_BITS": "0", "QWEN_MAX_BATCH": "1",
@@ -53,7 +65,15 @@ OURS_ENV = {
     "QWEN_PREFILL_BUDGET": "16777216", "QWEN_PRESENCE_PENALTY": "0", "LOG_LEVEL": "INFO",
 }
 MODEL_PROCS = ["python worker.py", "worker.py --addr", "llama-server", "llama-bench", "llama-perplexity",
-               "mlx_vlm.server", "mlx_vlm.generate"]
+               "mlx_vlm.server", "mlx_vlm.generate", "omlx-server", "omlx serve"]
+# oMLX: offline (local dirs only; the update check lives in the admin UI, which --headless leaves out),
+# no usage history; HOME and the base path point into the session dir, so its settings, logs and the
+# files it writes under ~ (~/.omlx/bin, cluster state) stay there
+OMLX_ENV = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1", "OMLX_USAGE_HISTORY": "0", "PYTHONUNBUFFERED": "1"}
+# oMLX finds the MTP head only inside the model's own weights (`language_model.mtp.*`); the 9B checkpoint has
+# none: omlx_mtp_dir.py assembles this dir from it and the split head (DRAFTERS)
+OMLX_MTP_DIR = {"ornith15-9b-mlx-8bit": "_staging/ornith15-9b-mlx-8bit-mtp-omlx"}
 
 
 def sh(argv, timeout=30):
@@ -75,15 +95,16 @@ def ctx_for(plan_name):
 
 
 # --------------------------------------------------------------------------- systems
-def ours(ctx, model_dir, draft):
+def ours(ctx, model_dir, draft, base=None):
     w = ctx["weights"]
-    env = dict(OURS_ENV, QWEN_MODEL=os.path.join(w, ctx["set"].get("model", model_dir)))
+    env = dict(OURS_ENV if base is None else base, QWEN_MODEL=os.path.join(w, ctx["set"].get("model", model_dir)))
+    dflash, head = DRAFTERS[next(k for k in DRAFTERS if model_dir.startswith(k))]
     if draft == "auto":                          # every drafter found next to the model dir, chosen per round
         env.update(QWEN_DRAFT="auto")
     elif draft == "mtp":                         # the target's own MTP head (qwen_worker/mtp.py)
-        env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-mtp"), QWEN_MTP_K="0")
+        env.update(QWEN_DRAFT=os.path.join(w, head), QWEN_MTP_K="0")
     elif draft:
-        env.update(QWEN_DRAFT=os.path.join(w, "qwen38-27b-dflash2"), QWEN_DRAFT_SAMPLING="1")
+        env.update(QWEN_DRAFT=os.path.join(w, ctx["set"].get("dflash", dflash)), QWEN_DRAFT_SAMPLING="1")
     env.update(ctx["env"])
     wdir = os.path.join(ctx["code"], "src", "worker")
     py = os.path.join(wdir, ".venv", "bin", "python")
@@ -106,9 +127,9 @@ def ours(ctx, model_dir, draft):
     }
 
 
-def mlx_vlm(ctx, draft):
+def mlx_vlm(ctx, draft, model_dir="qwen38-27b-mlx-4bit"):
     w = ctx["weights"]
-    model = os.path.join(w, ctx["set"].get("model", "qwen38-27b-mlx-4bit"))
+    model = os.path.join(w, ctx["set"].get("model", model_dir))
     py = os.path.join(ctx["code"], "src", "worker", ".venv", "bin", "python")
     argv = [py, "-m", "mlx_vlm.server", "--model", model, "--host", "127.0.0.1", "--port", str(ctx["port"])]
     if draft:
@@ -119,28 +140,104 @@ def mlx_vlm(ctx, draft):
             "ready": "/health", "model": model, "extra": {}, "drop": []}
 
 
-def llama(ctx, quant, spec=None):
-    g = os.path.join(ctx["weights"], GGUF_DIR)
-    gguf = os.path.join(g, GGUF[quant])
+def llama(ctx, quant, spec=None, gdir=GGUF_DIR, files=GGUF, name="qwen38-27b-"):
+    g = os.path.join(ctx["weights"], gdir)
+    gguf = os.path.join(g, files[quant])
     c = int(ctx["set"].get("ctx", ctx_for(ctx["plan"])))
     argv = ["llama-server", "-m", gguf, "-ngl", "99", "-fa", "on", "-c", str(c), "--jinja", "-np", "1",
             "--host", "127.0.0.1", "--port", str(ctx["port"]), "--cache-ram", str(ctx["set"].get("cache_ram", 0))]
     if spec:
         argv += ["--spec-type", f"draft-{spec}"]
-        if ctx["set"].get("md", "1") != "0":   # md=0: the target's own nextn (MTP) layer, no draft file
-            argv += ["-md", os.path.join(g, GGUF[spec])]
+        if ctx["set"].get("md", "1") != "0" and spec in files:   # md=0: the target's own nextn (MTP) layer, no draft file
+            argv += ["-md", os.path.join(g, files[spec])]
         if "n_max" in ctx["set"]:
             argv += ["--spec-draft-n-max", str(ctx["set"]["n_max"])]
     argv += ctx["set"].get("args", "").split()
-    for f in [gguf] + ([os.path.join(g, GGUF[spec])] if spec else []):
+    for f in [gguf] + ([os.path.join(g, files[spec])] if spec in files else []):
         if not os.path.exists(f) or os.path.exists(f + ".aria2"):
             raise SystemExit(f"{f}: missing or still downloading")
     return {"procs": [{"name": "llama-server", "argv": argv, "env": dict(ctx["env"]), "cwd": ctx["dir"],
                        "mem": True}],
-            "ready": "/health", "model": "qwen38-27b-" + quant,
+            "ready": "/health", "model": name + quant,
             "extra": {"cache_prompt": True, "repeat_penalty": 1.0, "presence_penalty": 0.0,
                       "frequency_penalty": 0.0},
             "drop": [], "template_check": True}
+
+
+def omlx(ctx, model_dir, draft=None, hot="4GB"):
+    """`omlx serve` on one model dir, configured by files written before the start (no admin calls):
+    <base>/settings.json (server, one row, memory guard, cache) and <base>/model_settings.json (the
+    model pinned = loaded before /health turns 200, its speculative / KV / dtype settings).
+    --set: fp16=1 (default; the Float16 Activations toggle the admin UI offers on M1/M2: bf16 leaves
+    recast to fp16, so activations and the KV cache are fp16 as in ours), kv=affine8|affine4 (KV
+    compression; default off = dense), cache=hot (default: prefix cache in RAM only, hot=<size>) | off
+    (--no-cache: no prefix reuse) | ssd, depth=N (MTP: fixed depth) / max_depth=N (MTP: the adaptive
+    controller's ceiling; neither = oMLX's default), dflash=<dir>, block=N (DFlash block), burst=off|light|
+    balanced|aggressive (Burst Decode: decode steps per stream hand-off; default balanced), keepwarm=S (idle
+    GPU keep-warm ticks, default 0.5, 0 = off), ceiling=GB (memory guard, custom tier; default 27),
+    engine=llm (serve a VLM checkpoint on the text engine), model=<weights dir>."""
+    exe = os.environ.get("BENCH_OMLX")
+    if not exe or not os.path.exists(exe):
+        raise SystemExit(f"$BENCH_OMLX = {exe!r}: no oMLX executable (the `omlx` of its own venv)")
+    w, s = ctx["weights"], ctx["set"]
+    name = s.get("model") or (OMLX_MTP_DIR.get(model_dir, model_dir) if draft == "mtp" else model_dir)
+    model = os.path.join(w, name)
+    if not os.path.exists(os.path.join(model, "config.json")):
+        raise SystemExit(f"{model}: no model there" + (" (assemble it with omlx_mtp_dir.py)" if draft == "mtp" else ""))
+    mid = os.path.basename(os.path.realpath(model))          # oMLX's model id: the dir's name
+    home = os.path.join(ctx["dir"], "omlx-home")
+    base = os.path.join(home, ".omlx")
+    os.makedirs(base, exist_ok=True)
+    ms = {"is_pinned": True, "is_default": True, "activation_fp16_enabled": s.get("fp16", "1") == "1"}
+    if draft == "mtp":                           # Lightning MTP: the head inside the model's weights
+        ms["mtp_enabled"] = True
+        if "depth" in s:
+            ms["mtp_fixed_depth"] = int(s["depth"])
+        if "max_depth" in s:
+            ms["mtp_adaptive_max_depth"] = int(s["max_depth"])
+    elif draft == "dflash":                      # a batched block drafter on the same verify path
+        dflash = DRAFTERS[next(k for k in DRAFTERS if model_dir.startswith(k))][0]
+        ms.update(dflash_enabled=True, dflash_draft_model=os.path.join(w, s.get("dflash", dflash)))
+        if "block" in s:
+            ms["dflash_block_size"] = int(s["block"])
+    if s.get("kv"):
+        ms.update(turboquant_kv_enabled=True, turboquant_kv_scheme=s["kv"], turboquant_kv_bits=int(s["kv"][-1]))
+    if s.get("engine"):
+        ms["model_type_override"] = s["engine"]
+    cache = s.get("cache", "hot")
+    settings = {
+        "version": "1.0",
+        "server": {"host": "127.0.0.1", "port": ctx["port"], "log_level": "info", "server_aliases": ["127.0.0.1"],
+                   "sse_keepalive_mode": "off", "auto_start_on_launch": False,
+                   "burst_decode_mode": s.get("burst", "balanced"),
+                   "gpu_keep_warm_interval": float(s.get("keepwarm", 0.5))},
+        "model": {"model_dirs": [model]},
+        "memory": {"prefill_memory_guard": True, "memory_guard_tier": "custom",
+                   "memory_guard_custom_ceiling_gb": float(s.get("ceiling", 27))},
+        "scheduler": {"max_concurrent_requests": 1},
+        "cache": {"enabled": cache != "off", "hot_cache_only": cache == "hot",
+                  "hot_cache_max_size": s.get("hot", hot) if cache == "hot" else "0"},
+        "huggingface": {"hf_cache_enabled": False},
+        "usage": {"usage_history": False},
+    }
+    with open(os.path.join(base, "settings.json"), "w") as f:
+        json.dump(settings, f, indent=1)
+    with open(os.path.join(base, "model_settings.json"), "w") as f:
+        json.dump({"version": 2, "models": {mid: ms}}, f, indent=1)
+    argv = [exe, "serve", "--base-path", base, "--model-dir", model, "--host", "127.0.0.1", "--port",
+            str(ctx["port"]), "--max-concurrent-requests", "1", "--no-hf-cache", "--headless"]
+    if cache == "off":
+        argv.append("--no-cache")
+    argv += s.get("args", "").split()
+    env = dict(OMLX_ENV, HOME=home, OMLX_BASE_PATH=base)
+    env.update(ctx["env"])
+    py = os.path.join(os.path.dirname(exe), "python")
+    return {"procs": [{"name": "omlx", "argv": argv, "env": env, "cwd": ctx["dir"], "mem": True}],
+            "ready": "/health", "model": mid,
+            "extra": {"repetition_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0},
+            "drop": [], "files": {"settings": settings, "model_settings": ms},
+            "versions": {"omlx": [py, "-I", "-c", "import importlib.metadata as m; print(' '.join("
+                                  "p + ' ' + m.version(p) for p in ('omlx', 'mlx', 'mlx-lm', 'mlx-vlm')))"]}}
 
 
 def llama_bench(ctx, quant):
@@ -188,6 +285,19 @@ SYSTEMS = {
     "ours-oq4e-dflash": lambda c: ours(c, "qwen38-27b-mlx-oq4e", True),
     "ours-oq4e-mtp": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "mtp"),
     "ours-oq4e-auto": lambda c: ours(c, "qwen38-27b-mlx-oq4e", "auto"),
+    "ours9-plain": lambda c: ours(c, "ornith15-9b-mlx-8bit", False, OURS9_ENV),
+    "ours9-dflash": lambda c: ours(c, "ornith15-9b-mlx-8bit", True, OURS9_ENV),
+    "ours9-mtp": lambda c: ours(c, "ornith15-9b-mlx-8bit", "mtp", OURS9_ENV),
+    "ours9-auto": lambda c: ours(c, "ornith15-9b-mlx-8bit", "auto", OURS9_ENV),
+    "mlx-vlm9": lambda c: mlx_vlm(c, False, "ornith15-9b-mlx-8bit"),
+    "llama9-q8_0": lambda c: llama(c, "q8_0", None, GGUF9_DIR, GGUF9, "ornith15-9b-"),
+    "llama9-q8_0-mtp": lambda c: llama(c, "q8_0", "mtp", GGUF9_DIR, GGUF9, "ornith15-9b-"),
+    "omlx9": lambda c: omlx(c, "ornith15-9b-mlx-8bit"),
+    "omlx9-mtp": lambda c: omlx(c, "ornith15-9b-mlx-8bit", "mtp"),
+    "omlx9-dflash": lambda c: omlx(c, "ornith15-9b-mlx-8bit", "dflash"),
+    "omlx": lambda c: omlx(c, "qwen38-27b-mlx-oq4e", hot="6GB"),
+    "omlx-mtp": lambda c: omlx(c, "qwen38-27b-mlx-oq4e", "mtp", hot="6GB"),
+    "omlx-dflash": lambda c: omlx(c, "qwen38-27b-mlx-oq4e", "dflash", hot="6GB"),
     "mlx-vlm": lambda c: mlx_vlm(c, False),
     "mlx-vlm-dflash": lambda c: mlx_vlm(c, True),
     "llama-q4_0": lambda c: llama(c, "q4_0"),
@@ -322,6 +432,30 @@ def parse_logs(logdir):
                 bufs.append(line.strip()[-160:])
         out["llama_draft"] = acc
         out["llama_buffers"] = bufs
+    p = os.path.join(logdir, "omlx.log")
+    if os.path.exists(p):
+        reqs, spec, setup = [], [], []
+        setup_re = re.compile(r"Discovered model|Preloading pinned|Failed to preload|activation dtype|Lightning MTP|"
+                              r"MTP path activated|MTP inactive|MTP .*parked|DFlash|M1 verify|engaged|patch applied|"
+                              r"enabled|installed|native|kernel|calibrated|mmap|resident|wired|ceiling|"
+                              r"hot-cache|Memory guard|Mode:|Traceback|Error|WARNING", re.I)
+        for line in open(p, errors="replace"):
+            m = re.search(r"Chat completion: model=(.*?), (\d+) tokens in ([\d.]+)s \(([\d.]+) tok/s\), prompt: (\d+), "
+                          r"finish_reason=(\S+?),.*stream_model_ttft=(\S+?)s?, stream_visible_ttft=(\S+)", line)
+            if m:
+                reqs.append({"gen_tokens": int(m[2]), "gen_s": float(m[3]), "tps": float(m[4]), "prompt": int(m[5]),
+                             "finish": m[6], "model_ttft": m[7], "visible_ttft": m[8].rstrip("s")})
+                continue
+            m = re.search(r"MTP\[(\S+)\] finish=(\S+) tokens=(\d+) cycles=(\d+) tok/cycle=([\d.]+) accept=(\d+)/(\d+)",
+                          line)
+            if m:
+                spec.append({"uid": m[1], "finish": m[2], "tokens": int(m[3]), "cycles": int(m[4]),
+                             "tok_per_cycle": float(m[5]), "accepted": int(m[6]), "drafted": int(m[7]),
+                             "line": line.strip()[-400:]})
+                continue
+            if setup_re.search(line) and len(setup) < 300:
+                setup.append(line.strip()[:300])
+        out["omlx_requests"], out["omlx_spec"], out["omlx_setup"] = reqs, spec, setup
     return out
 
 
@@ -331,6 +465,7 @@ def wait_ready(url, procs, timeout):
         for p in procs:
             if p["popen"].poll() is not None:
                 raise RuntimeError(f"{p['name']} exited with {p['popen'].returncode} before ready")
+        body = None
         try:
             with urllib.request.urlopen(url, timeout=5) as r:
                 if r.status == 200:
@@ -338,11 +473,18 @@ def wait_ready(url, procs, timeout):
                         body = json.loads(r.read())
                     except ValueError:
                         body = {}
-                    # mlx_vlm.server: up before its model is; llama-server: 503 while loading
-                    if not (isinstance(body, dict) and "loaded_model" in body and not body["loaded_model"]):
-                        return round(time.time() - t0, 1)
         except Exception:  # noqa: BLE001 -- not up yet
             pass
+        if body is not None:
+            # mlx_vlm.server: up before its model is; llama-server / oMLX: 503 while loading
+            if isinstance(body, dict) and "loaded_model" in body and not body["loaded_model"]:
+                pass
+            elif isinstance(body, dict) and isinstance(body.get("engine_pool"), dict) \
+                    and not body["engine_pool"].get("loaded_count"):
+                # oMLX turns 200 when its pinned-model preload ends, also when the load failed
+                raise RuntimeError(f"up without a loaded model (the pinned preload failed?): {body}")
+            else:
+                return round(time.time() - t0, 1)
         time.sleep(2)
     raise RuntimeError(f"not ready within {timeout} s")
 
@@ -408,6 +550,10 @@ def run_session(system, plan, out_root, code=CODE_DEFAULT, env=None, sets=None, 
             held = True
         meta["preflight"] = preflight(force)
         meta["versions"] = versions(ctx["code"])
+        for k, argv in (spec.get("versions") or {}).items():    # a system's own runtime (oMLX: its venv)
+            meta["versions"][k] = sh(argv)
+        if spec.get("files"):                                    # config files the system starts from
+            meta["system_files"] = spec["files"]
         if cooldown:
             log(f"[{sid}] cooldown {cooldown} s")
             time.sleep(cooldown)

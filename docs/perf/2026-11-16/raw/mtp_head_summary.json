@@ -1,0 +1,4131 @@
+{
+ "model": "qwen38-27b-mlx-oq4e",
+ "heads": {
+  "q4": {
+   "dir": "qwen38-27b-mtp",
+   "quantization": {
+    "group_size": 64,
+    "bits": 4,
+    "mode": "affine",
+    "layers.0.self_attn.k_proj": {
+     "bits": 8,
+     "group_size": 64,
+     "mode": "affine"
+    },
+    "layers.0.self_attn.o_proj": {
+     "bits": 5,
+     "group_size": 64,
+     "mode": "affine"
+    },
+    "layers.0.self_attn.v_proj": {
+     "bits": 8,
+     "group_size": 64,
+     "mode": "affine"
+    },
+    "fc": false
+   },
+   "mib": 430.724853515625,
+   "fp32_activations": false
+  },
+  "q8": {
+   "dir": "qwen38-27b-mtp-q8",
+   "quantization": {
+    "group_size": 64,
+    "bits": 8,
+    "mode": "affine"
+   },
+   "mib": 455.724853515625,
+   "fp32_activations": false
+  },
+  "fp16": {
+   "dir": "qwen38-27b-mtp-bf16",
+   "quantization": null,
+   "mib": 1620.099853515625,
+   "fp32_activations": false
+  }
+ },
+ "sampling": {
+  "temperature": 0.6,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0
+ },
+ "kmax": 4,
+ "texts": [
+  {
+   "key": "code-2k-0",
+   "cls": "code",
+   "mode": "greedy",
+   "prompt": 2047,
+   "generated": 321
+  },
+  {
+   "key": "en-2k-0",
+   "cls": "en",
+   "mode": "greedy",
+   "prompt": 2048,
+   "generated": 321
+  },
+  {
+   "key": "ru-2k-0",
+   "cls": "ru",
+   "mode": "greedy",
+   "prompt": 2047,
+   "generated": 321
+  },
+  {
+   "key": "en_prose",
+   "cls": "en",
+   "mode": "greedy",
+   "prompt": 43,
+   "generated": 321
+  },
+  {
+   "key": "ru_prose",
+   "cls": "ru",
+   "mode": "greedy",
+   "prompt": 52,
+   "generated": 321
+  },
+  {
+   "key": "code-2k-0",
+   "cls": "code",
+   "mode": "sampled",
+   "prompt": 2047,
+   "generated": 321
+  },
+  {
+   "key": "en-2k-0",
+   "cls": "en",
+   "mode": "sampled",
+   "prompt": 2048,
+   "generated": 321
+  },
+  {
+   "key": "ru-2k-0",
+   "cls": "ru",
+   "mode": "sampled",
+   "prompt": 2047,
+   "generated": 321
+  },
+  {
+   "key": "en_prose",
+   "cls": "en",
+   "mode": "sampled",
+   "prompt": 43,
+   "generated": 321
+  },
+  {
+   "key": "ru_prose",
+   "cls": "ru",
+   "mode": "sampled",
+   "prompt": 52,
+   "generated": 321
+  }
+ ],
+ "accept": {
+  "greedy/code/q4": {
+   "positions": 317,
+   "n": [
+    317,
+    292,
+    255,
+    213
+   ],
+   "match": [
+    292,
+    255,
+    213,
+    179
+   ],
+   "q_sum": [
+    286.497,
+    253.922,
+    212.56,
+    177.79
+   ],
+   "cos": [
+    0.5791,
+    0.4965,
+    0.4462,
+    0.4136
+   ]
+  },
+  "greedy/code/q4 oracle": {
+   "positions": 317,
+   "n": [
+    317,
+    292,
+    271,
+    252
+   ],
+   "match": [
+    292,
+    271,
+    252,
+    236
+   ],
+   "q_sum": [
+    286.497,
+    266.253,
+    247.033,
+    230.997
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/code/q8": {
+   "positions": 317,
+   "n": [
+    317,
+    293,
+    258,
+    217
+   ],
+   "match": [
+    293,
+    258,
+    217,
+    183
+   ],
+   "q_sum": [
+    286.95,
+    256.275,
+    217.242,
+    181.622
+   ],
+   "cos": [
+    0.5797,
+    0.4969,
+    0.4473,
+    0.4168
+   ]
+  },
+  "greedy/code/q8 oracle": {
+   "positions": 317,
+   "n": [
+    317,
+    293,
+    273,
+    254
+   ],
+   "match": [
+    293,
+    273,
+    254,
+    237
+   ],
+   "q_sum": [
+    286.95,
+    267.392,
+    248.917,
+    232.562
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/code/fp16": {
+   "positions": 317,
+   "n": [
+    317,
+    293,
+    257,
+    216
+   ],
+   "match": [
+    293,
+    257,
+    216,
+    183
+   ],
+   "q_sum": [
+    286.911,
+    255.275,
+    216.242,
+    181.506
+   ],
+   "cos": [
+    0.5798,
+    0.4978,
+    0.4479,
+    0.4165
+   ]
+  },
+  "greedy/code/fp16 oracle": {
+   "positions": 317,
+   "n": [
+    317,
+    293,
+    273,
+    254
+   ],
+   "match": [
+    293,
+    273,
+    254,
+    237
+   ],
+   "q_sum": [
+    286.911,
+    267.353,
+    248.878,
+    232.639
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/en/q4": {
+   "positions": 634,
+   "n": [
+    634,
+    486,
+    310,
+    170
+   ],
+   "match": [
+    486,
+    310,
+    170,
+    78
+   ],
+   "q_sum": [
+    466.98,
+    298.52,
+    162.443,
+    77.136
+   ],
+   "cos": [
+    0.6772,
+    0.5642,
+    0.5085,
+    0.4864
+   ]
+  },
+  "greedy/en/q4 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    486,
+    380,
+    297
+   ],
+   "match": [
+    486,
+    380,
+    297,
+    234
+   ],
+   "q_sum": [
+    466.98,
+    363.573,
+    284.762,
+    225.377
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/en/q8": {
+   "positions": 634,
+   "n": [
+    634,
+    486,
+    311,
+    176
+   ],
+   "match": [
+    486,
+    311,
+    176,
+    85
+   ],
+   "q_sum": [
+    466.767,
+    298.738,
+    166.846,
+    82.985
+   ],
+   "cos": [
+    0.6778,
+    0.5654,
+    0.5128,
+    0.4878
+   ]
+  },
+  "greedy/en/q8 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    486,
+    379,
+    299
+   ],
+   "match": [
+    486,
+    379,
+    299,
+    235
+   ],
+   "q_sum": [
+    466.767,
+    362.873,
+    286.26,
+    225.637
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/en/fp16": {
+   "positions": 634,
+   "n": [
+    634,
+    484,
+    306,
+    172
+   ],
+   "match": [
+    484,
+    306,
+    172,
+    83
+   ],
+   "q_sum": [
+    464.874,
+    295.073,
+    162.38,
+    82.182
+   ],
+   "cos": [
+    0.6778,
+    0.565,
+    0.5145,
+    0.4879
+   ]
+  },
+  "greedy/en/fp16 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    484,
+    377,
+    297
+   ],
+   "match": [
+    484,
+    377,
+    297,
+    233
+   ],
+   "q_sum": [
+    464.874,
+    360.47,
+    284.064,
+    224.302
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/ru/q4": {
+   "positions": 634,
+   "n": [
+    634,
+    454,
+    250,
+    111
+   ],
+   "match": [
+    454,
+    250,
+    111,
+    44
+   ],
+   "q_sum": [
+    436.98,
+    246.08,
+    107.793,
+    41.227
+   ],
+   "cos": [
+    0.6143,
+    0.5116,
+    0.4865,
+    0.485
+   ]
+  },
+  "greedy/ru/q4 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    454,
+    326,
+    238
+   ],
+   "match": [
+    454,
+    326,
+    238,
+    168
+   ],
+   "q_sum": [
+    436.98,
+    314.75,
+    227.787,
+    161.857
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/ru/q8": {
+   "positions": 634,
+   "n": [
+    634,
+    464,
+    256,
+    117
+   ],
+   "match": [
+    464,
+    256,
+    117,
+    43
+   ],
+   "q_sum": [
+    444.133,
+    250.478,
+    113.301,
+    40.821
+   ],
+   "cos": [
+    0.616,
+    0.5147,
+    0.4934,
+    0.4904
+   ]
+  },
+  "greedy/ru/q8 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    464,
+    340,
+    255
+   ],
+   "match": [
+    464,
+    340,
+    255,
+    185
+   ],
+   "q_sum": [
+    444.133,
+    327.212,
+    243.169,
+    178.171
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/ru/fp16": {
+   "positions": 634,
+   "n": [
+    634,
+    462,
+    256,
+    117
+   ],
+   "match": [
+    462,
+    256,
+    117,
+    44
+   ],
+   "q_sum": [
+    442.698,
+    251.312,
+    113.799,
+    41.766
+   ],
+   "cos": [
+    0.616,
+    0.5147,
+    0.4932,
+    0.4878
+   ]
+  },
+  "greedy/ru/fp16 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    462,
+    337,
+    251
+   ],
+   "match": [
+    462,
+    337,
+    251,
+    180
+   ],
+   "q_sum": [
+    442.698,
+    324.285,
+    239.318,
+    173.244
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/all/q4": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1232,
+    815,
+    494
+   ],
+   "match": [
+    1232,
+    815,
+    494,
+    301
+   ],
+   "q_sum": [
+    1190.458,
+    798.523,
+    482.796,
+    296.153
+   ],
+   "cos": [
+    0.6324,
+    0.5287,
+    0.4822,
+    0.4547
+   ]
+  },
+  "greedy/all/q4 oracle": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1232,
+    977,
+    787
+   ],
+   "match": [
+    1232,
+    977,
+    787,
+    638
+   ],
+   "q_sum": [
+    1190.458,
+    944.576,
+    759.583,
+    618.231
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/all/q8": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1243,
+    825,
+    510
+   ],
+   "match": [
+    1243,
+    825,
+    510,
+    311
+   ],
+   "q_sum": [
+    1197.849,
+    805.49,
+    497.389,
+    305.429
+   ],
+   "cos": [
+    0.6334,
+    0.5303,
+    0.4863,
+    0.4582
+   ]
+  },
+  "greedy/all/q8 oracle": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1243,
+    992,
+    808
+   ],
+   "match": [
+    1243,
+    992,
+    808,
+    657
+   ],
+   "q_sum": [
+    1197.849,
+    957.477,
+    778.346,
+    636.371
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "greedy/all/fp16": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1239,
+    819,
+    505
+   ],
+   "match": [
+    1239,
+    819,
+    505,
+    310
+   ],
+   "q_sum": [
+    1194.483,
+    801.659,
+    492.421,
+    305.455
+   ],
+   "cos": [
+    0.6335,
+    0.5304,
+    0.487,
+    0.4573
+   ]
+  },
+  "greedy/all/fp16 oracle": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1239,
+    987,
+    802
+   ],
+   "match": [
+    1239,
+    987,
+    802,
+    650
+   ],
+   "q_sum": [
+    1194.483,
+    952.108,
+    772.26,
+    630.185
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/code/q4": {
+   "positions": 317,
+   "n": [
+    317,
+    275,
+    232,
+    191
+   ],
+   "match": [
+    275,
+    232,
+    191,
+    159
+   ],
+   "q_sum": [
+    277.173,
+    234.828,
+    191.001,
+    155.881
+   ],
+   "cos": [
+    0.593,
+    0.5053,
+    0.4479,
+    0.4175
+   ]
+  },
+  "sampled/code/q4 oracle": {
+   "positions": 317,
+   "n": [
+    317,
+    275,
+    244,
+    218
+   ],
+   "match": [
+    275,
+    244,
+    218,
+    198
+   ],
+   "q_sum": [
+    277.173,
+    245.513,
+    217.71,
+    197.464
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/code/q8": {
+   "positions": 317,
+   "n": [
+    317,
+    278,
+    236,
+    192
+   ],
+   "match": [
+    278,
+    236,
+    192,
+    156
+   ],
+   "q_sum": [
+    278.527,
+    237.393,
+    192.559,
+    155.783
+   ],
+   "cos": [
+    0.5937,
+    0.5054,
+    0.4483,
+    0.4189
+   ]
+  },
+  "sampled/code/q8 oracle": {
+   "positions": 317,
+   "n": [
+    317,
+    278,
+    250,
+    227
+   ],
+   "match": [
+    278,
+    250,
+    227,
+    209
+   ],
+   "q_sum": [
+    278.527,
+    249.704,
+    224.901,
+    206.723
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/code/fp16": {
+   "positions": 317,
+   "n": [
+    317,
+    276,
+    235,
+    191
+   ],
+   "match": [
+    276,
+    235,
+    191,
+    157
+   ],
+   "q_sum": [
+    276.943,
+    236.857,
+    191.559,
+    155.58
+   ],
+   "cos": [
+    0.5938,
+    0.5064,
+    0.4485,
+    0.4186
+   ]
+  },
+  "sampled/code/fp16 oracle": {
+   "positions": 317,
+   "n": [
+    317,
+    276,
+    246,
+    221
+   ],
+   "match": [
+    276,
+    246,
+    221,
+    202
+   ],
+   "q_sum": [
+    276.943,
+    246.12,
+    219.317,
+    200.071
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/en/q4": {
+   "positions": 634,
+   "n": [
+    634,
+    449,
+    270,
+    146
+   ],
+   "match": [
+    449,
+    270,
+    146,
+    61
+   ],
+   "q_sum": [
+    458.199,
+    270.66,
+    142.811,
+    59.951
+   ],
+   "cos": [
+    0.6864,
+    0.5754,
+    0.5232,
+    0.4979
+   ]
+  },
+  "sampled/en/q4 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    449,
+    322,
+    232
+   ],
+   "match": [
+    449,
+    322,
+    232,
+    162
+   ],
+   "q_sum": [
+    458.199,
+    330.528,
+    235.346,
+    164.928
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/en/q8": {
+   "positions": 634,
+   "n": [
+    634,
+    448,
+    276,
+    146
+   ],
+   "match": [
+    448,
+    276,
+    146,
+    63
+   ],
+   "q_sum": [
+    456.848,
+    276.668,
+    146.244,
+    63.61
+   ],
+   "cos": [
+    0.6871,
+    0.5776,
+    0.5254,
+    0.5024
+   ]
+  },
+  "sampled/en/q8 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    448,
+    321,
+    229
+   ],
+   "match": [
+    448,
+    321,
+    229,
+    160
+   ],
+   "q_sum": [
+    456.848,
+    326.803,
+    230.999,
+    162.632
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/en/fp16": {
+   "positions": 634,
+   "n": [
+    634,
+    448,
+    273,
+    145
+   ],
+   "match": [
+    448,
+    273,
+    145,
+    63
+   ],
+   "q_sum": [
+    456.732,
+    274.274,
+    144.105,
+    63.487
+   ],
+   "cos": [
+    0.687,
+    0.5775,
+    0.5249,
+    0.5011
+   ]
+  },
+  "sampled/en/fp16 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    448,
+    321,
+    229
+   ],
+   "match": [
+    448,
+    321,
+    229,
+    160
+   ],
+   "q_sum": [
+    456.732,
+    326.803,
+    230.999,
+    162.632
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/ru/q4": {
+   "positions": 634,
+   "n": [
+    634,
+    445,
+    240,
+    114
+   ],
+   "match": [
+    445,
+    240,
+    114,
+    45
+   ],
+   "q_sum": [
+    440.17,
+    241.251,
+    112.595,
+    45.01
+   ],
+   "cos": [
+    0.6162,
+    0.5189,
+    0.4911,
+    0.5006
+   ]
+  },
+  "sampled/ru/q4 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    445,
+    324,
+    234
+   ],
+   "match": [
+    445,
+    324,
+    234,
+    170
+   ],
+   "q_sum": [
+    440.17,
+    321.802,
+    230.554,
+    166.315
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/ru/q8": {
+   "positions": 634,
+   "n": [
+    634,
+    443,
+    240,
+    113
+   ],
+   "match": [
+    443,
+    240,
+    113,
+    47
+   ],
+   "q_sum": [
+    440.355,
+    244.448,
+    111.991,
+    47.612
+   ],
+   "cos": [
+    0.6181,
+    0.5212,
+    0.4934,
+    0.5018
+   ]
+  },
+  "sampled/ru/q8 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    443,
+    322,
+    233
+   ],
+   "match": [
+    443,
+    322,
+    233,
+    169
+   ],
+   "q_sum": [
+    440.355,
+    322.601,
+    232.804,
+    168.183
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/ru/fp16": {
+   "positions": 634,
+   "n": [
+    634,
+    446,
+    242,
+    117
+   ],
+   "match": [
+    446,
+    242,
+    117,
+    49
+   ],
+   "q_sum": [
+    441.727,
+    245.755,
+    114.952,
+    48.8
+   ],
+   "cos": [
+    0.6181,
+    0.521,
+    0.4923,
+    0.499
+   ]
+  },
+  "sampled/ru/fp16 oracle": {
+   "positions": 634,
+   "n": [
+    634,
+    446,
+    325,
+    236
+   ],
+   "match": [
+    446,
+    325,
+    236,
+    172
+   ],
+   "q_sum": [
+    441.727,
+    324.643,
+    235.804,
+    171.043
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/all/q4": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1169,
+    742,
+    451
+   ],
+   "match": [
+    1169,
+    742,
+    451,
+    265
+   ],
+   "q_sum": [
+    1175.542,
+    746.74,
+    446.407,
+    260.842
+   ],
+   "cos": [
+    0.6396,
+    0.5374,
+    0.4893,
+    0.4646
+   ]
+  },
+  "sampled/all/q4 oracle": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1169,
+    890,
+    684
+   ],
+   "match": [
+    1169,
+    890,
+    684,
+    530
+   ],
+   "q_sum": [
+    1175.542,
+    897.843,
+    683.61,
+    528.708
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/all/q8": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1169,
+    752,
+    451
+   ],
+   "match": [
+    1169,
+    752,
+    451,
+    266
+   ],
+   "q_sum": [
+    1175.729,
+    758.509,
+    450.795,
+    267.006
+   ],
+   "cos": [
+    0.6408,
+    0.5391,
+    0.491,
+    0.4667
+   ]
+  },
+  "sampled/all/q8 oracle": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1169,
+    893,
+    689
+   ],
+   "match": [
+    1169,
+    893,
+    689,
+    538
+   ],
+   "q_sum": [
+    1175.729,
+    899.109,
+    688.704,
+    537.537
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "sampled/all/fp16": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1170,
+    750,
+    453
+   ],
+   "match": [
+    1170,
+    750,
+    453,
+    269
+   ],
+   "q_sum": [
+    1175.402,
+    756.886,
+    450.616,
+    267.867
+   ],
+   "cos": [
+    0.6408,
+    0.5392,
+    0.4904,
+    0.4658
+   ]
+  },
+  "sampled/all/fp16 oracle": {
+   "positions": 1585,
+   "n": [
+    1585,
+    1170,
+    892,
+    686
+   ],
+   "match": [
+    1170,
+    892,
+    686,
+    534
+   ],
+   "q_sum": [
+    1175.402,
+    897.567,
+    686.12,
+    533.746
+   ],
+   "cos": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "pair/q4-q8": {
+   "a_only": 10,
+   "b_only": 21,
+   "mean_diff": -0.02965299684542587,
+   "se": 0.012067425293806252,
+   "n": 1585
+  },
+  "pair/q4-fp16": {
+   "a_only": 11,
+   "b_only": 18,
+   "mean_diff": -0.019558359621451103,
+   "se": 0.01140193749135455,
+   "n": 1585
+  },
+  "pair/q8-fp16": {
+   "a_only": 5,
+   "b_only": 1,
+   "mean_diff": 0.010094637223974764,
+   "se": 0.006614317631940675,
+   "n": 1585
+  },
+  "wide/q4": {
+   "same": 956,
+   "positions": 960,
+   "fp16": [
+    793,
+    577,
+    388,
+    264
+   ],
+   "fp32": [
+    795,
+    580,
+    391,
+    265
+   ],
+   "nonfinite_fp16": 0
+  },
+  "wide/q8": {
+   "same": 955,
+   "positions": 960,
+   "fp16": [
+    803,
+    587,
+    404,
+    273
+   ],
+   "fp32": [
+    803,
+    587,
+    404,
+    272
+   ],
+   "nonfinite_fp16": 0
+  },
+  "wide/fp16": {
+   "same": 956,
+   "positions": 960,
+   "fp16": [
+    800,
+    581,
+    398,
+    272
+   ],
+   "fp32": [
+    800,
+    581,
+    397,
+    272
+   ],
+   "nonfinite_fp16": 0
+  }
+ },
+ "rounds": {
+  "greedy/code/q4/kept/1": {
+   "tokens": 319,
+   "rounds": 166,
+   "hist": [
+    13,
+    153
+   ],
+   "expected": 315.81
+  },
+  "greedy/code/q4/kept/2": {
+   "tokens": 320,
+   "rounds": 121,
+   "hist": [
+    14,
+    15,
+    92
+   ],
+   "expected": 316.92
+  },
+  "greedy/code/q4/kept/3": {
+   "tokens": 318,
+   "rounds": 96,
+   "hist": [
+    11,
+    11,
+    11,
+    63
+   ],
+   "expected": 313.59
+  },
+  "greedy/code/q4/kept/4": {
+   "tokens": 316,
+   "rounds": 86,
+   "hist": [
+    12,
+    11,
+    11,
+    11,
+    41
+   ],
+   "expected": 313.65
+  },
+  "greedy/code/q4/refeed/1": {
+   "tokens": 319,
+   "rounds": 166,
+   "hist": [
+    13,
+    153
+   ],
+   "expected": 315.81
+  },
+  "greedy/code/q4/refeed/2": {
+   "tokens": 320,
+   "rounds": 119,
+   "hist": [
+    11,
+    15,
+    93
+   ],
+   "expected": 317.95
+  },
+  "greedy/code/q4/refeed/3": {
+   "tokens": 317,
+   "rounds": 96,
+   "hist": [
+    11,
+    11,
+    12,
+    62
+   ],
+   "expected": 314.77
+  },
+  "greedy/code/q4/refeed/4": {
+   "tokens": 316,
+   "rounds": 81,
+   "hist": [
+    11,
+    7,
+    7,
+    10,
+    46
+   ],
+   "expected": 313.32
+  },
+  "greedy/code/q8/kept/1": {
+   "tokens": 319,
+   "rounds": 165,
+   "hist": [
+    11,
+    154
+   ],
+   "expected": 314.96
+  },
+  "greedy/code/q8/kept/2": {
+   "tokens": 320,
+   "rounds": 119,
+   "hist": [
+    12,
+    13,
+    94
+   ],
+   "expected": 317.0
+  },
+  "greedy/code/q8/kept/3": {
+   "tokens": 318,
+   "rounds": 97,
+   "hist": [
+    11,
+    10,
+    17,
+    59
+   ],
+   "expected": 314.51
+  },
+  "greedy/code/q8/kept/4": {
+   "tokens": 316,
+   "rounds": 88,
+   "hist": [
+    13,
+    13,
+    12,
+    9,
+    41
+   ],
+   "expected": 314.99
+  },
+  "greedy/code/q8/refeed/1": {
+   "tokens": 319,
+   "rounds": 165,
+   "hist": [
+    11,
+    154
+   ],
+   "expected": 314.96
+  },
+  "greedy/code/q8/refeed/2": {
+   "tokens": 320,
+   "rounds": 118,
+   "hist": [
+    11,
+    12,
+    95
+   ],
+   "expected": 317.06
+  },
+  "greedy/code/q8/refeed/3": {
+   "tokens": 317,
+   "rounds": 97,
+   "hist": [
+    12,
+    11,
+    13,
+    61
+   ],
+   "expected": 315.08
+  },
+  "greedy/code/q8/refeed/4": {
+   "tokens": 318,
+   "rounds": 83,
+   "hist": [
+    11,
+    10,
+    7,
+    9,
+    46
+   ],
+   "expected": 316.1
+  },
+  "greedy/code/fp16/kept/1": {
+   "tokens": 319,
+   "rounds": 165,
+   "hist": [
+    11,
+    154
+   ],
+   "expected": 314.96
+  },
+  "greedy/code/fp16/kept/2": {
+   "tokens": 320,
+   "rounds": 119,
+   "hist": [
+    12,
+    13,
+    94
+   ],
+   "expected": 317.0
+  },
+  "greedy/code/fp16/kept/3": {
+   "tokens": 318,
+   "rounds": 97,
+   "hist": [
+    11,
+    10,
+    17,
+    59
+   ],
+   "expected": 314.51
+  },
+  "greedy/code/fp16/kept/4": {
+   "tokens": 316,
+   "rounds": 88,
+   "hist": [
+    13,
+    13,
+    12,
+    9,
+    41
+   ],
+   "expected": 314.99
+  },
+  "greedy/code/fp16/refeed/1": {
+   "tokens": 319,
+   "rounds": 165,
+   "hist": [
+    11,
+    154
+   ],
+   "expected": 314.96
+  },
+  "greedy/code/fp16/refeed/2": {
+   "tokens": 320,
+   "rounds": 118,
+   "hist": [
+    11,
+    12,
+    95
+   ],
+   "expected": 317.06
+  },
+  "greedy/code/fp16/refeed/3": {
+   "tokens": 317,
+   "rounds": 97,
+   "hist": [
+    12,
+    11,
+    13,
+    61
+   ],
+   "expected": 315.08
+  },
+  "greedy/code/fp16/refeed/4": {
+   "tokens": 318,
+   "rounds": 83,
+   "hist": [
+    11,
+    10,
+    7,
+    9,
+    46
+   ],
+   "expected": 315.77
+  },
+  "greedy/en/q4/kept/1": {
+   "tokens": 640,
+   "rounds": 365,
+   "hist": [
+    90,
+    275
+   ],
+   "expected": 629.0
+  },
+  "greedy/en/q4/kept/2": {
+   "tokens": 637,
+   "rounds": 283,
+   "hist": [
+    66,
+    80,
+    137
+   ],
+   "expected": 620.87
+  },
+  "greedy/en/q4/kept/3": {
+   "tokens": 637,
+   "rounds": 264,
+   "hist": [
+    66,
+    83,
+    55,
+    60
+   ],
+   "expected": 625.53
+  },
+  "greedy/en/q4/kept/4": {
+   "tokens": 632,
+   "rounds": 244,
+   "hist": [
+    58,
+    72,
+    55,
+    30,
+    29
+   ],
+   "expected": 619.1
+  },
+  "greedy/en/q4/refeed/1": {
+   "tokens": 640,
+   "rounds": 365,
+   "hist": [
+    90,
+    275
+   ],
+   "expected": 629.0
+  },
+  "greedy/en/q4/refeed/2": {
+   "tokens": 637,
+   "rounds": 286,
+   "hist": [
+    70,
+    81,
+    135
+   ],
+   "expected": 621.37
+  },
+  "greedy/en/q4/refeed/3": {
+   "tokens": 637,
+   "rounds": 256,
+   "hist": [
+    63,
+    75,
+    48,
+    70
+   ],
+   "expected": 622.96
+  },
+  "greedy/en/q4/refeed/4": {
+   "tokens": 632,
+   "rounds": 240,
+   "hist": [
+    59,
+    66,
+    48,
+    38,
+    29
+   ],
+   "expected": 619.32
+  },
+  "greedy/en/q8/kept/1": {
+   "tokens": 640,
+   "rounds": 361,
+   "hist": [
+    82,
+    279
+   ],
+   "expected": 627.82
+  },
+  "greedy/en/q8/kept/2": {
+   "tokens": 637,
+   "rounds": 289,
+   "hist": [
+    75,
+    80,
+    134
+   ],
+   "expected": 624.98
+  },
+  "greedy/en/q8/kept/3": {
+   "tokens": 637,
+   "rounds": 262,
+   "hist": [
+    65,
+    82,
+    52,
+    63
+   ],
+   "expected": 624.27
+  },
+  "greedy/en/q8/kept/4": {
+   "tokens": 632,
+   "rounds": 246,
+   "hist": [
+    60,
+    73,
+    54,
+    31,
+    28
+   ],
+   "expected": 619.14
+  },
+  "greedy/en/q8/refeed/1": {
+   "tokens": 640,
+   "rounds": 361,
+   "hist": [
+    82,
+    279
+   ],
+   "expected": 627.82
+  },
+  "greedy/en/q8/refeed/2": {
+   "tokens": 637,
+   "rounds": 285,
+   "hist": [
+    68,
+    82,
+    135
+   ],
+   "expected": 621.13
+  },
+  "greedy/en/q8/refeed/3": {
+   "tokens": 637,
+   "rounds": 254,
+   "hist": [
+    61,
+    72,
+    52,
+    69
+   ],
+   "expected": 621.72
+  },
+  "greedy/en/q8/refeed/4": {
+   "tokens": 632,
+   "rounds": 235,
+   "hist": [
+    54,
+    62,
+    54,
+    33,
+    32
+   ],
+   "expected": 615.68
+  },
+  "greedy/en/fp16/kept/1": {
+   "tokens": 640,
+   "rounds": 363,
+   "hist": [
+    86,
+    277
+   ],
+   "expected": 628.3
+  },
+  "greedy/en/fp16/kept/2": {
+   "tokens": 637,
+   "rounds": 290,
+   "hist": [
+    77,
+    79,
+    134
+   ],
+   "expected": 625.38
+  },
+  "greedy/en/fp16/kept/3": {
+   "tokens": 637,
+   "rounds": 263,
+   "hist": [
+    65,
+    82,
+    56,
+    60
+   ],
+   "expected": 624.96
+  },
+  "greedy/en/fp16/kept/4": {
+   "tokens": 632,
+   "rounds": 243,
+   "hist": [
+    56,
+    71,
+    58,
+    30,
+    28
+   ],
+   "expected": 617.22
+  },
+  "greedy/en/fp16/refeed/1": {
+   "tokens": 640,
+   "rounds": 363,
+   "hist": [
+    86,
+    277
+   ],
+   "expected": 628.3
+  },
+  "greedy/en/fp16/refeed/2": {
+   "tokens": 637,
+   "rounds": 286,
+   "hist": [
+    70,
+    81,
+    135
+   ],
+   "expected": 622.87
+  },
+  "greedy/en/fp16/refeed/3": {
+   "tokens": 637,
+   "rounds": 255,
+   "hist": [
+    61,
+    75,
+    50,
+    69
+   ],
+   "expected": 621.81
+  },
+  "greedy/en/fp16/refeed/4": {
+   "tokens": 632,
+   "rounds": 237,
+   "hist": [
+    55,
+    65,
+    52,
+    34,
+    31
+   ],
+   "expected": 616.17
+  },
+  "greedy/ru/q4/kept/1": {
+   "tokens": 639,
+   "rounds": 364,
+   "hist": [
+    89,
+    275
+   ],
+   "expected": 624.81
+  },
+  "greedy/ru/q4/kept/2": {
+   "tokens": 638,
+   "rounds": 300,
+   "hist": [
+    80,
+    102,
+    118
+   ],
+   "expected": 623.84
+  },
+  "greedy/ru/q4/kept/3": {
+   "tokens": 637,
+   "rounds": 282,
+   "hist": [
+    75,
+    99,
+    68,
+    40
+   ],
+   "expected": 623.64
+  },
+  "greedy/ru/q4/kept/4": {
+   "tokens": 633,
+   "rounds": 274,
+   "hist": [
+    79,
+    86,
+    72,
+    19,
+    18
+   ],
+   "expected": 619.83
+  },
+  "greedy/ru/q4/refeed/1": {
+   "tokens": 639,
+   "rounds": 364,
+   "hist": [
+    89,
+    275
+   ],
+   "expected": 624.81
+  },
+  "greedy/ru/q4/refeed/2": {
+   "tokens": 638,
+   "rounds": 301,
+   "hist": [
+    83,
+    99,
+    119
+   ],
+   "expected": 624.13
+  },
+  "greedy/ru/q4/refeed/3": {
+   "tokens": 637,
+   "rounds": 285,
+   "hist": [
+    84,
+    94,
+    63,
+    44
+   ],
+   "expected": 623.98
+  },
+  "greedy/ru/q4/refeed/4": {
+   "tokens": 635,
+   "rounds": 277,
+   "hist": [
+    82,
+    91,
+    62,
+    25,
+    17
+   ],
+   "expected": 620.93
+  },
+  "greedy/ru/q8/kept/1": {
+   "tokens": 639,
+   "rounds": 361,
+   "hist": [
+    83,
+    278
+   ],
+   "expected": 622.33
+  },
+  "greedy/ru/q8/kept/2": {
+   "tokens": 638,
+   "rounds": 302,
+   "hist": [
+    82,
+    104,
+    116
+   ],
+   "expected": 623.59
+  },
+  "greedy/ru/q8/kept/3": {
+   "tokens": 637,
+   "rounds": 280,
+   "hist": [
+    78,
+    92,
+    65,
+    45
+   ],
+   "expected": 623.28
+  },
+  "greedy/ru/q8/kept/4": {
+   "tokens": 633,
+   "rounds": 277,
+   "hist": [
+    80,
+    94,
+    64,
+    22,
+    17
+   ],
+   "expected": 620.64
+  },
+  "greedy/ru/q8/refeed/1": {
+   "tokens": 639,
+   "rounds": 361,
+   "hist": [
+    83,
+    278
+   ],
+   "expected": 622.33
+  },
+  "greedy/ru/q8/refeed/2": {
+   "tokens": 638,
+   "rounds": 302,
+   "hist": [
+    81,
+    106,
+    115
+   ],
+   "expected": 624.21
+  },
+  "greedy/ru/q8/refeed/3": {
+   "tokens": 637,
+   "rounds": 281,
+   "hist": [
+    78,
+    99,
+    55,
+    49
+   ],
+   "expected": 622.43
+  },
+  "greedy/ru/q8/refeed/4": {
+   "tokens": 635,
+   "rounds": 275,
+   "hist": [
+    79,
+    95,
+    56,
+    27,
+    18
+   ],
+   "expected": 621.2
+  },
+  "greedy/ru/fp16/kept/1": {
+   "tokens": 639,
+   "rounds": 361,
+   "hist": [
+    83,
+    278
+   ],
+   "expected": 622.52
+  },
+  "greedy/ru/fp16/kept/2": {
+   "tokens": 638,
+   "rounds": 303,
+   "hist": [
+    83,
+    105,
+    115
+   ],
+   "expected": 623.71
+  },
+  "greedy/ru/fp16/kept/3": {
+   "tokens": 637,
+   "rounds": 283,
+   "hist": [
+    81,
+    93,
+    66,
+    43
+   ],
+   "expected": 623.31
+  },
+  "greedy/ru/fp16/kept/4": {
+   "tokens": 633,
+   "rounds": 274,
+   "hist": [
+    79,
+    88,
+    67,
+    23,
+    17
+   ],
+   "expected": 619.79
+  },
+  "greedy/ru/fp16/refeed/1": {
+   "tokens": 639,
+   "rounds": 361,
+   "hist": [
+    83,
+    278
+   ],
+   "expected": 622.52
+  },
+  "greedy/ru/fp16/refeed/2": {
+   "tokens": 638,
+   "rounds": 302,
+   "hist": [
+    83,
+    102,
+    117
+   ],
+   "expected": 624.88
+  },
+  "greedy/ru/fp16/refeed/3": {
+   "tokens": 637,
+   "rounds": 282,
+   "hist": [
+    81,
+    95,
+    58,
+    48
+   ],
+   "expected": 623.66
+  },
+  "greedy/ru/fp16/refeed/4": {
+   "tokens": 635,
+   "rounds": 276,
+   "hist": [
+    82,
+    91,
+    59,
+    26,
+    18
+   ],
+   "expected": 622.44
+  },
+  "greedy/all/q4/kept/1": {
+   "tokens": 1598,
+   "rounds": 895,
+   "hist": [
+    192,
+    703
+   ],
+   "expected": 1569.62
+  },
+  "greedy/all/q4/kept/2": {
+   "tokens": 1595,
+   "rounds": 704,
+   "hist": [
+    160,
+    197,
+    347
+   ],
+   "expected": 1561.64
+  },
+  "greedy/all/q4/kept/3": {
+   "tokens": 1592,
+   "rounds": 642,
+   "hist": [
+    152,
+    193,
+    134,
+    163
+   ],
+   "expected": 1562.75
+  },
+  "greedy/all/q4/kept/4": {
+   "tokens": 1581,
+   "rounds": 604,
+   "hist": [
+    149,
+    169,
+    138,
+    60,
+    88
+   ],
+   "expected": 1552.58
+  },
+  "greedy/all/q4/refeed/1": {
+   "tokens": 1598,
+   "rounds": 895,
+   "hist": [
+    192,
+    703
+   ],
+   "expected": 1569.62
+  },
+  "greedy/all/q4/refeed/2": {
+   "tokens": 1595,
+   "rounds": 706,
+   "hist": [
+    164,
+    195,
+    347
+   ],
+   "expected": 1563.45
+  },
+  "greedy/all/q4/refeed/3": {
+   "tokens": 1591,
+   "rounds": 637,
+   "hist": [
+    158,
+    180,
+    123,
+    176
+   ],
+   "expected": 1561.71
+  },
+  "greedy/all/q4/refeed/4": {
+   "tokens": 1583,
+   "rounds": 598,
+   "hist": [
+    152,
+    164,
+    117,
+    73,
+    92
+   ],
+   "expected": 1553.57
+  },
+  "greedy/all/q8/kept/1": {
+   "tokens": 1598,
+   "rounds": 887,
+   "hist": [
+    176,
+    711
+   ],
+   "expected": 1565.11
+  },
+  "greedy/all/q8/kept/2": {
+   "tokens": 1595,
+   "rounds": 710,
+   "hist": [
+    169,
+    197,
+    344
+   ],
+   "expected": 1565.58
+  },
+  "greedy/all/q8/kept/3": {
+   "tokens": 1592,
+   "rounds": 639,
+   "hist": [
+    154,
+    184,
+    134,
+    167
+   ],
+   "expected": 1562.05
+  },
+  "greedy/all/q8/kept/4": {
+   "tokens": 1581,
+   "rounds": 611,
+   "hist": [
+    153,
+    180,
+    130,
+    62,
+    86
+   ],
+   "expected": 1554.77
+  },
+  "greedy/all/q8/refeed/1": {
+   "tokens": 1598,
+   "rounds": 887,
+   "hist": [
+    176,
+    711
+   ],
+   "expected": 1565.11
+  },
+  "greedy/all/q8/refeed/2": {
+   "tokens": 1595,
+   "rounds": 705,
+   "hist": [
+    160,
+    200,
+    345
+   ],
+   "expected": 1562.39
+  },
+  "greedy/all/q8/refeed/3": {
+   "tokens": 1591,
+   "rounds": 632,
+   "hist": [
+    151,
+    182,
+    120,
+    179
+   ],
+   "expected": 1559.22
+  },
+  "greedy/all/q8/refeed/4": {
+   "tokens": 1585,
+   "rounds": 593,
+   "hist": [
+    144,
+    167,
+    117,
+    69,
+    96
+   ],
+   "expected": 1552.98
+  },
+  "greedy/all/fp16/kept/1": {
+   "tokens": 1598,
+   "rounds": 889,
+   "hist": [
+    180,
+    709
+   ],
+   "expected": 1565.77
+  },
+  "greedy/all/fp16/kept/2": {
+   "tokens": 1595,
+   "rounds": 712,
+   "hist": [
+    172,
+    197,
+    343
+   ],
+   "expected": 1566.09
+  },
+  "greedy/all/fp16/kept/3": {
+   "tokens": 1592,
+   "rounds": 643,
+   "hist": [
+    157,
+    185,
+    139,
+    162
+   ],
+   "expected": 1562.78
+  },
+  "greedy/all/fp16/kept/4": {
+   "tokens": 1581,
+   "rounds": 605,
+   "hist": [
+    148,
+    172,
+    137,
+    62,
+    86
+   ],
+   "expected": 1552.0
+  },
+  "greedy/all/fp16/refeed/1": {
+   "tokens": 1598,
+   "rounds": 889,
+   "hist": [
+    180,
+    709
+   ],
+   "expected": 1565.77
+  },
+  "greedy/all/fp16/refeed/2": {
+   "tokens": 1595,
+   "rounds": 706,
+   "hist": [
+    164,
+    195,
+    347
+   ],
+   "expected": 1564.81
+  },
+  "greedy/all/fp16/refeed/3": {
+   "tokens": 1591,
+   "rounds": 634,
+   "hist": [
+    154,
+    181,
+    121,
+    178
+   ],
+   "expected": 1560.55
+  },
+  "greedy/all/fp16/refeed/4": {
+   "tokens": 1585,
+   "rounds": 596,
+   "hist": [
+    148,
+    166,
+    118,
+    69,
+    95
+   ],
+   "expected": 1554.37
+  },
+  "sampled/code/q4/kept/1": {
+   "tokens": 320,
+   "rounds": 173,
+   "hist": [
+    26,
+    147
+   ],
+   "expected": 322.19
+  },
+  "sampled/code/q4/kept/2": {
+   "tokens": 318,
+   "rounds": 125,
+   "hist": [
+    19,
+    19,
+    87
+   ],
+   "expected": 321.75
+  },
+  "sampled/code/q4/kept/3": {
+   "tokens": 319,
+   "rounds": 105,
+   "hist": [
+    18,
+    18,
+    11,
+    58
+   ],
+   "expected": 319.7
+  },
+  "sampled/code/q4/kept/4": {
+   "tokens": 318,
+   "rounds": 97,
+   "hist": [
+    21,
+    16,
+    13,
+    9,
+    38
+   ],
+   "expected": 319.54
+  },
+  "sampled/code/q4/refeed/1": {
+   "tokens": 320,
+   "rounds": 173,
+   "hist": [
+    26,
+    147
+   ],
+   "expected": 322.19
+  },
+  "sampled/code/q4/refeed/2": {
+   "tokens": 318,
+   "rounds": 124,
+   "hist": [
+    18,
+    18,
+    88
+   ],
+   "expected": 321.65
+  },
+  "sampled/code/q4/refeed/3": {
+   "tokens": 319,
+   "rounds": 106,
+   "hist": [
+    17,
+    21,
+    12,
+    56
+   ],
+   "expected": 320.65
+  },
+  "sampled/code/q4/refeed/4": {
+   "tokens": 320,
+   "rounds": 92,
+   "hist": [
+    20,
+    9,
+    12,
+    9,
+    42
+   ],
+   "expected": 318.22
+  },
+  "sampled/code/q8/kept/1": {
+   "tokens": 320,
+   "rounds": 173,
+   "hist": [
+    26,
+    147
+   ],
+   "expected": 321.27
+  },
+  "sampled/code/q8/kept/2": {
+   "tokens": 318,
+   "rounds": 126,
+   "hist": [
+    20,
+    20,
+    86
+   ],
+   "expected": 321.64
+  },
+  "sampled/code/q8/kept/3": {
+   "tokens": 318,
+   "rounds": 106,
+   "hist": [
+    20,
+    17,
+    12,
+    57
+   ],
+   "expected": 319.23
+  },
+  "sampled/code/q8/kept/4": {
+   "tokens": 318,
+   "rounds": 96,
+   "hist": [
+    19,
+    17,
+    12,
+    11,
+    37
+   ],
+   "expected": 318.72
+  },
+  "sampled/code/q8/refeed/1": {
+   "tokens": 320,
+   "rounds": 173,
+   "hist": [
+    26,
+    147
+   ],
+   "expected": 321.27
+  },
+  "sampled/code/q8/refeed/2": {
+   "tokens": 318,
+   "rounds": 124,
+   "hist": [
+    18,
+    18,
+    88
+   ],
+   "expected": 321.2
+  },
+  "sampled/code/q8/refeed/3": {
+   "tokens": 319,
+   "rounds": 106,
+   "hist": [
+    17,
+    22,
+    10,
+    57
+   ],
+   "expected": 319.33
+  },
+  "sampled/code/q8/refeed/4": {
+   "tokens": 320,
+   "rounds": 94,
+   "hist": [
+    21,
+    13,
+    10,
+    7,
+    43
+   ],
+   "expected": 319.14
+  },
+  "sampled/code/fp16/kept/1": {
+   "tokens": 320,
+   "rounds": 173,
+   "hist": [
+    26,
+    147
+   ],
+   "expected": 322.19
+  },
+  "sampled/code/fp16/kept/2": {
+   "tokens": 318,
+   "rounds": 126,
+   "hist": [
+    20,
+    20,
+    86
+   ],
+   "expected": 321.64
+  },
+  "sampled/code/fp16/kept/3": {
+   "tokens": 318,
+   "rounds": 107,
+   "hist": [
+    22,
+    16,
+    12,
+    57
+   ],
+   "expected": 319.23
+  },
+  "sampled/code/fp16/kept/4": {
+   "tokens": 318,
+   "rounds": 95,
+   "hist": [
+    21,
+    13,
+    12,
+    10,
+    39
+   ],
+   "expected": 320.66
+  },
+  "sampled/code/fp16/refeed/1": {
+   "tokens": 320,
+   "rounds": 173,
+   "hist": [
+    26,
+    147
+   ],
+   "expected": 322.19
+  },
+  "sampled/code/fp16/refeed/2": {
+   "tokens": 318,
+   "rounds": 124,
+   "hist": [
+    18,
+    18,
+    88
+   ],
+   "expected": 321.66
+  },
+  "sampled/code/fp16/refeed/3": {
+   "tokens": 319,
+   "rounds": 105,
+   "hist": [
+    16,
+    21,
+    11,
+    57
+   ],
+   "expected": 319.79
+  },
+  "sampled/code/fp16/refeed/4": {
+   "tokens": 320,
+   "rounds": 93,
+   "hist": [
+    20,
+    13,
+    10,
+    6,
+    44
+   ],
+   "expected": 318.03
+  },
+  "sampled/en/q4/kept/1": {
+   "tokens": 640,
+   "rounds": 374,
+   "hist": [
+    108,
+    266
+   ],
+   "expected": 643.0
+  },
+  "sampled/en/q4/kept/2": {
+   "tokens": 637,
+   "rounds": 304,
+   "hist": [
+    89,
+    97,
+    118
+   ],
+   "expected": 641.85
+  },
+  "sampled/en/q4/kept/3": {
+   "tokens": 637,
+   "rounds": 278,
+   "hist": [
+    77,
+    97,
+    50,
+    54
+   ],
+   "expected": 642.66
+  },
+  "sampled/en/q4/kept/4": {
+   "tokens": 632,
+   "rounds": 272,
+   "hist": [
+    82,
+    88,
+    53,
+    30,
+    19
+   ],
+   "expected": 641.01
+  },
+  "sampled/en/q4/refeed/1": {
+   "tokens": 640,
+   "rounds": 374,
+   "hist": [
+    108,
+    266
+   ],
+   "expected": 643.0
+  },
+  "sampled/en/q4/refeed/2": {
+   "tokens": 637,
+   "rounds": 305,
+   "hist": [
+    93,
+    92,
+    120
+   ],
+   "expected": 642.32
+  },
+  "sampled/en/q4/refeed/3": {
+   "tokens": 638,
+   "rounds": 277,
+   "hist": [
+    82,
+    89,
+    46,
+    60
+   ],
+   "expected": 644.36
+  },
+  "sampled/en/q4/refeed/4": {
+   "tokens": 632,
+   "rounds": 266,
+   "hist": [
+    81,
+    82,
+    46,
+    36,
+    21
+   ],
+   "expected": 639.7
+  },
+  "sampled/en/q8/kept/1": {
+   "tokens": 639,
+   "rounds": 376,
+   "hist": [
+    113,
+    263
+   ],
+   "expected": 644.77
+  },
+  "sampled/en/q8/kept/2": {
+   "tokens": 639,
+   "rounds": 305,
+   "hist": [
+    92,
+    92,
+    121
+   ],
+   "expected": 645.24
+  },
+  "sampled/en/q8/kept/3": {
+   "tokens": 636,
+   "rounds": 280,
+   "hist": [
+    85,
+    88,
+    53,
+    54
+   ],
+   "expected": 643.64
+  },
+  "sampled/en/q8/kept/4": {
+   "tokens": 632,
+   "rounds": 273,
+   "hist": [
+    89,
+    79,
+    55,
+    30,
+    20
+   ],
+   "expected": 637.99
+  },
+  "sampled/en/q8/refeed/1": {
+   "tokens": 639,
+   "rounds": 376,
+   "hist": [
+    113,
+    263
+   ],
+   "expected": 644.77
+  },
+  "sampled/en/q8/refeed/2": {
+   "tokens": 639,
+   "rounds": 302,
+   "hist": [
+    91,
+    85,
+    126
+   ],
+   "expected": 643.48
+  },
+  "sampled/en/q8/refeed/3": {
+   "tokens": 637,
+   "rounds": 274,
+   "hist": [
+    78,
+    88,
+    49,
+    59
+   ],
+   "expected": 641.53
+  },
+  "sampled/en/q8/refeed/4": {
+   "tokens": 632,
+   "rounds": 266,
+   "hist": [
+    79,
+    82,
+    51,
+    34,
+    20
+   ],
+   "expected": 638.73
+  },
+  "sampled/en/fp16/kept/1": {
+   "tokens": 639,
+   "rounds": 376,
+   "hist": [
+    113,
+    263
+   ],
+   "expected": 644.65
+  },
+  "sampled/en/fp16/kept/2": {
+   "tokens": 639,
+   "rounds": 307,
+   "hist": [
+    94,
+    94,
+    119
+   ],
+   "expected": 648.19
+  },
+  "sampled/en/fp16/kept/3": {
+   "tokens": 636,
+   "rounds": 278,
+   "hist": [
+    82,
+    88,
+    54,
+    54
+   ],
+   "expected": 641.55
+  },
+  "sampled/en/fp16/kept/4": {
+   "tokens": 632,
+   "rounds": 273,
+   "hist": [
+    89,
+    80,
+    54,
+    29,
+    21
+   ],
+   "expected": 639.89
+  },
+  "sampled/en/fp16/refeed/1": {
+   "tokens": 639,
+   "rounds": 376,
+   "hist": [
+    113,
+    263
+   ],
+   "expected": 644.65
+  },
+  "sampled/en/fp16/refeed/2": {
+   "tokens": 639,
+   "rounds": 302,
+   "hist": [
+    90,
+    87,
+    125
+   ],
+   "expected": 643.39
+  },
+  "sampled/en/fp16/refeed/3": {
+   "tokens": 637,
+   "rounds": 274,
+   "hist": [
+    79,
+    86,
+    50,
+    59
+   ],
+   "expected": 641.53
+  },
+  "sampled/en/fp16/refeed/4": {
+   "tokens": 632,
+   "rounds": 265,
+   "hist": [
+    79,
+    81,
+    50,
+    34,
+    21
+   ],
+   "expected": 638.61
+  },
+  "sampled/ru/q4/kept/1": {
+   "tokens": 638,
+   "rounds": 381,
+   "hist": [
+    124,
+    257
+   ],
+   "expected": 632.57
+  },
+  "sampled/ru/q4/kept/2": {
+   "tokens": 638,
+   "rounds": 318,
+   "hist": [
+    109,
+    98,
+    111
+   ],
+   "expected": 635.41
+  },
+  "sampled/ru/q4/kept/3": {
+   "tokens": 635,
+   "rounds": 293,
+   "hist": [
+    99,
+    94,
+    52,
+    48
+   ],
+   "expected": 630.67
+  },
+  "sampled/ru/q4/kept/4": {
+   "tokens": 635,
+   "rounds": 286,
+   "hist": [
+    98,
+    96,
+    43,
+    29,
+    20
+   ],
+   "expected": 634.37
+  },
+  "sampled/ru/q4/refeed/1": {
+   "tokens": 638,
+   "rounds": 381,
+   "hist": [
+    124,
+    257
+   ],
+   "expected": 632.57
+  },
+  "sampled/ru/q4/refeed/2": {
+   "tokens": 637,
+   "rounds": 312,
+   "hist": [
+    101,
+    97,
+    114
+   ],
+   "expected": 631.9
+  },
+  "sampled/ru/q4/refeed/3": {
+   "tokens": 634,
+   "rounds": 288,
+   "hist": [
+    98,
+    84,
+    56,
+    50
+   ],
+   "expected": 627.03
+  },
+  "sampled/ru/q4/refeed/4": {
+   "tokens": 633,
+   "rounds": 280,
+   "hist": [
+    96,
+    86,
+    48,
+    29,
+    21
+   ],
+   "expected": 630.43
+  },
+  "sampled/ru/q8/kept/1": {
+   "tokens": 638,
+   "rounds": 383,
+   "hist": [
+    128,
+    255
+   ],
+   "expected": 635.99
+  },
+  "sampled/ru/q8/kept/2": {
+   "tokens": 637,
+   "rounds": 319,
+   "hist": [
+    108,
+    104,
+    107
+   ],
+   "expected": 636.99
+  },
+  "sampled/ru/q8/kept/3": {
+   "tokens": 634,
+   "rounds": 290,
+   "hist": [
+    96,
+    93,
+    52,
+    49
+   ],
+   "expected": 628.62
+  },
+  "sampled/ru/q8/kept/4": {
+   "tokens": 633,
+   "rounds": 285,
+   "hist": [
+    96,
+    95,
+    46,
+    31,
+    17
+   ],
+   "expected": 628.85
+  },
+  "sampled/ru/q8/refeed/1": {
+   "tokens": 638,
+   "rounds": 383,
+   "hist": [
+    128,
+    255
+   ],
+   "expected": 635.99
+  },
+  "sampled/ru/q8/refeed/2": {
+   "tokens": 637,
+   "rounds": 315,
+   "hist": [
+    103,
+    102,
+    110
+   ],
+   "expected": 635.59
+  },
+  "sampled/ru/q8/refeed/3": {
+   "tokens": 634,
+   "rounds": 286,
+   "hist": [
+    94,
+    86,
+    56,
+    50
+   ],
+   "expected": 626.46
+  },
+  "sampled/ru/q8/refeed/4": {
+   "tokens": 633,
+   "rounds": 277,
+   "hist": [
+    92,
+    86,
+    48,
+    30,
+    21
+   ],
+   "expected": 628.54
+  },
+  "sampled/ru/fp16/kept/1": {
+   "tokens": 638,
+   "rounds": 381,
+   "hist": [
+    124,
+    257
+   ],
+   "expected": 634.92
+  },
+  "sampled/ru/fp16/kept/2": {
+   "tokens": 637,
+   "rounds": 318,
+   "hist": [
+    107,
+    103,
+    108
+   ],
+   "expected": 636.62
+  },
+  "sampled/ru/fp16/kept/3": {
+   "tokens": 634,
+   "rounds": 292,
+   "hist": [
+    98,
+    94,
+    52,
+    48
+   ],
+   "expected": 629.64
+  },
+  "sampled/ru/fp16/kept/4": {
+   "tokens": 633,
+   "rounds": 285,
+   "hist": [
+    96,
+    95,
+    46,
+    31,
+    17
+   ],
+   "expected": 628.85
+  },
+  "sampled/ru/fp16/refeed/1": {
+   "tokens": 638,
+   "rounds": 381,
+   "hist": [
+    124,
+    257
+   ],
+   "expected": 634.92
+  },
+  "sampled/ru/fp16/refeed/2": {
+   "tokens": 637,
+   "rounds": 312,
+   "hist": [
+    100,
+    99,
+    113
+   ],
+   "expected": 633.77
+  },
+  "sampled/ru/fp16/refeed/3": {
+   "tokens": 634,
+   "rounds": 283,
+   "hist": [
+    91,
+    85,
+    55,
+    52
+   ],
+   "expected": 625.75
+  },
+  "sampled/ru/fp16/refeed/4": {
+   "tokens": 633,
+   "rounds": 275,
+   "hist": [
+    90,
+    86,
+    46,
+    32,
+    21
+   ],
+   "expected": 628.33
+  },
+  "sampled/all/q4/kept/1": {
+   "tokens": 1598,
+   "rounds": 928,
+   "hist": [
+    258,
+    670
+   ],
+   "expected": 1597.76
+  },
+  "sampled/all/q4/kept/2": {
+   "tokens": 1593,
+   "rounds": 747,
+   "hist": [
+    217,
+    214,
+    316
+   ],
+   "expected": 1599.02
+  },
+  "sampled/all/q4/kept/3": {
+   "tokens": 1591,
+   "rounds": 676,
+   "hist": [
+    194,
+    209,
+    113,
+    160
+   ],
+   "expected": 1593.04
+  },
+  "sampled/all/q4/kept/4": {
+   "tokens": 1585,
+   "rounds": 655,
+   "hist": [
+    201,
+    200,
+    109,
+    68,
+    77
+   ],
+   "expected": 1594.93
+  },
+  "sampled/all/q4/refeed/1": {
+   "tokens": 1598,
+   "rounds": 928,
+   "hist": [
+    258,
+    670
+   ],
+   "expected": 1597.76
+  },
+  "sampled/all/q4/refeed/2": {
+   "tokens": 1592,
+   "rounds": 741,
+   "hist": [
+    212,
+    207,
+    322
+   ],
+   "expected": 1595.87
+  },
+  "sampled/all/q4/refeed/3": {
+   "tokens": 1591,
+   "rounds": 671,
+   "hist": [
+    197,
+    194,
+    114,
+    166
+   ],
+   "expected": 1592.04
+  },
+  "sampled/all/q4/refeed/4": {
+   "tokens": 1585,
+   "rounds": 638,
+   "hist": [
+    197,
+    177,
+    106,
+    74,
+    84
+   ],
+   "expected": 1588.36
+  },
+  "sampled/all/q8/kept/1": {
+   "tokens": 1597,
+   "rounds": 932,
+   "hist": [
+    267,
+    665
+   ],
+   "expected": 1602.02
+  },
+  "sampled/all/q8/kept/2": {
+   "tokens": 1594,
+   "rounds": 750,
+   "hist": [
+    220,
+    216,
+    314
+   ],
+   "expected": 1603.87
+  },
+  "sampled/all/q8/kept/3": {
+   "tokens": 1588,
+   "rounds": 676,
+   "hist": [
+    201,
+    198,
+    117,
+    160
+   ],
+   "expected": 1591.49
+  },
+  "sampled/all/q8/kept/4": {
+   "tokens": 1583,
+   "rounds": 654,
+   "hist": [
+    204,
+    191,
+    113,
+    72,
+    74
+   ],
+   "expected": 1585.56
+  },
+  "sampled/all/q8/refeed/1": {
+   "tokens": 1597,
+   "rounds": 932,
+   "hist": [
+    267,
+    665
+   ],
+   "expected": 1602.02
+  },
+  "sampled/all/q8/refeed/2": {
+   "tokens": 1594,
+   "rounds": 741,
+   "hist": [
+    212,
+    205,
+    324
+   ],
+   "expected": 1600.27
+  },
+  "sampled/all/q8/refeed/3": {
+   "tokens": 1590,
+   "rounds": 666,
+   "hist": [
+    189,
+    196,
+    115,
+    166
+   ],
+   "expected": 1587.32
+  },
+  "sampled/all/q8/refeed/4": {
+   "tokens": 1585,
+   "rounds": 637,
+   "hist": [
+    192,
+    181,
+    109,
+    71,
+    84
+   ],
+   "expected": 1586.41
+  },
+  "sampled/all/fp16/kept/1": {
+   "tokens": 1597,
+   "rounds": 930,
+   "hist": [
+    263,
+    667
+   ],
+   "expected": 1601.76
+  },
+  "sampled/all/fp16/kept/2": {
+   "tokens": 1594,
+   "rounds": 751,
+   "hist": [
+    221,
+    217,
+    313
+   ],
+   "expected": 1606.45
+  },
+  "sampled/all/fp16/kept/3": {
+   "tokens": 1588,
+   "rounds": 677,
+   "hist": [
+    202,
+    198,
+    118,
+    159
+   ],
+   "expected": 1590.42
+  },
+  "sampled/all/fp16/kept/4": {
+   "tokens": 1583,
+   "rounds": 653,
+   "hist": [
+    206,
+    188,
+    112,
+    70,
+    77
+   ],
+   "expected": 1589.4
+  },
+  "sampled/all/fp16/refeed/1": {
+   "tokens": 1597,
+   "rounds": 930,
+   "hist": [
+    263,
+    667
+   ],
+   "expected": 1601.76
+  },
+  "sampled/all/fp16/refeed/2": {
+   "tokens": 1594,
+   "rounds": 738,
+   "hist": [
+    208,
+    204,
+    326
+   ],
+   "expected": 1598.83
+  },
+  "sampled/all/fp16/refeed/3": {
+   "tokens": 1590,
+   "rounds": 662,
+   "hist": [
+    186,
+    192,
+    116,
+    168
+   ],
+   "expected": 1587.07
+  },
+  "sampled/all/fp16/refeed/4": {
+   "tokens": 1585,
+   "rounds": 633,
+   "hist": [
+    189,
+    180,
+    106,
+    72,
+    86
+   ],
+   "expected": 1584.97
+  }
+ },
+ "speed": {
+  "greedy/today/code/q4/kept/1": 1.3856,
+  "greedy/today/code/q4/kept/2": 1.4947,
+  "greedy/today/code/q4/kept/3": 1.7093,
+  "greedy/today/code/q4/kept/4": 1.7419,
+  "greedy/today/code/q4/refeed/1": 1.389,
+  "greedy/today/code/q4/refeed/2": 1.5151,
+  "greedy/today/code/q4/refeed/3": 1.6885,
+  "greedy/today/code/q4/refeed/4": 1.8271,
+  "greedy/today/code/q4/gate/0.3": 1.8573,
+  "greedy/today/code/q4/gate/0.5": 1.8742,
+  "greedy/today/code/q4/gate/0.7": 1.8533,
+  "greedy/today/code/q4/gate/0.9": 1.7517,
+  "greedy/today/code/q8/kept/1": 1.3918,
+  "greedy/today/code/q8/kept/2": 1.5198,
+  "greedy/today/code/q8/kept/3": 1.6799,
+  "greedy/today/code/q8/kept/4": 1.6909,
+  "greedy/today/code/q8/refeed/1": 1.3926,
+  "greedy/today/code/q8/refeed/2": 1.5157,
+  "greedy/today/code/q8/refeed/3": 1.6532,
+  "greedy/today/code/q8/refeed/4": 1.7699,
+  "greedy/today/code/q8/gate/0.3": 1.8372,
+  "greedy/today/code/q8/gate/0.5": 1.8793,
+  "greedy/today/code/q8/gate/0.7": 1.8381,
+  "greedy/today/code/q8/gate/0.9": 1.7313,
+  "greedy/today/code/fp16/kept/1": 1.3109,
+  "greedy/today/code/fp16/kept/2": 1.447,
+  "greedy/today/code/fp16/kept/3": 1.6139,
+  "greedy/today/code/fp16/kept/4": 1.6278,
+  "greedy/today/code/fp16/refeed/1": 1.311,
+  "greedy/today/code/fp16/refeed/2": 1.4492,
+  "greedy/today/code/fp16/refeed/3": 1.5872,
+  "greedy/today/code/fp16/refeed/4": 1.7035,
+  "greedy/today/code/fp16/gate/0.3": 1.7999,
+  "greedy/today/code/fp16/gate/0.5": 1.8315,
+  "greedy/today/code/fp16/gate/0.7": 1.8118,
+  "greedy/today/code/fp16/gate/0.9": 1.7032,
+  "greedy/today/en/q4/kept/1": 1.2669,
+  "greedy/today/en/q4/kept/2": 1.2756,
+  "greedy/today/en/q4/kept/3": 1.2499,
+  "greedy/today/en/q4/kept/4": 1.2315,
+  "greedy/today/en/q4/refeed/1": 1.2701,
+  "greedy/today/en/q4/refeed/2": 1.2591,
+  "greedy/today/en/q4/refeed/3": 1.279,
+  "greedy/today/en/q4/refeed/4": 1.2419,
+  "greedy/today/en/q4/gate/0.3": 1.2968,
+  "greedy/today/en/q4/gate/0.5": 1.3598,
+  "greedy/today/en/q4/gate/0.7": 1.3484,
+  "greedy/today/en/q4/gate/0.9": 1.2361,
+  "greedy/today/en/q8/kept/1": 1.2789,
+  "greedy/today/en/q8/kept/2": 1.25,
+  "greedy/today/en/q8/kept/3": 1.2501,
+  "greedy/today/en/q8/kept/4": 1.2134,
+  "greedy/today/en/q8/refeed/1": 1.2797,
+  "greedy/today/en/q8/refeed/2": 1.255,
+  "greedy/today/en/q8/refeed/3": 1.2773,
+  "greedy/today/en/q8/refeed/4": 1.2541,
+  "greedy/today/en/q8/gate/0.3": 1.316,
+  "greedy/today/en/q8/gate/0.5": 1.3272,
+  "greedy/today/en/q8/gate/0.7": 1.3572,
+  "greedy/today/en/q8/gate/0.9": 1.2372,
+  "greedy/today/en/fp16/kept/1": 1.2094,
+  "greedy/today/en/fp16/kept/2": 1.2032,
+  "greedy/today/en/fp16/kept/3": 1.2151,
+  "greedy/today/en/fp16/kept/4": 1.198,
+  "greedy/today/en/fp16/refeed/1": 1.2096,
+  "greedy/today/en/fp16/refeed/2": 1.2,
+  "greedy/today/en/fp16/refeed/3": 1.2206,
+  "greedy/today/en/fp16/refeed/4": 1.192,
+  "greedy/today/en/fp16/gate/0.3": 1.2871,
+  "greedy/today/en/fp16/gate/0.5": 1.2995,
+  "greedy/today/en/fp16/gate/0.7": 1.334,
+  "greedy/today/en/fp16/gate/0.9": 1.2196,
+  "greedy/today/ru/q4/kept/1": 1.2684,
+  "greedy/today/ru/q4/kept/2": 1.2063,
+  "greedy/today/ru/q4/kept/3": 1.171,
+  "greedy/today/ru/q4/kept/4": 1.0989,
+  "greedy/today/ru/q4/refeed/1": 1.2716,
+  "greedy/today/ru/q4/refeed/2": 1.1991,
+  "greedy/today/ru/q4/refeed/3": 1.1507,
+  "greedy/today/ru/q4/refeed/4": 1.0832,
+  "greedy/today/ru/q4/gate/0.3": 1.251,
+  "greedy/today/ru/q4/gate/0.5": 1.2921,
+  "greedy/today/ru/q4/gate/0.7": 1.289,
+  "greedy/today/ru/q4/gate/0.9": 1.2299,
+  "greedy/today/ru/q8/kept/1": 1.277,
+  "greedy/today/ru/q8/kept/2": 1.199,
+  "greedy/today/ru/q8/kept/3": 1.1706,
+  "greedy/today/ru/q8/kept/4": 1.0798,
+  "greedy/today/ru/q8/refeed/1": 1.2778,
+  "greedy/today/ru/q8/refeed/2": 1.1876,
+  "greedy/today/ru/q8/refeed/3": 1.157,
+  "greedy/today/ru/q8/refeed/4": 1.0802,
+  "greedy/today/ru/q8/gate/0.3": 1.2291,
+  "greedy/today/ru/q8/gate/0.5": 1.2813,
+  "greedy/today/ru/q8/gate/0.7": 1.2884,
+  "greedy/today/ru/q8/gate/0.9": 1.2213,
+  "greedy/today/ru/fp16/kept/1": 1.2136,
+  "greedy/today/ru/fp16/kept/2": 1.1586,
+  "greedy/today/ru/fp16/kept/3": 1.1336,
+  "greedy/today/ru/fp16/kept/4": 1.0668,
+  "greedy/today/ru/fp16/refeed/1": 1.2138,
+  "greedy/today/ru/fp16/refeed/2": 1.14,
+  "greedy/today/ru/fp16/refeed/3": 1.1064,
+  "greedy/today/ru/fp16/refeed/4": 1.0317,
+  "greedy/today/ru/fp16/gate/0.3": 1.2035,
+  "greedy/today/ru/fp16/gate/0.5": 1.2625,
+  "greedy/today/ru/fp16/gate/0.7": 1.2612,
+  "greedy/today/ru/fp16/gate/0.9": 1.2079,
+  "greedy/today/all/q4/kept/1": 1.2896,
+  "greedy/today/all/q4/kept/2": 1.2839,
+  "greedy/today/all/q4/kept/3": 1.2843,
+  "greedy/today/all/q4/kept/4": 1.2443,
+  "greedy/today/all/q4/refeed/1": 1.2928,
+  "greedy/today/all/q4/refeed/2": 1.2768,
+  "greedy/today/all/q4/refeed/3": 1.2837,
+  "greedy/today/all/q4/refeed/4": 1.2483,
+  "greedy/today/all/q4/gate/0.3": 1.3587,
+  "greedy/today/all/q4/gate/0.5": 1.4073,
+  "greedy/today/all/q4/gate/0.7": 1.3986,
+  "greedy/today/all/q4/gate/0.9": 1.3111,
+  "greedy/today/all/q8/kept/1": 1.2992,
+  "greedy/today/all/q8/kept/2": 1.2737,
+  "greedy/today/all/q8/kept/3": 1.2808,
+  "greedy/today/all/q8/kept/4": 1.2218,
+  "greedy/today/all/q8/refeed/1": 1.3,
+  "greedy/today/all/q8/refeed/2": 1.27,
+  "greedy/today/all/q8/refeed/3": 1.282,
+  "greedy/today/all/q8/refeed/4": 1.2466,
+  "greedy/today/all/q8/gate/0.3": 1.3546,
+  "greedy/today/all/q8/gate/0.5": 1.3889,
+  "greedy/today/all/q8/gate/0.7": 1.4003,
+  "greedy/today/all/q8/gate/0.9": 1.3047,
+  "greedy/today/all/fp16/kept/1": 1.2301,
+  "greedy/today/all/fp16/kept/2": 1.2258,
+  "greedy/today/all/fp16/kept/3": 1.2407,
+  "greedy/today/all/fp16/kept/4": 1.2022,
+  "greedy/today/all/fp16/refeed/1": 1.2303,
+  "greedy/today/all/fp16/refeed/2": 1.2163,
+  "greedy/today/all/fp16/refeed/3": 1.2264,
+  "greedy/today/all/fp16/refeed/4": 1.1896,
+  "greedy/today/all/fp16/gate/0.3": 1.3258,
+  "greedy/today/all/fp16/gate/0.5": 1.3625,
+  "greedy/today/all/fp16/gate/0.7": 1.3745,
+  "greedy/today/all/fp16/gate/0.9": 1.2876,
+  "greedy/target/code/q4/kept/1": 1.5791,
+  "greedy/target/code/q4/kept/2": 1.9313,
+  "greedy/target/code/q4/kept/3": 2.0861,
+  "greedy/target/code/q4/kept/4": 2.2143,
+  "greedy/target/code/q4/refeed/1": 1.5836,
+  "greedy/target/code/q4/refeed/2": 1.9559,
+  "greedy/target/code/q4/refeed/3": 2.0566,
+  "greedy/target/code/q4/refeed/4": 2.315,
+  "greedy/target/code/q4/gate/0.3": 2.3543,
+  "greedy/target/code/q4/gate/0.5": 2.3393,
+  "greedy/target/code/q4/gate/0.7": 2.2433,
+  "greedy/target/code/q4/gate/0.9": 2.0754,
+  "greedy/target/code/q8/kept/1": 1.5859,
+  "greedy/target/code/q8/kept/2": 1.9638,
+  "greedy/target/code/q8/kept/3": 2.047,
+  "greedy/target/code/q8/kept/4": 2.1455,
+  "greedy/target/code/q8/refeed/1": 1.587,
+  "greedy/target/code/q8/refeed/2": 1.9521,
+  "greedy/target/code/q8/refeed/3": 2.0088,
+  "greedy/target/code/q8/refeed/4": 2.2343,
+  "greedy/target/code/q8/gate/0.3": 2.3237,
+  "greedy/target/code/q8/gate/0.5": 2.3461,
+  "greedy/target/code/q8/gate/0.7": 2.2195,
+  "greedy/target/code/q8/gate/0.9": 2.0501,
+  "greedy/target/code/fp16/kept/1": 1.4817,
+  "greedy/target/code/fp16/kept/2": 1.8438,
+  "greedy/target/code/fp16/kept/3": 1.9499,
+  "greedy/target/code/fp16/kept/4": 2.0449,
+  "greedy/target/code/fp16/refeed/1": 1.4819,
+  "greedy/target/code/fp16/refeed/2": 1.8432,
+  "greedy/target/code/fp16/refeed/3": 1.9123,
+  "greedy/target/code/fp16/refeed/4": 2.1297,
+  "greedy/target/code/fp16/gate/0.3": 2.2643,
+  "greedy/target/code/fp16/gate/0.5": 2.2702,
+  "greedy/target/code/fp16/gate/0.7": 2.173,
+  "greedy/target/code/fp16/gate/0.9": 2.0095,
+  "greedy/target/en/q4/kept/1": 1.4443,
+  "greedy/target/en/q4/kept/2": 1.6496,
+  "greedy/target/en/q4/kept/3": 1.5267,
+  "greedy/target/en/q4/kept/4": 1.5668,
+  "greedy/target/en/q4/refeed/1": 1.4485,
+  "greedy/target/en/q4/refeed/2": 1.627,
+  "greedy/target/en/q4/refeed/3": 1.5595,
+  "greedy/target/en/q4/refeed/4": 1.5764,
+  "greedy/target/en/q4/gate/0.3": 1.6156,
+  "greedy/target/en/q4/gate/0.5": 1.6324,
+  "greedy/target/en/q4/gate/0.7": 1.5419,
+  "greedy/target/en/q4/gate/0.9": 1.3477,
+  "greedy/target/en/q8/kept/1": 1.4577,
+  "greedy/target/en/q8/kept/2": 1.6167,
+  "greedy/target/en/q8/kept/3": 1.5244,
+  "greedy/target/en/q8/kept/4": 1.5409,
+  "greedy/target/en/q8/refeed/1": 1.4587,
+  "greedy/target/en/q8/refeed/2": 1.6185,
+  "greedy/target/en/q8/refeed/3": 1.5543,
+  "greedy/target/en/q8/refeed/4": 1.5872,
+  "greedy/target/en/q8/gate/0.3": 1.638,
+  "greedy/target/en/q8/gate/0.5": 1.5938,
+  "greedy/target/en/q8/gate/0.7": 1.556,
+  "greedy/target/en/q8/gate/0.9": 1.3473,
+  "greedy/target/en/fp16/kept/1": 1.3691,
+  "greedy/target/en/fp16/kept/2": 1.5408,
+  "greedy/target/en/fp16/kept/3": 1.474,
+  "greedy/target/en/fp16/kept/4": 1.5113,
+  "greedy/target/en/fp16/refeed/1": 1.3693,
+  "greedy/target/en/fp16/refeed/2": 1.5296,
+  "greedy/target/en/fp16/refeed/3": 1.4724,
+  "greedy/target/en/fp16/refeed/4": 1.4922,
+  "greedy/target/en/fp16/gate/0.3": 1.5945,
+  "greedy/target/en/fp16/gate/0.5": 1.5564,
+  "greedy/target/en/fp16/gate/0.7": 1.5258,
+  "greedy/target/en/fp16/gate/0.9": 1.3258,
+  "greedy/target/ru/q4/kept/1": 1.446,
+  "greedy/target/ru/q4/kept/2": 1.5604,
+  "greedy/target/ru/q4/kept/3": 1.4306,
+  "greedy/target/ru/q4/kept/4": 1.3982,
+  "greedy/target/ru/q4/refeed/1": 1.4501,
+  "greedy/target/ru/q4/refeed/2": 1.5499,
+  "greedy/target/ru/q4/refeed/3": 1.4036,
+  "greedy/target/ru/q4/refeed/4": 1.3757,
+  "greedy/target/ru/q4/gate/0.3": 1.518,
+  "greedy/target/ru/q4/gate/0.5": 1.5188,
+  "greedy/target/ru/q4/gate/0.7": 1.4648,
+  "greedy/target/ru/q4/gate/0.9": 1.3445,
+  "greedy/target/ru/q8/kept/1": 1.4555,
+  "greedy/target/ru/q8/kept/2": 1.5511,
+  "greedy/target/ru/q8/kept/3": 1.4277,
+  "greedy/target/ru/q8/kept/4": 1.3714,
+  "greedy/target/ru/q8/refeed/1": 1.4565,
+  "greedy/target/ru/q8/refeed/2": 1.5322,
+  "greedy/target/ru/q8/refeed/3": 1.4087,
+  "greedy/target/ru/q8/refeed/4": 1.3682,
+  "greedy/target/ru/q8/gate/0.3": 1.4902,
+  "greedy/target/ru/q8/gate/0.5": 1.5046,
+  "greedy/target/ru/q8/gate/0.7": 1.4639,
+  "greedy/target/ru/q8/gate/0.9": 1.3343,
+  "greedy/target/ru/fp16/kept/1": 1.3738,
+  "greedy/target/ru/fp16/kept/2": 1.4856,
+  "greedy/target/ru/fp16/kept/3": 1.3762,
+  "greedy/target/ru/fp16/kept/4": 1.3466,
+  "greedy/target/ru/fp16/refeed/1": 1.374,
+  "greedy/target/ru/fp16/refeed/2": 1.4538,
+  "greedy/target/ru/fp16/refeed/3": 1.3353,
+  "greedy/target/ru/fp16/refeed/4": 1.2925,
+  "greedy/target/ru/fp16/gate/0.3": 1.4544,
+  "greedy/target/ru/fp16/gate/0.5": 1.4788,
+  "greedy/target/ru/fp16/gate/0.7": 1.4333,
+  "greedy/target/ru/fp16/gate/0.9": 1.318,
+  "greedy/target/all/q4/kept/1": 1.4701,
+  "greedy/target/all/q4/kept/2": 1.6602,
+  "greedy/target/all/q4/kept/3": 1.5686,
+  "greedy/target/all/q4/kept/4": 1.5829,
+  "greedy/target/all/q4/refeed/1": 1.4743,
+  "greedy/target/all/q4/refeed/2": 1.6498,
+  "greedy/target/all/q4/refeed/3": 1.5653,
+  "greedy/target/all/q4/refeed/4": 1.5846,
+  "greedy/target/all/q4/gate/0.3": 1.6774,
+  "greedy/target/all/q4/gate/0.5": 1.6834,
+  "greedy/target/all/q4/gate/0.7": 1.6083,
+  "greedy/target/all/q4/gate/0.9": 1.4485,
+  "greedy/target/all/q8/kept/1": 1.4807,
+  "greedy/target/all/q8/kept/2": 1.6473,
+  "greedy/target/all/q8/kept/3": 1.5618,
+  "greedy/target/all/q8/kept/4": 1.5515,
+  "greedy/target/all/q8/refeed/1": 1.4817,
+  "greedy/target/all/q8/refeed/2": 1.6378,
+  "greedy/target/all/q8/refeed/3": 1.5601,
+  "greedy/target/all/q8/refeed/4": 1.5777,
+  "greedy/target/all/q8/gate/0.3": 1.6703,
+  "greedy/target/all/q8/gate/0.5": 1.6609,
+  "greedy/target/all/q8/gate/0.7": 1.6115,
+  "greedy/target/all/q8/gate/0.9": 1.4402,
+  "greedy/target/all/fp16/kept/1": 1.3921,
+  "greedy/target/all/fp16/kept/2": 1.5692,
+  "greedy/target/all/fp16/kept/3": 1.5045,
+  "greedy/target/all/fp16/kept/4": 1.5161,
+  "greedy/target/all/fp16/refeed/1": 1.3923,
+  "greedy/target/all/fp16/refeed/2": 1.5502,
+  "greedy/target/all/fp16/refeed/3": 1.4794,
+  "greedy/target/all/fp16/refeed/4": 1.4894,
+  "greedy/target/all/fp16/gate/0.3": 1.628,
+  "greedy/target/all/fp16/gate/0.5": 1.6241,
+  "greedy/target/all/fp16/gate/0.7": 1.5788,
+  "greedy/target/all/fp16/gate/0.9": 1.4188,
+  "sampled/today/code/q4/kept/1": 1.344,
+  "sampled/today/code/q4/kept/2": 1.4557,
+  "sampled/today/code/q4/kept/3": 1.5726,
+  "sampled/today/code/q4/kept/4": 1.5628,
+  "sampled/today/code/q4/refeed/1": 1.3474,
+  "sampled/today/code/q4/refeed/2": 1.4629,
+  "sampled/today/code/q4/refeed/3": 1.5497,
+  "sampled/today/code/q4/refeed/4": 1.6239,
+  "sampled/today/code/q4/gate/0.3": 1.6481,
+  "sampled/today/code/q4/gate/0.5": 1.6669,
+  "sampled/today/code/q4/gate/0.7": 1.7226,
+  "sampled/today/code/q4/gate/0.9": 1.6572,
+  "sampled/today/code/q8/kept/1": 1.3383,
+  "sampled/today/code/q8/kept/2": 1.4444,
+  "sampled/today/code/q8/kept/3": 1.5442,
+  "sampled/today/code/q8/kept/4": 1.5644,
+  "sampled/today/code/q8/refeed/1": 1.3391,
+  "sampled/today/code/q8/refeed/2": 1.4498,
+  "sampled/today/code/q8/refeed/3": 1.5274,
+  "sampled/today/code/q8/refeed/4": 1.5739,
+  "sampled/today/code/q8/gate/0.3": 1.6237,
+  "sampled/today/code/q8/gate/0.5": 1.6555,
+  "sampled/today/code/q8/gate/0.7": 1.6979,
+  "sampled/today/code/q8/gate/0.9": 1.6099,
+  "sampled/today/code/fp16/kept/1": 1.27,
+  "sampled/today/code/fp16/kept/2": 1.3816,
+  "sampled/today/code/fp16/kept/3": 1.4742,
+  "sampled/today/code/fp16/kept/4": 1.5339,
+  "sampled/today/code/fp16/refeed/1": 1.2701,
+  "sampled/today/code/fp16/refeed/2": 1.3901,
+  "sampled/today/code/fp16/refeed/3": 1.4814,
+  "sampled/today/code/fp16/refeed/4": 1.5264,
+  "sampled/today/code/fp16/gate/0.3": 1.6048,
+  "sampled/today/code/fp16/gate/0.5": 1.6226,
+  "sampled/today/code/fp16/gate/0.7": 1.6628,
+  "sampled/today/code/fp16/gate/0.9": 1.5839,
+  "sampled/today/en/q4/kept/1": 1.2429,
+  "sampled/today/en/q4/kept/2": 1.1977,
+  "sampled/today/en/q4/kept/3": 1.1979,
+  "sampled/today/en/q4/kept/4": 1.121,
+  "sampled/today/en/q4/refeed/1": 1.246,
+  "sampled/today/en/q4/refeed/2": 1.1918,
+  "sampled/today/en/q4/refeed/3": 1.1971,
+  "sampled/today/en/q4/refeed/4": 1.1359,
+  "sampled/today/en/q4/gate/0.3": 1.2149,
+  "sampled/today/en/q4/gate/0.5": 1.2636,
+  "sampled/today/en/q4/gate/0.7": 1.2677,
+  "sampled/today/en/q4/gate/0.9": 1.2065,
+  "sampled/today/en/q8/kept/1": 1.2382,
+  "sampled/today/en/q8/kept/2": 1.2005,
+  "sampled/today/en/q8/kept/3": 1.1825,
+  "sampled/today/en/q8/kept/4": 1.1041,
+  "sampled/today/en/q8/refeed/1": 1.239,
+  "sampled/today/en/q8/refeed/2": 1.1978,
+  "sampled/today/en/q8/refeed/3": 1.1944,
+  "sampled/today/en/q8/refeed/4": 1.1227,
+  "sampled/today/en/q8/gate/0.3": 1.2098,
+  "sampled/today/en/q8/gate/0.5": 1.2594,
+  "sampled/today/en/q8/gate/0.7": 1.2717,
+  "sampled/today/en/q8/gate/0.9": 1.2031,
+  "sampled/today/en/fp16/kept/1": 1.1812,
+  "sampled/today/en/fp16/kept/2": 1.1613,
+  "sampled/today/en/fp16/kept/3": 1.1598,
+  "sampled/today/en/fp16/kept/4": 1.0816,
+  "sampled/today/en/fp16/refeed/1": 1.1814,
+  "sampled/today/en/fp16/refeed/2": 1.1511,
+  "sampled/today/en/fp16/refeed/3": 1.1468,
+  "sampled/today/en/fp16/refeed/4": 1.0806,
+  "sampled/today/en/fp16/gate/0.3": 1.1804,
+  "sampled/today/en/fp16/gate/0.5": 1.2391,
+  "sampled/today/en/fp16/gate/0.7": 1.2504,
+  "sampled/today/en/fp16/gate/0.9": 1.1876,
+  "sampled/today/ru/q4/kept/1": 1.2008,
+  "sampled/today/ru/q4/kept/2": 1.1339,
+  "sampled/today/ru/q4/kept/3": 1.1157,
+  "sampled/today/ru/q4/kept/4": 1.0551,
+  "sampled/today/ru/q4/refeed/1": 1.2038,
+  "sampled/today/ru/q4/refeed/2": 1.1465,
+  "sampled/today/ru/q4/refeed/3": 1.1213,
+  "sampled/today/ru/q4/refeed/4": 1.0642,
+  "sampled/today/ru/q4/gate/0.3": 1.228,
+  "sampled/today/ru/q4/gate/0.5": 1.2683,
+  "sampled/today/ru/q4/gate/0.7": 1.2656,
+  "sampled/today/ru/q4/gate/0.9": 1.218,
+  "sampled/today/ru/q8/kept/1": 1.1996,
+  "sampled/today/ru/q8/kept/2": 1.1339,
+  "sampled/today/ru/q8/kept/3": 1.1153,
+  "sampled/today/ru/q8/kept/4": 1.0426,
+  "sampled/today/ru/q8/refeed/1": 1.2003,
+  "sampled/today/ru/q8/refeed/2": 1.1354,
+  "sampled/today/ru/q8/refeed/3": 1.1185,
+  "sampled/today/ru/q8/refeed/4": 1.0617,
+  "sampled/today/ru/q8/gate/0.3": 1.2158,
+  "sampled/today/ru/q8/gate/0.5": 1.2621,
+  "sampled/today/ru/q8/gate/0.7": 1.2696,
+  "sampled/today/ru/q8/gate/0.9": 1.2207,
+  "sampled/today/ru/fp16/kept/1": 1.1501,
+  "sampled/today/ru/fp16/kept/2": 1.104,
+  "sampled/today/ru/fp16/kept/3": 1.0853,
+  "sampled/today/ru/fp16/kept/4": 1.019,
+  "sampled/today/ru/fp16/refeed/1": 1.1503,
+  "sampled/today/ru/fp16/refeed/2": 1.0989,
+  "sampled/today/ru/fp16/refeed/3": 1.0848,
+  "sampled/today/ru/fp16/refeed/4": 1.0259,
+  "sampled/today/ru/fp16/gate/0.3": 1.2,
+  "sampled/today/ru/fp16/gate/0.5": 1.2377,
+  "sampled/today/ru/fp16/gate/0.7": 1.2471,
+  "sampled/today/ru/fp16/gate/0.9": 1.2037,
+  "sampled/today/all/q4/kept/1": 1.2445,
+  "sampled/today/all/q4/kept/2": 1.2139,
+  "sampled/today/all/q4/kept/3": 1.2206,
+  "sampled/today/all/q4/kept/4": 1.1578,
+  "sampled/today/all/q4/refeed/1": 1.2476,
+  "sampled/today/all/q4/refeed/2": 1.2183,
+  "sampled/today/all/q4/refeed/3": 1.2205,
+  "sampled/today/all/q4/refeed/4": 1.1752,
+  "sampled/today/all/q4/gate/0.3": 1.288,
+  "sampled/today/all/q4/gate/0.5": 1.3302,
+  "sampled/today/all/q4/gate/0.7": 1.3373,
+  "sampled/today/all/q4/gate/0.9": 1.281,
+  "sampled/today/all/q8/kept/1": 1.241,
+  "sampled/today/all/q8/kept/2": 1.2133,
+  "sampled/today/all/q8/kept/3": 1.2105,
+  "sampled/today/all/q8/kept/4": 1.1451,
+  "sampled/today/all/q8/refeed/1": 1.2417,
+  "sampled/today/all/q8/refeed/2": 1.2136,
+  "sampled/today/all/q8/refeed/3": 1.2152,
+  "sampled/today/all/q8/refeed/4": 1.1633,
+  "sampled/today/all/q8/gate/0.3": 1.2778,
+  "sampled/today/all/q8/gate/0.5": 1.3241,
+  "sampled/today/all/q8/gate/0.7": 1.3385,
+  "sampled/today/all/q8/gate/0.9": 1.2749,
+  "sampled/today/all/fp16/kept/1": 1.1852,
+  "sampled/today/all/fp16/kept/2": 1.1746,
+  "sampled/today/all/fp16/kept/3": 1.1782,
+  "sampled/today/all/fp16/kept/4": 1.121,
+  "sampled/today/all/fp16/refeed/1": 1.1853,
+  "sampled/today/all/fp16/refeed/2": 1.1695,
+  "sampled/today/all/fp16/refeed/3": 1.1738,
+  "sampled/today/all/fp16/refeed/4": 1.1226,
+  "sampled/today/all/fp16/gate/0.3": 1.255,
+  "sampled/today/all/fp16/gate/0.5": 1.3001,
+  "sampled/today/all/fp16/gate/0.7": 1.3145,
+  "sampled/today/all/fp16/gate/0.9": 1.2573,
+  "sampled/target/code/q4/kept/1": 1.532,
+  "sampled/target/code/q4/kept/2": 1.8813,
+  "sampled/target/code/q4/kept/3": 1.9197,
+  "sampled/target/code/q4/kept/4": 1.987,
+  "sampled/target/code/q4/refeed/1": 1.5363,
+  "sampled/target/code/q4/refeed/2": 1.889,
+  "sampled/target/code/q4/refeed/3": 1.8882,
+  "sampled/target/code/q4/refeed/4": 2.0589,
+  "sampled/target/code/q4/gate/0.3": 2.0905,
+  "sampled/target/code/q4/gate/0.5": 2.0825,
+  "sampled/target/code/q4/gate/0.7": 2.0594,
+  "sampled/target/code/q4/gate/0.9": 1.9139,
+  "sampled/target/code/q8/kept/1": 1.5252,
+  "sampled/target/code/q8/kept/2": 1.8669,
+  "sampled/target/code/q8/kept/3": 1.8819,
+  "sampled/target/code/q8/kept/4": 1.9854,
+  "sampled/target/code/q8/refeed/1": 1.5262,
+  "sampled/target/code/q8/refeed/2": 1.868,
+  "sampled/target/code/q8/refeed/3": 1.8569,
+  "sampled/target/code/q8/refeed/4": 1.9887,
+  "sampled/target/code/q8/gate/0.3": 2.0571,
+  "sampled/target/code/q8/gate/0.5": 2.0618,
+  "sampled/target/code/q8/gate/0.7": 2.0357,
+  "sampled/target/code/q8/gate/0.9": 1.8559,
+  "sampled/target/code/fp16/kept/1": 1.4365,
+  "sampled/target/code/fp16/kept/2": 1.7633,
+  "sampled/target/code/fp16/kept/3": 1.7825,
+  "sampled/target/code/fp16/kept/4": 1.9283,
+  "sampled/target/code/fp16/refeed/1": 1.4367,
+  "sampled/target/code/fp16/refeed/2": 1.7694,
+  "sampled/target/code/fp16/refeed/3": 1.7853,
+  "sampled/target/code/fp16/refeed/4": 1.9101,
+  "sampled/target/code/fp16/gate/0.3": 2.0223,
+  "sampled/target/code/fp16/gate/0.5": 2.0124,
+  "sampled/target/code/fp16/gate/0.7": 1.9865,
+  "sampled/target/code/fp16/gate/0.9": 1.8213,
+  "sampled/target/en/q4/kept/1": 1.4171,
+  "sampled/target/en/q4/kept/2": 1.5492,
+  "sampled/target/en/q4/kept/3": 1.4633,
+  "sampled/target/en/q4/kept/4": 1.4262,
+  "sampled/target/en/q4/refeed/1": 1.4211,
+  "sampled/target/en/q4/refeed/2": 1.5405,
+  "sampled/target/en/q4/refeed/3": 1.4601,
+  "sampled/target/en/q4/refeed/4": 1.4424,
+  "sampled/target/en/q4/gate/0.3": 1.5138,
+  "sampled/target/en/q4/gate/0.5": 1.5067,
+  "sampled/target/en/q4/gate/0.7": 1.4513,
+  "sampled/target/en/q4/gate/0.9": 1.3132,
+  "sampled/target/en/q8/kept/1": 1.4115,
+  "sampled/target/en/q8/kept/2": 1.5531,
+  "sampled/target/en/q8/kept/3": 1.4421,
+  "sampled/target/en/q8/kept/4": 1.4023,
+  "sampled/target/en/q8/refeed/1": 1.4125,
+  "sampled/target/en/q8/refeed/2": 1.5453,
+  "sampled/target/en/q8/refeed/3": 1.454,
+  "sampled/target/en/q8/refeed/4": 1.4218,
+  "sampled/target/en/q8/gate/0.3": 1.5026,
+  "sampled/target/en/q8/gate/0.5": 1.5013,
+  "sampled/target/en/q8/gate/0.7": 1.451,
+  "sampled/target/en/q8/gate/0.9": 1.3088,
+  "sampled/target/en/fp16/kept/1": 1.338,
+  "sampled/target/en/fp16/kept/2": 1.4888,
+  "sampled/target/en/fp16/kept/3": 1.4073,
+  "sampled/target/en/fp16/kept/4": 1.3651,
+  "sampled/target/en/fp16/refeed/1": 1.3381,
+  "sampled/target/en/fp16/refeed/2": 1.4684,
+  "sampled/target/en/fp16/refeed/3": 1.3841,
+  "sampled/target/en/fp16/refeed/4": 1.3537,
+  "sampled/target/en/fp16/gate/0.3": 1.4597,
+  "sampled/target/en/fp16/gate/0.5": 1.4707,
+  "sampled/target/en/fp16/gate/0.7": 1.4244,
+  "sampled/target/en/fp16/gate/0.9": 1.2906,
+  "sampled/target/ru/q4/kept/1": 1.3692,
+  "sampled/target/ru/q4/kept/2": 1.4669,
+  "sampled/target/ru/q4/kept/3": 1.3629,
+  "sampled/target/ru/q4/kept/4": 1.3424,
+  "sampled/target/ru/q4/refeed/1": 1.3731,
+  "sampled/target/ru/q4/refeed/2": 1.4822,
+  "sampled/target/ru/q4/refeed/3": 1.3678,
+  "sampled/target/ru/q4/refeed/4": 1.3517,
+  "sampled/target/ru/q4/gate/0.3": 1.4769,
+  "sampled/target/ru/q4/gate/0.5": 1.4733,
+  "sampled/target/ru/q4/gate/0.7": 1.4218,
+  "sampled/target/ru/q4/gate/0.9": 1.3213,
+  "sampled/target/ru/q8/kept/1": 1.3675,
+  "sampled/target/ru/q8/kept/2": 1.4671,
+  "sampled/target/ru/q8/kept/3": 1.3602,
+  "sampled/target/ru/q8/kept/4": 1.3242,
+  "sampled/target/ru/q8/refeed/1": 1.3685,
+  "sampled/target/ru/q8/refeed/2": 1.4651,
+  "sampled/target/ru/q8/refeed/3": 1.3619,
+  "sampled/target/ru/q8/refeed/4": 1.3448,
+  "sampled/target/ru/q8/gate/0.3": 1.4637,
+  "sampled/target/ru/q8/gate/0.5": 1.4646,
+  "sampled/target/ru/q8/gate/0.7": 1.4217,
+  "sampled/target/ru/q8/gate/0.9": 1.3269,
+  "sampled/target/ru/fp16/kept/1": 1.303,
+  "sampled/target/ru/fp16/kept/2": 1.4165,
+  "sampled/target/ru/fp16/kept/3": 1.3174,
+  "sampled/target/ru/fp16/kept/4": 1.2863,
+  "sampled/target/ru/fp16/refeed/1": 1.3032,
+  "sampled/target/ru/fp16/refeed/2": 1.4023,
+  "sampled/target/ru/fp16/refeed/3": 1.3097,
+  "sampled/target/ru/fp16/refeed/4": 1.2856,
+  "sampled/target/ru/fp16/gate/0.3": 1.4417,
+  "sampled/target/ru/fp16/gate/0.5": 1.4292,
+  "sampled/target/ru/fp16/gate/0.7": 1.3941,
+  "sampled/target/ru/fp16/gate/0.9": 1.3064,
+  "sampled/target/all/q4/kept/1": 1.4189,
+  "sampled/target/all/q4/kept/2": 1.57,
+  "sampled/target/all/q4/kept/3": 1.4909,
+  "sampled/target/all/q4/kept/4": 1.4729,
+  "sampled/target/all/q4/refeed/1": 1.4229,
+  "sampled/target/all/q4/refeed/2": 1.5745,
+  "sampled/target/all/q4/refeed/3": 1.4885,
+  "sampled/target/all/q4/refeed/4": 1.4922,
+  "sampled/target/all/q4/gate/0.3": 1.5854,
+  "sampled/target/all/q4/gate/0.5": 1.5802,
+  "sampled/target/all/q4/gate/0.7": 1.5287,
+  "sampled/target/all/q4/gate/0.9": 1.4049,
+  "sampled/target/all/q8/kept/1": 1.4146,
+  "sampled/target/all/q8/kept/2": 1.5694,
+  "sampled/target/all/q8/kept/3": 1.4762,
+  "sampled/target/all/q8/kept/4": 1.4541,
+  "sampled/target/all/q8/refeed/1": 1.4156,
+  "sampled/target/all/q8/refeed/2": 1.5656,
+  "sampled/target/all/q8/refeed/3": 1.4791,
+  "sampled/target/all/q8/refeed/4": 1.4729,
+  "sampled/target/all/q8/gate/0.3": 1.5711,
+  "sampled/target/all/q8/gate/0.5": 1.5712,
+  "sampled/target/all/q8/gate/0.7": 1.5268,
+  "sampled/target/all/q8/gate/0.9": 1.3989,
+  "sampled/target/all/fp16/kept/1": 1.3422,
+  "sampled/target/all/fp16/kept/2": 1.5053,
+  "sampled/target/all/fp16/kept/3": 1.4291,
+  "sampled/target/all/fp16/kept/4": 1.4141,
+  "sampled/target/all/fp16/refeed/1": 1.3424,
+  "sampled/target/all/fp16/refeed/2": 1.4916,
+  "sampled/target/all/fp16/refeed/3": 1.4165,
+  "sampled/target/all/fp16/refeed/4": 1.4064,
+  "sampled/target/all/fp16/gate/0.3": 1.5377,
+  "sampled/target/all/fp16/gate/0.5": 1.5358,
+  "sampled/target/all/fp16/gate/0.7": 1.4964,
+  "sampled/target/all/fp16/gate/0.9": 1.3775
+ },
+ "costs": {
+  "ctx": 2048,
+  "median_ms": {
+   "plain step": 88.171,
+   "q4 draft k=1": 7.133,
+   "q4 draft k=2": 13.764,
+   "q4 draft k=3": 19.969,
+   "q4 draft k=4": 26.551,
+   "q4 flush n=1": 6.828,
+   "q4 flush n=2": 8.36,
+   "q4 flush n=3": 9.289,
+   "q4 flush n=4": 10.361,
+   "q4 flush n=5": 11.282,
+   "q4 forward 1 row": 1.851,
+   "q4 lm_head": 5.356,
+   "q8 draft k=1": 7.246,
+   "q8 draft k=2": 13.665,
+   "q8 draft k=3": 21.206,
+   "q8 draft k=4": 27.793,
+   "q8 flush n=1": 7.171,
+   "q8 flush n=2": 8.77,
+   "q8 flush n=3": 10.279,
+   "q8 flush n=4": 11.851,
+   "q8 flush n=5": 13.454,
+   "q8 forward 1 row": 2.291,
+   "q8 lm_head": 4.962,
+   "fp16 draft k=1": 8.056,
+   "fp16 draft k=2": 15.809,
+   "fp16 draft k=3": 23.839,
+   "fp16 draft k=4": 31.687,
+   "fp16 flush n=1": 8.04,
+   "fp16 flush n=2": 16.871,
+   "fp16 flush n=3": 16.865,
+   "fp16 flush n=4": 17.062,
+   "fp16 flush n=5": 17.304,
+   "fp16 forward 1 row": 3.102,
+   "fp16 lm_head": 5.154
+  }
+ }
+}

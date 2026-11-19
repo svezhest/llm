@@ -1,0 +1,96 @@
+loaded in 5 s; active 10.50 GB; VERIFY_QMV 2; PROMPT_CACHE True REPLY True
+code-2k-0: prompt lengths over tags (cold, hit) [2047, 2065]
+code-8k-0: prompt lengths over tags (cold, hit) [8192, 8210]
+code-32k-0: prompt lengths over tags (cold, hit) [32768, 32786]
+code-2k-0: prompt lengths over tags (cold, hit) [2047, 2065]
+code-8k-0: prompt lengths over tags (cold, hit) [8192, 8210]
+warm code-2k-0 plain: cold ttft 4.586 s, hit ttft 0.516 s (reused 2001)
+warm code-2k-0 head: cold ttft 4.462 s, hit ttft 0.232 s (reused 2001)
+warm code-2k-0 dflash: cold ttft 4.554 s, hit ttft 0.225 s (reused 2001)
+warm code-2k-0 auto: cold ttft 4.508 s, hit ttft 0.237 s (reused 2001)
+ident code-2k-0 head+det: cold tokens same, entries same (1), hit tokens same (reused 2001)
+ident code-2k-0 dflash+det: cold tokens same, entries same (1), hit tokens same (reused 2001)
+ident code-2k-0 both+det: cold tokens same, entries same (1), hit tokens same (reused 2001)
+ident code-2k-0 both-mtp+det: cold tokens same, entries same (1), hit tokens same (reused 2001)
+ident code-8k-0 both+det: cold tokens same, entries DIFFER (1), hit tokens same (reused 8146)
+r0 code-2k-0  plain        cold ttft   4.365 total   5.221 | hit ttft  0.241 total  1.073 (reused 2001/2065)
+r0 code-2k-0  head+old     cold ttft   4.792 total   5.223 | hit ttft  0.326 total  0.751 (reused 2001/2065)
+r0 code-2k-0  head         cold ttft   4.365 total   4.987 | hit ttft  0.237 total  0.727 (reused 2001/2065)
+r0 code-2k-0  dflash+old   cold ttft   4.457 total   5.008 | hit ttft  0.269 total  0.797 (reused 2001/2065)
+r0 code-2k-0  dflash       cold ttft   4.300 total   4.953 | hit ttft  0.230 total  0.796 (reused 2001/2065)
+r0 code-2k-0  auto+old     cold ttft   4.647 total   5.203 | hit ttft  0.328 total  0.856 (reused 2001/2065)
+r0 code-2k-0  auto+eager   cold ttft   4.651 total   5.191 | hit ttft  0.315 total  0.864 (reused 2001/2065)
+r0 code-2k-0  auto         cold ttft   4.326 total   5.151 | hit ttft  0.236 total  0.833 (reused 2001/2065)
+r0 code-8k-0  auto         cold ttft  17.889 total  19.414 | hit ttft  0.230 total  0.737 (reused 8146/8210)
+r0 code-8k-0  auto+old     cold ttft  18.828 total  19.735 | hit ttft  0.333 total  0.768 (reused 8146/8210)
+r0 code-8k-0  dflash       cold ttft  17.720 total  18.689 | hit ttft  0.231 total  0.696 (reused 8146/8210)
+r0 code-8k-0  dflash+old   cold ttft  17.945 total  18.696 | hit ttft  0.254 total  0.706 (reused 8146/8210)
+r0 code-8k-0  head         cold ttft  18.129 total  18.814 | hit ttft  0.238 total  0.827 (reused 8146/8210)
+r0 code-8k-0  head+old     cold ttft  18.493 total  19.037 | hit ttft  0.321 total  0.711 (reused 8146/8210)
+r0 code-8k-0  plain        cold ttft  17.585 total  18.458 | hit ttft  0.237 total  1.094 (reused 8146/8210)
+r0 code-32k-0 plain        cold ttft  76.985 total  77.953 | hit ttft  0.299 total  1.247 (reused 32722/32786)
+r0 code-32k-0 auto+old     cold ttft  83.498 total  84.295 | hit ttft  0.409 total  0.820 (reused 32722/32786)
+r0 code-32k-0 auto         cold ttft  81.620 total  83.014 | hit ttft  0.302 total  0.811 (reused 32722/32786)
+r1 code-2k-0  plain        cold ttft   4.475 total   5.323 | hit ttft  0.246 total  1.074 (reused 2001/2065)
+r1 code-2k-0  auto         cold ttft   4.536 total   5.458 | hit ttft  0.254 total  0.826 (reused 2001/2065)
+r1 code-2k-0  auto+eager   cold ttft   4.638 total   5.265 | hit ttft  0.322 total  0.841 (reused 2001/2065)
+r1 code-2k-0  auto+old     cold ttft   4.650 total   5.264 | hit ttft  0.359 total  0.891 (reused 2001/2065)
+r1 code-2k-0  dflash       cold ttft   4.342 total   5.038 | hit ttft  0.233 total  0.798 (reused 2001/2065)
+r1 code-2k-0  dflash+old   cold ttft   4.435 total   5.029 | hit ttft  0.274 total  0.802 (reused 2001/2065)
+r1 code-2k-0  head         cold ttft   4.297 total   4.943 | hit ttft  0.228 total  0.724 (reused 2001/2065)
+r1 code-2k-0  head+old     cold ttft   4.567 total   5.009 | hit ttft  0.319 total  0.757 (reused 2001/2065)
+r1 code-8k-0  head+old     cold ttft  18.279 total  18.818 | hit ttft  0.316 total  0.756 (reused 8146/8210)
+r1 code-8k-0  head         cold ttft  17.966 total  18.610 | hit ttft  0.230 total  0.719 (reused 8146/8210)
+r1 code-8k-0  dflash+old   cold ttft  17.912 total  18.661 | hit ttft  0.255 total  0.709 (reused 8146/8210)
+r1 code-8k-0  dflash       cold ttft  17.754 total  18.742 | hit ttft  0.235 total  0.710 (reused 8146/8210)
+r1 code-8k-0  auto+old     cold ttft  18.870 total  19.678 | hit ttft  0.331 total  0.763 (reused 8146/8210)
+r1 code-8k-0  auto         cold ttft  17.989 total  19.382 | hit ttft  0.232 total  0.732 (reused 8146/8210)
+r1 code-8k-0  plain        cold ttft  17.544 total  18.417 | hit ttft  0.241 total  1.094 (reused 8146/8210)
+r1 code-32k-0 plain        cold ttft  77.163 total  78.132 | hit ttft  0.302 total  1.247 (reused 32722/32786)
+r1 code-32k-0 auto         cold ttft  81.864 total  83.216 | hit ttft  0.305 total  0.771 (reused 32722/32786)
+r1 code-32k-0 auto+old     cold ttft  83.000 total  83.812 | hit ttft  0.410 total  0.847 (reused 32722/32786)
+r2 code-2k-0  head         cold ttft   4.400 total   5.035 | hit ttft  0.233 total  0.724 (reused 2001/2065)
+r2 code-2k-0  dflash+old   cold ttft   4.437 total   5.035 | hit ttft  0.264 total  0.793 (reused 2001/2065)
+r2 code-2k-0  dflash       cold ttft   4.272 total   4.974 | hit ttft  0.226 total  0.796 (reused 2001/2065)
+r2 code-2k-0  auto+old     cold ttft   4.639 total   5.280 | hit ttft  0.340 total  0.862 (reused 2001/2065)
+r2 code-2k-0  auto+eager   cold ttft   4.597 total   5.206 | hit ttft  0.309 total  0.833 (reused 2001/2065)
+r2 code-2k-0  auto         cold ttft   4.313 total   5.211 | hit ttft  0.235 total  0.816 (reused 2001/2065)
+r2 code-2k-0  plain        cold ttft   4.329 total   5.173 | hit ttft  0.251 total  1.078 (reused 2001/2065)
+r2 code-2k-0  head+old     cold ttft   4.661 total   5.122 | hit ttft  0.319 total  0.742 (reused 2001/2065)
+r2 code-8k-0  head+old     cold ttft  18.112 total  18.649 | hit ttft  0.314 total  0.748 (reused 8146/8210)
+r2 code-8k-0  plain        cold ttft  17.378 total  18.253 | hit ttft  0.231 total  1.087 (reused 8146/8210)
+r2 code-8k-0  auto         cold ttft  18.019 total  19.406 | hit ttft  0.232 total  0.734 (reused 8146/8210)
+r2 code-8k-0  auto+old     cold ttft  18.649 total  19.452 | hit ttft  0.331 total  0.764 (reused 8146/8210)
+r2 code-8k-0  dflash       cold ttft  17.619 total  18.586 | hit ttft  0.239 total  0.701 (reused 8146/8210)
+r2 code-8k-0  dflash+old   cold ttft  17.888 total  18.646 | hit ttft  0.250 total  0.692 (reused 8146/8210)
+r2 code-8k-0  head         cold ttft  18.048 total  18.690 | hit ttft  0.232 total  0.717 (reused 8146/8210)
+r2 code-32k-0 auto         cold ttft  81.788 total  83.140 | hit ttft  0.320 total  0.828 (reused 32722/32786)
+r2 code-32k-0 plain        cold ttft  76.263 total  77.228 | hit ttft  0.299 total  1.244 (reused 32722/32786)
+r2 code-32k-0 auto+old     cold ttft  82.888 total  83.679 | hit ttft  0.436 total  0.874 (reused 32722/32786)
+
+== medians over rounds (s); x plain = the median of the per-round ratios; on/old = the variant against its +old ==
+-- code-2k-0 (2047 tokens)
+plain        cold ttft  4.365 (x plain 1.000, on/old      -) total  5.221 (on/old      -) | hit ttft  0.246 (x plain 1.000, on/old      -)
+head+old     cold ttft  4.661 (x plain 1.077, on/old      -) total  5.122 (on/old      -) | hit ttft  0.319 (x plain 1.296, on/old      -)
+head         cold ttft  4.365 (x plain 1.000, on/old 0.941) total  4.987 (on/old 0.983) | hit ttft  0.233 (x plain 0.927, on/old 0.727) | tokens == +old 3/3
+dflash+old   cold ttft  4.437 (x plain 1.021, on/old      -) total  5.029 (on/old      -) | hit ttft  0.269 (x plain 1.111, on/old      -)
+dflash       cold ttft  4.300 (x plain 0.985, on/old 0.965) total  4.974 (on/old 0.989) | hit ttft  0.230 (x plain 0.947, on/old 0.853) | tokens == +old 3/3
+auto+old     cold ttft  4.647 (x plain 1.064, on/old      -) total  5.264 (on/old      -) | hit ttft  0.340 (x plain 1.359, on/old      -)
+auto+eager   cold ttft  4.638 (x plain 1.062, on/old 0.997) total  5.206 (on/old 0.998) | hit ttft  0.315 (x plain 1.306, on/old 0.911) | tokens == +old 3/3
+auto         cold ttft  4.326 (x plain 0.996, on/old 0.931) total  5.211 (on/old 0.990) | hit ttft  0.236 (x plain 0.981, on/old 0.708) | tokens == +old 3/3
+-- code-8k-0 (8192 tokens)
+plain        cold ttft 17.544 (x plain 1.000, on/old      -) total 18.417 (on/old      -) | hit ttft  0.237 (x plain 1.000, on/old      -)
+head+old     cold ttft 18.279 (x plain 1.042, on/old      -) total 18.818 (on/old      -) | hit ttft  0.316 (x plain 1.357, on/old      -)
+head         cold ttft 18.048 (x plain 1.031, on/old 0.983) total 18.690 (on/old 0.989) | hit ttft  0.232 (x plain 1.003, on/old 0.738) | tokens == +old 3/3
+dflash+old   cold ttft 17.912 (x plain 1.021, on/old      -) total 18.661 (on/old      -) | hit ttft  0.254 (x plain 1.072, on/old      -)
+dflash       cold ttft 17.720 (x plain 1.012, on/old 0.987) total 18.689 (on/old 1.000) | hit ttft  0.235 (x plain 0.977, on/old 0.921) | tokens == +old 3/3
+auto+old     cold ttft 18.828 (x plain 1.073, on/old      -) total 19.678 (on/old      -) | hit ttft  0.331 (x plain 1.406, on/old      -)
+auto         cold ttft 17.989 (x plain 1.025, on/old 0.953) total 19.406 (on/old 0.985) | hit ttft  0.232 (x plain 0.973, on/old 0.700) | tokens == +old 3/3
+-- code-32k-0 (32768 tokens)
+plain        cold ttft 76.985 (x plain 1.000, on/old      -) total 77.953 (on/old      -) | hit ttft  0.299 (x plain 1.000, on/old      -)
+auto+old     cold ttft 83.000 (x plain 1.085, on/old      -) total 83.812 (on/old      -) | hit ttft  0.410 (x plain 1.366, on/old      -)
+auto         cold ttft 81.788 (x plain 1.061, on/old 0.986) total 83.140 (on/old 0.993) | hit ttft  0.305 (x plain 1.011, on/old 0.739) | tokens == +old 3/3
+
+== identity (+det, switches off vs on): 4/5 identical; DIFFER: [('code-8k-0', 'both+det')]
+peak 14.92 GB
+wrote $PERF_OUT/spf/spf9.json

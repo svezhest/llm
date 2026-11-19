@@ -4,9 +4,12 @@ index-*.json lists) into one table: per (system, class, ctx, mode, max_tokens) t
 median over SESSIONS of each session's median decode tok/s, with min-max over sessions,
 the number of sessions and requests; TTFT / prefill tok/s of cold requests (cached 0);
 turn-2 TTFT; peak footprint; the session probes. Sessions marked off-probe in an index
-(> tol from the matrix median) are left out unless --keep-off-probe.
+(> tol from the matrix median) are left out unless --keep-off-probe; --exclude SESSION
+leaves out one more session by name (repeatable).
 
   python3 scripts/perf/bench27/aggregate.py --root $PERF_OUT/bench27 --json agg.json --md agg.md
+  python3 scripts/perf/bench27/aggregate.py --index $PERF_OUT/bench9/index-A.json \
+      --index $PERF_OUT/bench9/index-B.json --json agg.json     # the sessions of several matrices
 """
 from __future__ import annotations
 
@@ -21,13 +24,21 @@ def med(v):
     return round(statistics.median(v), 2) if v else None
 
 
-def load_sessions(root, index, keep_off):
-    if index:
-        idx = json.load(open(index))
-        names = [s["session"] for s in idx["sessions"] if keep_off or not s.get("off_probe")]
-        paths = [os.path.join(os.path.dirname(index), n, "session.json") for n in names]
+def load_sessions(root, index, keep_off, exclude=()):
+    """index: one index path or a list of them (their sessions in order, each once); none = every
+    session.json under root."""
+    indexes = [index] if isinstance(index, str) and index else list(index or [])
+    if indexes:
+        paths = []
+        for ix in indexes:
+            idx = json.load(open(ix))
+            for s in idx["sessions"]:
+                p = os.path.join(os.path.dirname(ix), s["session"], "session.json")
+                if (keep_off or not s.get("off_probe")) and s["session"] not in exclude and p not in paths:
+                    paths.append(p)
     else:
-        paths = sorted(glob.glob(os.path.join(root, "*", "session.json")))
+        paths = [p for p in sorted(glob.glob(os.path.join(root, "*", "session.json")))
+                 if os.path.basename(os.path.dirname(p)) not in exclude]
     out = []
     for p in paths:
         m = json.load(open(p))
@@ -117,13 +128,16 @@ def markdown(agg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.join(os.environ.get("PERF_OUT", "/tmp/perf"), "bench27"))
-    ap.add_argument("--index", default="")
+    ap.add_argument("--index", action="append", default=[],
+                    help="index-*.json (repeatable); none: every session under --root")
     ap.add_argument("--keep-off-probe", action="store_true")
+    ap.add_argument("--exclude", action="append", default=[], metavar="SESSION",
+                    help="leave out this session (its directory name); repeatable")
     ap.add_argument("--json", default="")
     ap.add_argument("--md", default="")
     ap.add_argument("--identity", action="append", default=[], help="A,B: greedy answers of A vs B")
     a = ap.parse_args()
-    sessions = load_sessions(a.root, a.index, a.keep_off_probe)
+    sessions = load_sessions(a.root, a.index, a.keep_off_probe, a.exclude)
     agg = aggregate(sessions)
     agg["identity"] = [identity(sessions, *x.split(",")) for x in a.identity]
     for i in agg["identity"]:
